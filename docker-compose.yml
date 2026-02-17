@@ -1,0 +1,63 @@
+# Standalone Agentic Bridge stack.
+#
+# Indexes Claude CLI transcripts and serves them via SSE/HTTP MCP.
+# Any Claude Code session or cloud AI can connect and ask
+# "what are my agents doing?"
+#
+# Usage:
+#   docker compose up --build -d
+#
+# Connect from Claude Code (.mcp.json):
+#   {
+#     "mcpServers": {
+#       "session-bridge": {
+#         "url": "http://your-host:8100/sse",
+#         "headers": {"X-API-Key": "your-key"}
+#       }
+#     }
+#   }
+
+services:
+  session-bridge:
+    container_name: session-bridge
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentic-bridge:latest
+    ports:
+      - "8100:8100"
+    volumes:
+      # Mount host Claude CLI transcripts (read-only)
+      - ${CLAUDE_PROJECTS_DIR:-~/.claude/projects}:/home/appuser/.claude/projects:ro
+    environment:
+      - SESSION_BRIDGE_TRANSPORT=sse
+      - SESSION_BRIDGE_HOST=0.0.0.0
+      - SESSION_BRIDGE_PORT=8100
+      - SESSION_BRIDGE_API_KEYS=${SESSION_BRIDGE_API_KEYS:-}
+      - SESSION_BRIDGE_POLL_INTERVAL=${SESSION_BRIDGE_POLL_INTERVAL:-60}
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-agenticore}
+    networks:
+      - sb-network
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  redis:
+    container_name: session-bridge-redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - sb_redis_data:/data
+    networks:
+      - sb-network
+    restart: unless-stopped
+    # Redis port NOT exposed to host (internal only)
+
+volumes:
+  sb_redis_data:
+
+networks:
+  sb-network:
+    driver: bridge
