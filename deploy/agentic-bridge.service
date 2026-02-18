@@ -1,0 +1,20 @@
+[Unit]
+Description=Agentic Bridge MCP Server (Docker)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker stop agentic-bridge
+ExecStartPre=-/usr/bin/docker rm agentic-bridge
+ExecStart=/usr/bin/docker run --rm --name agentic-bridge \
+    -p 8100:8100 \
+    -v %h/.claude/projects:/home/appuser/.claude/projects:ro \
+    --env-file %h/.config/agentic-bridge/env \
+    ghcr.io/the-cloud-clock-work/agentic-bridge:allinone-latest
+ExecStop=/usr/bin/docker stop agentic-bridge
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

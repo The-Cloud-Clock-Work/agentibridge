@@ -1,0 +1,91 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest tests/unit -v -m unit --cov=agentic_bridge --cov-report=term-missing --tb=short
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff>=0.4
+
+      - name: Lint check
+        run: ruff check agentic_bridge/ tests/
+
+      - name: Format check
+        run: ruff format --check agentic_bridge/ tests/
+
+  integration:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [unit, lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Start Docker stack
+        run: docker compose up --build -d
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 60); do
+            if docker inspect -f '{{.State.Running}}' session-bridge 2>/dev/null | grep -q true; then
+              echo "Container running"
+              break
+            fi
+            sleep 1
+          done
+          for i in $(seq 1 30); do
+            if docker exec session-bridge python3 -c "from agentic_bridge.redis_client import get_redis; r=get_redis(); print(r.ping())" 2>/dev/null | grep -q True; then
+              echo "Redis connected"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run integration tests
+        run: python tests/integration/test_docker.py --test
+
+      - name: Stop Docker stack
+        if: always()
+        run: docker compose down

@@ -12,14 +12,14 @@ Usage::
 """
 
 import os
-from typing import Optional
+import sys
 
 # Lazy singleton
 _redis_client = None
 _redis_checked = False
 
 # TTLs from environment (matching agenticore settings defaults)
-SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))   # 24h
+SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))  # 24h
 POSITION_TTL: int = int(os.getenv("REDIS_POSITION_TTL", "3600"))  # 1h
 _KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
 
@@ -51,7 +51,8 @@ def get_redis():
             socket_connect_timeout=timeout,
         )
         _redis_client.ping()  # fail-fast on bad URL
-    except Exception:
+    except Exception as exc:
+        print(f"Redis connection failed ({url}): {exc}", file=sys.stderr)
         _redis_client = None
 
     return _redis_client

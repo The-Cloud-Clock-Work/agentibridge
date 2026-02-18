@@ -27,10 +27,13 @@ Available tools:
 import json
 import os
 import sys
+from typing import Dict
 
 from mcp.server.fastmcp import FastMCP
 
 from agentic_bridge.logging import log
+
+_SUMMARY_TRUNCATE_LENGTH = 200
 
 # =============================================================================
 # MCP SERVER
@@ -52,6 +55,7 @@ def _get_store():
     global _store
     if _store is None:
         from agentic_bridge.store import SessionStore
+
         _store = SessionStore()
     return _store
 
@@ -60,6 +64,7 @@ def _get_collector():
     global _collector
     if _collector is None:
         from agentic_bridge.collector import SessionCollector
+
         _collector = SessionCollector(_get_store())
         _collector.start()
     return _collector
@@ -69,6 +74,7 @@ def _get_embedder():
     global _embedder
     if _embedder is None:
         from agentic_bridge.embeddings import TranscriptEmbedder
+
         _embedder = TranscriptEmbedder()
     return _embedder
 
@@ -107,26 +113,28 @@ def list_sessions(
             since_hours=since_hours if since_hours > 0 else 0,
         )
 
-        return json.dumps({
-            "success": True,
-            "count": len(sessions),
-            "offset": offset,
-            "sessions": [
-                {
-                    "session_id": s.session_id,
-                    "project_path": s.project_path,
-                    "git_branch": s.git_branch,
-                    "start_time": s.start_time,
-                    "last_update": s.last_update,
-                    "num_user_turns": s.num_user_turns,
-                    "num_assistant_turns": s.num_assistant_turns,
-                    "num_tool_calls": s.num_tool_calls,
-                    "summary": s.summary[:200],
-                    "has_subagents": s.has_subagents,
-                }
-                for s in sessions
-            ],
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(sessions),
+                "offset": offset,
+                "sessions": [
+                    {
+                        "session_id": s.session_id,
+                        "project_path": s.project_path,
+                        "git_branch": s.git_branch,
+                        "start_time": s.start_time,
+                        "last_update": s.last_update,
+                        "num_user_turns": s.num_user_turns,
+                        "num_assistant_turns": s.num_assistant_turns,
+                        "num_tool_calls": s.num_tool_calls,
+                        "summary": s.summary[:_SUMMARY_TRUNCATE_LENGTH],
+                        "has_subagents": s.has_subagents,
+                    }
+                    for s in sessions
+                ],
+            }
+        )
 
     except Exception as e:
         log("MCP list_sessions failed", {"error": str(e)})
@@ -165,10 +173,10 @@ def get_session(
         if last_n == 0:
             entries = store.get_session_entries(session_id, offset=0, limit=10000)
         else:
-            # Get total count to calculate offset for "last N"
-            all_entries = store.get_session_entries(session_id, offset=0, limit=10000)
-            start = max(0, len(all_entries) - last_n)
-            entries = all_entries[start:]
+            # Use count_entries to avoid loading all entries just for the count
+            total = store.count_entries(session_id)
+            start = max(0, total - last_n)
+            entries = store.get_session_entries(session_id, offset=start, limit=last_n)
 
         result["entries"] = [e.to_dict() for e in entries]
         result["entry_count"] = len(entries)
@@ -218,17 +226,18 @@ def get_session_segment(
             total_count = len(filtered)
         else:
             entries = store.get_session_entries(session_id, offset=offset, limit=limit)
-            all_entries = store.get_session_entries(session_id, offset=0, limit=10000)
-            total_count = len(all_entries)
+            total_count = store.count_entries(session_id)
 
-        return json.dumps({
-            "success": True,
-            "session_id": session_id,
-            "total_count": total_count,
-            "offset": offset,
-            "count": len(entries),
-            "entries": [e.to_dict() for e in entries],
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "session_id": session_id,
+                "total_count": total_count,
+                "offset": offset,
+                "count": len(entries),
+                "entries": [e.to_dict() for e in entries],
+            }
+        )
 
     except Exception as e:
         log("MCP get_session_segment failed", {"session_id": session_id, "error": str(e)})
@@ -256,7 +265,7 @@ def get_session_actions(
         entries = store.get_session_entries(session_id, offset=0, limit=10000)
 
         # Count tool usage
-        tool_counts: dict[str, int] = {}
+        tool_counts: Dict[str, int] = {}
         for entry in entries:
             for tool_name in entry.tool_names:
                 tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
@@ -264,16 +273,15 @@ def get_session_actions(
         # Sort by count descending
         sorted_tools = sorted(tool_counts.items(), key=lambda x: -x[1])
 
-        return json.dumps({
-            "success": True,
-            "session_id": session_id,
-            "total_tool_calls": sum(tool_counts.values()),
-            "unique_tools": len(tool_counts),
-            "tools": [
-                {"name": name, "count": count}
-                for name, count in sorted_tools
-            ],
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "session_id": session_id,
+                "total_tool_calls": sum(tool_counts.values()),
+                "unique_tools": len(tool_counts),
+                "tools": [{"name": name, "count": count} for name, count in sorted_tools],
+            }
+        )
 
     except Exception as e:
         log("MCP get_session_actions failed", {"session_id": session_id, "error": str(e)})
@@ -306,12 +314,14 @@ def search_sessions(
             limit=limit,
         )
 
-        return json.dumps({
-            "success": True,
-            "query": query,
-            "count": len(results),
-            "matches": results,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "query": query,
+                "count": len(results),
+                "matches": results,
+            }
+        )
 
     except Exception as e:
         log("MCP search_sessions failed", {"query": query, "error": str(e)})
@@ -332,10 +342,12 @@ def collect_now() -> str:
         collector = _get_collector()
         stats = collector.collect_once()
 
-        return json.dumps({
-            "success": True,
-            **stats,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                **stats,
+            }
+        )
 
     except Exception as e:
         log("MCP collect_now failed", {"error": str(e)})
@@ -369,10 +381,12 @@ def search_semantic(
     try:
         embedder = _get_embedder()
         if not embedder.is_available():
-            return json.dumps({
-                "success": False,
-                "error": "Embedding backend not available. Configure EMBEDDING_BACKEND.",
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Embedding backend not available. Configure EMBEDDING_BACKEND.",
+                }
+            )
 
         results = embedder.search_semantic(
             query=query,
@@ -380,12 +394,14 @@ def search_semantic(
             limit=limit,
         )
 
-        return json.dumps({
-            "success": True,
-            "query": query,
-            "count": len(results),
-            "matches": results,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "query": query,
+                "count": len(results),
+                "matches": results,
+            }
+        )
 
     except Exception as e:
         log("MCP search_semantic failed", {"query": query, "error": str(e)})
@@ -411,11 +427,13 @@ def generate_summary(
         embedder = _get_embedder()
         summary = embedder.generate_summary(session_id)
 
-        return json.dumps({
-            "success": True,
-            "session_id": session_id,
-            "summary": summary,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "session_id": session_id,
+                "summary": summary,
+            }
+        )
 
     except Exception as e:
         log("MCP generate_summary failed", {"session_id": session_id, "error": str(e)})
@@ -446,14 +464,17 @@ def restore_session(
     """
     try:
         from agentic_bridge.dispatch import restore_session_context
+
         context = restore_session_context(session_id, last_n=last_n)
 
-        return json.dumps({
-            "success": True,
-            "session_id": session_id,
-            "context": context,
-            "char_count": len(context),
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "session_id": session_id,
+                "context": context,
+                "char_count": len(context),
+            }
+        )
 
     except Exception as e:
         log("MCP restore_session failed", {"session_id": session_id, "error": str(e)})
@@ -485,6 +506,7 @@ def dispatch_task(
     """
     try:
         from agentic_bridge.dispatch import dispatch_task as _dispatch
+
         result = _dispatch(
             task_description=task_description,
             project=project,
@@ -520,6 +542,7 @@ def main():
     transport = os.getenv("SESSION_BRIDGE_TRANSPORT", "stdio")
     if transport == "sse":
         from agentic_bridge.transport import run_sse_server
+
         print(f"Starting SSE transport on {mcp.settings.host}:{mcp.settings.port}...", file=sys.stderr)
         run_sse_server(mcp)
     else:

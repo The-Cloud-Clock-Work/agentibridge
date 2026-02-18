@@ -21,10 +21,22 @@ SESSION_BRIDGE_TRANSPORT=sse python -m agentic_bridge
 # Docker (full stack with Redis)
 docker compose up --build -d
 
-# Run tests
-python tests/test_docker.py --start   # start stack
-python tests/test_docker.py --test    # run tests
-python tests/test_docker.py --stop    # stop stack
+# Run unit tests
+pytest tests/unit -v -m unit --cov=agentic_bridge
+
+# Lint + format
+ruff check agentic_bridge/ tests/
+ruff format --check agentic_bridge/ tests/
+
+# Run integration tests (requires Docker)
+python tests/integration/test_docker.py --start
+python tests/integration/test_docker.py --test
+python tests/integration/test_docker.py --stop
+
+# CLI
+agentic-bridge version
+agentic-bridge status
+agentic-bridge help
 ```
 
 ## Architecture
@@ -62,10 +74,11 @@ python tests/test_docker.py --stop    # stop stack
 | `agentic_bridge/transport.py` | SSE/HTTP transport + API key auth |
 | `agentic_bridge/embeddings.py` | Semantic search (Phase 2) |
 | `agentic_bridge/dispatch.py` | Session restore + task dispatch (Phase 4) |
-| `agentic_bridge/completions.py` | Vendored completions API client |
-| `agentic_bridge/redis_client.py` | Vendored Redis helper |
-| `agentic_bridge/config.py` | Session-bridge-only configuration |
-| `agentic_bridge/logging.py` | Simplified log() utility |
+| `agentic_bridge/completions.py` | Completions API client |
+| `agentic_bridge/redis_client.py` | Redis helper |
+| `agentic_bridge/config.py` | Configuration with validation |
+| `agentic_bridge/cli.py` | CLI helper tool (status/connect/install) |
+| `agentic_bridge/logging.py` | Structured JSON logging |
 
 ## Key Environment Variables
 

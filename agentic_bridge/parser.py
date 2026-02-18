@@ -96,10 +96,12 @@ def scan_projects_dir(base_dir: Optional[Path] = None) -> List[Tuple[str, str, P
     Only includes main session files (not subagent files).
     """
     if base_dir is None:
-        base_dir = Path(os.getenv(
-            "SESSION_BRIDGE_PROJECTS_DIR",
-            str(Path.home() / ".claude" / "projects"),
-        ))
+        base_dir = Path(
+            os.getenv(
+                "SESSION_BRIDGE_PROJECTS_DIR",
+                str(Path.home() / ".claude" / "projects"),
+            )
+        )
     else:
         base_dir = Path(base_dir)
 
@@ -220,7 +222,7 @@ def parse_transcript_entries(
     entries = []
     new_offset = offset
 
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         if offset > 0:
             f.seek(offset)
             # Skip partial line if we seeked into the middle of one
@@ -258,12 +260,14 @@ def parse_transcript_entries(
                 text, is_tool_result = extract_user_content(message)
                 if is_tool_result or not text:
                     continue
-                entries.append(SessionEntry(
-                    entry_type="user",
-                    timestamp=timestamp,
-                    content=text[:2000],
-                    uuid=uuid,
-                ))
+                entries.append(
+                    SessionEntry(
+                        entry_type="user",
+                        timestamp=timestamp,
+                        content=text[:2000],
+                        uuid=uuid,
+                    )
+                )
 
             elif entry_type == "assistant":
                 if not isinstance(message, dict):
@@ -271,34 +275,40 @@ def parse_transcript_entries(
                 text, tool_names = extract_assistant_content(message)
                 if not text and not tool_names:
                     continue
-                entries.append(SessionEntry(
-                    entry_type="assistant",
-                    timestamp=timestamp,
-                    content=text[:2000],
-                    tool_names=tool_names,
-                    uuid=uuid,
-                ))
+                entries.append(
+                    SessionEntry(
+                        entry_type="assistant",
+                        timestamp=timestamp,
+                        content=text[:2000],
+                        tool_names=tool_names,
+                        uuid=uuid,
+                    )
+                )
 
             elif entry_type == "summary":
                 summary_text = entry.get("summary", "")
                 if summary_text:
-                    entries.append(SessionEntry(
-                        entry_type="summary",
-                        timestamp=timestamp,
-                        content=summary_text[:2000],
-                        uuid=uuid,
-                    ))
+                    entries.append(
+                        SessionEntry(
+                            entry_type="summary",
+                            timestamp=timestamp,
+                            content=summary_text[:2000],
+                            uuid=uuid,
+                        )
+                    )
 
             elif entry_type == "system":
                 if isinstance(message, dict):
                     content = message.get("content", "")
                     if isinstance(content, str) and content:
-                        entries.append(SessionEntry(
-                            entry_type="system",
-                            timestamp=timestamp,
-                            content=content[:2000],
-                            uuid=uuid,
-                        ))
+                        entries.append(
+                            SessionEntry(
+                                entry_type="system",
+                                timestamp=timestamp,
+                                content=content[:2000],
+                                uuid=uuid,
+                            )
+                        )
 
     # Fix offset for initial full-file reads
     if offset == 0:
@@ -340,11 +350,16 @@ def parse_transcript_meta(
 
     if entries:
         _extract_meta_from_entries(
-            entries, locals_dict := {
-                "cwd": cwd, "git_branch": git_branch,
-                "start_time": start_time, "last_update": last_update,
-                "num_user": num_user, "num_assistant": num_assistant,
-                "num_tools": num_tools, "summary": summary,
+            entries,
+            locals_dict := {
+                "cwd": cwd,
+                "git_branch": git_branch,
+                "start_time": start_time,
+                "last_update": last_update,
+                "num_user": num_user,
+                "num_assistant": num_assistant,
+                "num_tools": num_tools,
+                "summary": summary,
             },
         )
     else:
@@ -405,13 +420,17 @@ def _quick_parse_meta(filepath: Path) -> dict:
     content only from first entries.
     """
     result = {
-        "cwd": "", "git_branch": "",
-        "start_time": "", "last_update": "",
-        "num_user": 0, "num_assistant": 0, "num_tools": 0,
+        "cwd": "",
+        "git_branch": "",
+        "start_time": "",
+        "last_update": "",
+        "num_user": 0,
+        "num_assistant": 0,
+        "num_tools": 0,
         "summary": "",
     }
 
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

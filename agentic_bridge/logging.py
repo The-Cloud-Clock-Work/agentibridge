@@ -7,6 +7,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 
 def _env_bool(key: str, default: str = "false") -> bool:
@@ -16,10 +17,19 @@ def _env_bool(key: str, default: str = "false") -> bool:
 
 
 LOG_ENABLED = _env_bool("CLAUDE_HOOK_LOG_ENABLED", "true")
-LOG_FILE = os.getenv("AGENTIC_BRIDGE_LOG_FILE", "/app/logs/agentic-bridge.log")
 
 
-def log(message: str, payload: dict | None = None) -> None:
+def _default_log_file() -> str:
+    """Determine default log file path. Use /app/logs inside Docker, ~/.cache otherwise."""
+    if Path("/.dockerenv").exists():
+        return "/app/logs/agentic-bridge.log"
+    return str(Path.home() / ".cache" / "agentic-bridge" / "agentic-bridge.log")
+
+
+LOG_FILE = os.getenv("AGENTIC_BRIDGE_LOG_FILE", _default_log_file())
+
+
+def log(message: str, payload: Optional[dict] = None) -> None:
     """Write log entry to file (JSON format)."""
     if not LOG_ENABLED:
         return

@@ -12,19 +12,50 @@ Requires:
 import json
 import math
 import os
-import sys
 from typing import Any, Dict, List, Optional
 
 from agentic_bridge.logging import log
 
 
 def _get_embed_fn():
-    """Lazy-load embedding function from agenticore.search."""
-    try:
-        from agenticore.search import embed_query
-        return embed_query
-    except Exception:
-        return None
+    """Return an embed_query function based on EMBEDDING_BACKEND env var.
+
+    Supported backends:
+      - "ollama"  — POST to Ollama /api/embeddings (local, default model nomic-embed-text)
+      - "bedrock" — AWS Bedrock via boto3 (model amazon.titan-embed-text-v1)
+    """
+    backend = os.getenv("EMBEDDING_BACKEND", "").lower()
+    if backend == "ollama":
+        return _embed_ollama
+    if backend == "bedrock":
+        return _embed_bedrock
+    return None
+
+
+def _embed_ollama(text: str) -> List[float]:
+    """Generate embeddings via Ollama REST API."""
+    import httpx
+
+    url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    resp = httpx.post(
+        f"{url}/api/embeddings",
+        json={"model": model, "prompt": text},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()["embedding"]
+
+
+def _embed_bedrock(text: str) -> List[float]:
+    """Generate embeddings via AWS Bedrock."""
+    import boto3
+
+    client = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
+    model_id = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v1")
+    body = json.dumps({"inputText": text})
+    resp = client.invoke_model(modelId=model_id, body=body, contentType="application/json")
+    return json.loads(resp["body"].read())["embedding"]
 
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
@@ -33,6 +64,7 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0 or norm_b == 0:
+        log("Zero-norm vector in cosine similarity", {"norm_a": norm_a, "norm_b": norm_b})
         return 0.0
     return dot / (norm_a * norm_b)
 
@@ -41,6 +73,7 @@ def _cosine_similarity_batch(query: List[float], vectors: List[List[float]]) -> 
     """Batch cosine similarity — uses numpy when available."""
     try:
         import numpy as np
+
         q = np.array(query, dtype=np.float32)
         m = np.array(vectors, dtype=np.float32)
         dots = m @ q
@@ -71,6 +104,7 @@ class TranscriptEmbedder:
         self._redis_checked = True
         try:
             from agentic_bridge.redis_client import get_redis
+
             self._redis = get_redis()
         except Exception:
             self._redis = None
@@ -108,6 +142,7 @@ class TranscriptEmbedder:
             raise RuntimeError("Redis required for vector storage")
 
         from agentic_bridge.store import SessionStore
+
         store = SessionStore()
         entries = store.get_session_entries(session_id, offset=0, limit=10000)
         meta = store.get_session_meta(session_id)
@@ -141,11 +176,14 @@ class TranscriptEmbedder:
 
                 chunk_count += 1
             except Exception as e:
-                log("Embedding failed for chunk", {
-                    "session_id": session_id,
-                    "chunk_idx": idx,
-                    "error": str(e),
-                })
+                log(
+                    "Embedding failed for chunk",
+                    {
+                        "session_id": session_id,
+                        "chunk_idx": idx,
+                        "error": str(e),
+                    },
+                )
                 continue
 
         # Mark session as embedded
@@ -205,13 +243,15 @@ class TranscriptEmbedder:
                 if not vec:
                     continue
                 vectors.append(vec)
-                meta_list.append({
-                    "session_id": data.get("session_id", ""),
-                    "chunk_idx": int(data.get("chunk_idx", 0)),
-                    "project": data.get("project", ""),
-                    "timestamp": data.get("timestamp", ""),
-                    "text_preview": data.get("text", "")[:300],
-                })
+                meta_list.append(
+                    {
+                        "session_id": data.get("session_id", ""),
+                        "chunk_idx": int(data.get("chunk_idx", 0)),
+                        "project": data.get("project", ""),
+                        "timestamp": data.get("timestamp", ""),
+                        "text_preview": data.get("text", "")[:300],
+                    }
+                )
             except (json.JSONDecodeError, ValueError):
                 continue
 
@@ -246,6 +286,7 @@ class TranscriptEmbedder:
     def generate_summary(self, session_id: str) -> str:
         """Generate session summary via Claude API (Anthropic SDK)."""
         from agentic_bridge.store import SessionStore
+
         store = SessionStore()
         entries = store.get_session_entries(session_id, offset=0, limit=10000)
         meta = store.get_session_meta(session_id)
@@ -266,9 +307,10 @@ class TranscriptEmbedder:
         # Try Anthropic SDK directly
         try:
             import anthropic
+
             client = anthropic.Anthropic()
             response = client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model=os.getenv("AGENTIC_BRIDGE_SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -277,6 +319,7 @@ class TranscriptEmbedder:
             # Fallback: completions API
             try:
                 from agentic_bridge.completions import call_completions
+
                 result = call_completions(prompt=prompt, command="default", stateless=True)
                 if result.success and result.parsed_output:
                     summary = result.parsed_output.get("result", "Summary generation failed")

@@ -1,0 +1,146 @@
+# Connecting Clients
+
+Step-by-step instructions for connecting various AI clients to Agentic Bridge.
+
+## Prerequisites
+
+- Agentic Bridge running with SSE transport (`SESSION_BRIDGE_TRANSPORT=sse`)
+- Server accessible at `http://HOST:PORT` (default: `http://localhost:8100`)
+- API key configured if using authentication (`SESSION_BRIDGE_API_KEYS`)
+
+Quick check:
+```bash
+curl http://localhost:8100/health
+# Should return: {"status": "ok", "service": "session-bridge"}
+```
+
+## Claude Code CLI
+
+Add to `~/.mcp.json` (or project-level `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "session-bridge": {
+      "url": "http://localhost:8100/sse",
+      "headers": {
+        "X-API-Key": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+Verify:
+```bash
+claude --mcp-debug
+# Should show "session-bridge" in the connected servers list
+```
+
+### Available Tools in Claude Code
+
+Once connected, Claude Code can use all 10 tools:
+- "List my recent sessions" → `list_sessions`
+- "What did I work on yesterday?" → `list_sessions` with `since_hours=24`
+- "Search for Docker setup sessions" → `search_sessions`
+- "Show me session abc-123" → `get_session`
+- "What tools did I use?" → `get_session_actions`
+- "Find sessions about authentication" → `search_semantic`
+- "Summarize that session" → `generate_summary`
+- "Continue from session abc-123" → `restore_session`
+
+## ChatGPT Custom GPT (Actions)
+
+1. Go to **ChatGPT** → **Explore GPTs** → **Create a GPT**
+2. In the **Configure** tab, click **Create new action**
+3. Set:
+   - **Authentication**: API Key
+   - **API Key**: Your `SESSION_BRIDGE_API_KEYS` value
+   - **Auth Type**: Custom Header
+   - **Header Name**: `X-API-Key`
+4. Import the OpenAPI schema from your server, or manually configure the SSE endpoint URL
+
+### Example Action Schema
+
+```yaml
+openapi: 3.0.0
+info:
+  title: Agentic Bridge
+  version: 0.2.0
+servers:
+  - url: http://your-host:8100
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check service health
+      responses:
+        '200':
+          description: OK
+```
+
+Note: ChatGPT Actions work best with REST endpoints. For full MCP integration, use the SSE endpoint with an MCP-compatible client.
+
+## Claude Web (MCP Servers)
+
+Claude.ai supports connecting to remote MCP servers:
+
+1. Go to **Settings** → **MCP Servers** → **Add Server**
+2. Enter:
+   - **Name**: Agentic Bridge
+   - **URL**: `http://your-host:8100/sse`
+   - **Headers**: `X-API-Key: your-api-key`
+
+## Grok (xAI)
+
+For Grok or other clients that support MCP:
+
+1. Use the SSE endpoint: `http://your-host:8100/sse`
+2. Set authentication header: `X-API-Key: your-api-key`
+
+## Generic MCP Client
+
+Any MCP client that supports the SSE transport can connect:
+
+```python
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+async with sse_client(
+    "http://localhost:8100/sse",
+    headers={"X-API-Key": "your-key"},
+) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+
+        # List available tools
+        tools = await session.list_tools()
+        for tool in tools.tools:
+            print(f"  {tool.name}: {tool.description}")
+
+        # Call a tool
+        result = await session.call_tool("list_sessions", {"limit": 5})
+        print(result)
+```
+
+## Troubleshooting
+
+### Connection refused
+- Verify the server is running: `curl http://HOST:PORT/health`
+- Check if the port is open: `ss -tlnp | grep 8100`
+- If behind a firewall, ensure port 8100 is allowed
+
+### 401 Unauthorized
+- Check your API key matches one in `SESSION_BRIDGE_API_KEYS`
+- Verify the header name is `X-API-Key` (case-insensitive)
+- Try with `?api_key=your-key` as a query parameter
+
+### SSE connection drops
+- Check reverse proxy settings (buffering must be disabled)
+- Increase proxy timeouts
+- Verify the server isn't running out of memory
+
+### No sessions found
+- Run `agentic-bridge status` to check transcript directory
+- Trigger collection: call the `collect_now` tool
+- Verify `~/.claude/projects/` contains `.jsonl` files

@@ -1,0 +1,20 @@
+{"type":"user","timestamp":"2025-06-01T10:00:00Z","uuid":"u1","cwd":"/home/user/dev/myapp","gitBranch":"main","message":{"role":"user","content":"Help me create a Docker Compose setup"}}
+{"type":"assistant","timestamp":"2025-06-01T10:01:00Z","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will create docker-compose.yml with services."},{"type":"tool_use","id":"tu1","name":"Write","input":{"path":"docker-compose.yml"}}]}}
+{"type":"user","timestamp":"2025-06-01T10:05:00Z","uuid":"u2","message":{"role":"user","content":"Add health checks"}}
+{"type":"assistant","timestamp":"2025-06-01T10:06:00Z","uuid":"a2","message":{"role":"assistant","content":[{"type":"text","text":"Added healthcheck blocks to all services."},{"type":"tool_use","id":"tu2","name":"Edit","input":{"path":"docker-compose.yml"}}]}}
+{"type":"user","timestamp":"2025-06-01T10:10:00Z","uuid":"u3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu2","content":"OK"}]}}
+{"type":"user","timestamp":"2025-06-01T10:15:00Z","uuid":"u4","message":{"role":"user","content":"Now configure SSL"}}
+{"type":"assistant","timestamp":"2025-06-01T10:16:00Z","uuid":"a3","message":{"role":"assistant","content":[{"type":"text","text":"Created nginx.conf with SSL termination."},{"type":"tool_use","id":"tu3","name":"Write","input":{"path":"nginx.conf"}},{"type":"tool_use","id":"tu4","name":"Edit","input":{"path":"Dockerfile"}}]}}
+{"type":"summary","timestamp":"2025-06-01T10:20:00Z","uuid":"s1","summary":"Set up Docker Compose with health checks and SSL"}
+{"type":"user","timestamp":"2025-06-01T10:25:00Z","uuid":"u5","message":{"role":"user","content":"Test the stack"}}
+{"type":"assistant","timestamp":"2025-06-01T10:26:00Z","uuid":"a4","message":{"role":"assistant","content":[{"type":"text","text":"All services healthy. SSL working."},{"type":"tool_use","id":"tu5","name":"Bash","input":{"command":"docker compose up -d"}}]}}
+{"type":"progress","timestamp":"2025-06-01T10:27:00Z","uuid":"p1","progress":{"status":"complete"}}
+{"type":"queue-operation","timestamp":"2025-06-01T10:27:01Z","uuid":"q1","operation":"enqueue"}
+{"type":"file-history-snapshot","timestamp":"2025-06-01T10:27:02Z","uuid":"f1","files":["docker-compose.yml"]}
+{"type":"system","timestamp":"2025-06-01T10:00:00Z","uuid":"sys1","message":{"role":"system","content":"Welcome to Claude Code"}}
+{"type":"user","timestamp":"2025-06-01T10:30:00Z","uuid":"u6","message":{"role":"user","content":["I"," ","l","o","v","e"," ","i","t"]}}
+{"type":"assistant","timestamp":"2025-06-01T10:31:00Z","uuid":"a5","message":{"role":"assistant","content":[{"type":"text","text":"Glad to help!"}]}}
+{"type":"user","timestamp":"2025-06-01T10:35:00Z","uuid":"u7","message":{"role":"user","content":[{"type":"text","text":"One more thing"},{"type":"text","text":"Add monitoring"}]}}
+{"type":"assistant","timestamp":"2025-06-01T10:36:00Z","uuid":"a6","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Let me think about this..."},{"type":"text","text":"Added Prometheus metrics."},{"type":"tool_use","id":"tu6","name":"Write","input":{"path":"prometheus.yml"}}]}}
+{"type":"user","timestamp":"2025-06-01T10:40:00Z","uuid":"u8","message":{"role":"user","content":"Deploy to production"}}
+{"type":"assistant","timestamp":"2025-06-01T10:41:00Z","uuid":"a7","message":{"role":"assistant","content":[{"type":"text","text":"Deployed successfully. All checks green."},{"type":"tool_use","id":"tu7","name":"Bash","input":{"command":"kubectl apply -f deploy/"}}]}}

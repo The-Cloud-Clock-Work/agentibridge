@@ -19,7 +19,7 @@ Environment:
 import json
 import os
 import sys
-from typing import Optional
+from typing import List, Optional
 
 from agentic_bridge.logging import log
 
@@ -29,7 +29,7 @@ from agentic_bridge.logging import log
 # =============================================================================
 
 
-def _get_api_keys() -> list[str]:
+def _get_api_keys() -> List[str]:
     """Load valid API keys from environment."""
     raw = os.getenv("SESSION_BRIDGE_API_KEYS", "")
     if not raw.strip():
@@ -86,7 +86,7 @@ class APIKeyAuthMiddleware:
             # Extract API key from headers
             key = None
             for header_name, header_value in scope.get("headers", []):
-                if header_name == b"x-api-key":
+                if header_name.lower() == b"x-api-key":
                     key = header_value.decode("utf-8")
                     break
 
@@ -101,14 +101,16 @@ class APIKeyAuthMiddleware:
             if not validate_api_key(key):
                 log("SSE auth rejected", {"path": path})
                 body = json.dumps({"error": "Invalid or missing API key"}).encode()
-                await send({
-                    "type": "http.response.start",
-                    "status": 401,
-                    "headers": [
-                        [b"content-type", b"application/json"],
-                        [b"content-length", str(len(body)).encode()],
-                    ],
-                })
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            [b"content-type", b"application/json"],
+                            [b"content-length", str(len(body)).encode()],
+                        ],
+                    }
+                )
                 await send({"type": "http.response.body", "body": body})
                 return
 
@@ -123,14 +125,16 @@ class APIKeyAuthMiddleware:
 async def _health_endpoint(scope, receive, send):
     """Lightweight /health ASGI endpoint."""
     body = json.dumps({"status": "ok", "service": "session-bridge"}).encode()
-    await send({
-        "type": "http.response.start",
-        "status": 200,
-        "headers": [
-            [b"content-type", b"application/json"],
-            [b"content-length", str(len(body)).encode()],
-        ],
-    })
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(body)).encode()],
+            ],
+        }
+    )
     await send({"type": "http.response.body", "body": body})
 
 
@@ -166,21 +170,23 @@ class CORSMiddleware:
         # Handle preflight
         method = None
         for header_name, header_value in scope.get("headers", []):
-            if header_name == b"access-control-request-method":
+            if header_name.lower() == b"access-control-request-method":
                 method = header_value
                 break
 
         if scope.get("method") == "OPTIONS" and method is not None:
-            await send({
-                "type": "http.response.start",
-                "status": 204,
-                "headers": [
-                    [b"access-control-allow-origin", b"*"],
-                    [b"access-control-allow-methods", b"GET, POST, OPTIONS"],
-                    [b"access-control-allow-headers", b"content-type, x-api-key"],
-                    [b"access-control-max-age", b"86400"],
-                ],
-            })
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 204,
+                    "headers": [
+                        [b"access-control-allow-origin", b"*"],
+                        [b"access-control-allow-methods", b"GET, POST, OPTIONS"],
+                        [b"access-control-allow-headers", b"content-type, x-api-key"],
+                        [b"access-control-max-age", b"86400"],
+                    ],
+                }
+            )
             await send({"type": "http.response.body", "body": b""})
             return
 

@@ -1,0 +1,11 @@
+
+not valid json at all
+{"type":"user","timestamp":"2025-06-01T10:00:00Z","uuid":"m1","message":{"role":"user","content":"Valid entry"}}
+{"incomplete json
+{"type":"unknown_type","timestamp":"2025-06-01T10:01:00Z","uuid":"m2","message":{}}
+12345
+{"type":"user","timestamp":"2025-06-01T10:02:00Z","uuid":"m3"}
+{"type":"user","timestamp":"2025-06-01T10:03:00Z","uuid":"m4","message":"not a dict"}
+{"type":"assistant","timestamp":"2025-06-01T10:04:00Z","uuid":"m5","message":{"role":"assistant","content":"string content not list"}}
+{"type":"user","timestamp":"2025-06-01T10:05:00Z","uuid":"m6","message":{"role":"user","content":""}}
+{"type":"user","timestamp":"2025-06-01T10:06:00Z","uuid":"m7","message":{"role":"user","content":"Second valid entry after garbage"}}

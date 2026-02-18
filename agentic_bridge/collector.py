@@ -9,7 +9,8 @@ import os
 import sys
 import threading
 from pathlib import Path
-from time import time, sleep
+from time import time
+from typing import Optional
 
 from agentic_bridge.logging import log
 from agentic_bridge.parser import (
@@ -26,11 +27,13 @@ class SessionCollector:
     def __init__(self, store: SessionStore) -> None:
         self._store = store
         self._interval = int(os.getenv("SESSION_BRIDGE_POLL_INTERVAL", "60"))
-        self._projects_dir = Path(os.getenv(
-            "SESSION_BRIDGE_PROJECTS_DIR",
-            str(Path.home() / ".claude" / "projects"),
-        ))
-        self._thread: threading.Thread | None = None
+        self._projects_dir = Path(
+            os.getenv(
+                "SESSION_BRIDGE_PROJECTS_DIR",
+                str(Path.home() / ".claude" / "projects"),
+            )
+        )
+        self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
     def start(self) -> None:
@@ -71,10 +74,13 @@ class SessionCollector:
                         sessions_updated += 1
                         entries_added += result["entries_added"]
                 except Exception as e:
-                    log("Collector: file scan error", {
-                        "file": str(filepath),
-                        "error": str(e),
-                    })
+                    log(
+                        "Collector: file scan error",
+                        {
+                            "file": str(filepath),
+                            "error": str(e),
+                        },
+                    )
                     continue
 
         except Exception as e:
@@ -127,8 +133,8 @@ class SessionCollector:
         if not entries and new_offset <= stored_offset:
             return {"updated": False, "entries_added": 0}
 
-        # Update session metadata
-        meta = parse_transcript_meta(filepath, project_encoded, entries if stored_offset == 0 else None)
+        # Update session metadata — always pass entries to avoid re-reading the file
+        meta = parse_transcript_meta(filepath, project_encoded, entries)
         if meta:
             self._store.upsert_session(meta)
 

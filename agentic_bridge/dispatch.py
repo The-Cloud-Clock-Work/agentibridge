@@ -7,7 +7,7 @@ Enables:
 Uses agentic_bridge.completions for agent dispatch via /completions API.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from agentic_bridge.logging import log
 
@@ -114,18 +114,17 @@ def dispatch_task(
             context = restore_session_context(session_id, last_n=context_turns)
             prompt_parts.append(
                 "The following is context from a previous session. "
-                "Use it to inform your work on the current task:\n\n"
-                + context
-                + "\n\n"
+                "Use it to inform your work on the current task:\n\n" + context + "\n\n"
             )
         except Exception as e:
-            log("dispatch_task: context restore failed", {
-                "session_id": session_id,
-                "error": str(e),
-            })
-            prompt_parts.append(
-                f"(Note: Failed to restore session context: {e})\n\n"
+            log(
+                "dispatch_task: context restore failed",
+                {
+                    "session_id": session_id,
+                    "error": str(e),
+                },
             )
+            prompt_parts.append(f"(Note: Failed to restore session context: {e})\n\n")
 
     # Add project context if provided
     if project:

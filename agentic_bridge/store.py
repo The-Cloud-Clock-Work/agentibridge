@@ -8,7 +8,6 @@ unavailable (no separate JSONL copy needed).
 import hashlib
 import json
 import os
-from dataclasses import asdict
 from pathlib import Path
 from time import time
 from typing import List, Optional
@@ -32,6 +31,13 @@ def _rkey(suffix: str) -> str:
     return f"{_KEY_PREFIX}:sb:{suffix}"
 
 
+def _escape_redis_glob(s: str) -> str:
+    """Escape Redis glob special characters in a string."""
+    for ch in ("*", "?", "[", "]"):
+        s = s.replace(ch, f"\\{ch}")
+    return s
+
+
 def _filepath_hash(filepath: str) -> str:
     """Short hash of filepath for position tracking keys."""
     return hashlib.md5(filepath.encode()).hexdigest()[:12]
@@ -43,10 +49,12 @@ class SessionStore:
     def __init__(self) -> None:
         self._redis = None
         self._redis_checked = False
-        self._projects_dir = Path(os.getenv(
-            "SESSION_BRIDGE_PROJECTS_DIR",
-            str(Path.home() / ".claude" / "projects"),
-        ))
+        self._projects_dir = Path(
+            os.getenv(
+                "SESSION_BRIDGE_PROJECTS_DIR",
+                str(Path.home() / ".claude" / "projects"),
+            )
+        )
 
     # ------------------------------------------------------------------
     # Redis connection (lazy, fail-safe)
@@ -58,6 +66,7 @@ class SessionStore:
         self._redis_checked = True
         try:
             from agentic_bridge.redis_client import get_redis
+
             self._redis = get_redis()
         except Exception:
             self._redis = None
@@ -122,6 +131,18 @@ class SessionStore:
             return self._redis_search(r, query, project, limit)
         return self._file_search(query, project, limit)
 
+    def count_entries(self, session_id: str) -> int:
+        """Return the number of entries for a session without loading them all."""
+        r = self._get_redis()
+        if r is not None:
+            return r.llen(_rkey(f"session:{session_id}:entries"))
+        # File fallback: must parse
+        for sid, project_encoded, filepath in scan_projects_dir(self._projects_dir):
+            if sid == session_id:
+                entries, _ = parse_transcript_entries(filepath)
+                return len(entries)
+        return 0
+
     def get_file_position(self, filepath: str) -> int:
         """Get stored byte offset for incremental reading."""
         r = self._get_redis()
@@ -168,6 +189,7 @@ class SessionStore:
         # Index by recency
         try:
             from datetime import datetime
+
             score = datetime.fromisoformat(meta.last_update.replace("Z", "+00:00")).timestamp()
         except (ValueError, AttributeError):
             score = time()
@@ -180,13 +202,15 @@ class SessionStore:
         entries_key = _rkey(f"session:{session_id}:entries")
         pipe = r.pipeline()
         for entry in entries:
-            compact = json.dumps({
-                "entry_type": entry.entry_type,
-                "timestamp": entry.timestamp,
-                "content": entry.content[:500],
-                "tool_names": entry.tool_names,
-                "uuid": entry.uuid,
-            })
+            compact = json.dumps(
+                {
+                    "entry_type": entry.entry_type,
+                    "timestamp": entry.timestamp,
+                    "content": entry.content[:500],
+                    "tool_names": entry.tool_names,
+                    "uuid": entry.uuid,
+                }
+            )
             pipe.rpush(entries_key, compact)
 
         # Trim to max entries
@@ -218,7 +242,7 @@ class SessionStore:
             matching_ids = set()
             # Scan for project indexes matching the substring
             cursor = 0
-            pattern = _rkey(f"idx:project:*{project}*")
+            pattern = _rkey(f"idx:project:*{_escape_redis_glob(project)}*")
             while True:
                 cursor, keys = r.scan(cursor, match=pattern, count=100)
                 for key in keys:
@@ -236,14 +260,17 @@ class SessionStore:
                 if score is not None:
                     scored.append((sid, score))
             scored.sort(key=lambda x: x[1], reverse=True)
-            session_ids = [s[0] for s in scored[offset:offset + limit]]
+            session_ids = [s[0] for s in scored[offset : offset + limit]]
         else:
             min_score = "-inf"
             if since_hours:
                 min_score = str(time() - since_hours * 3600)
             session_ids = r.zrevrangebyscore(
-                _rkey("idx:all"), "+inf", min_score,
-                start=offset, num=limit,
+                _rkey("idx:all"),
+                "+inf",
+                min_score,
+                start=offset,
+                num=limit,
             )
 
         results = []
@@ -280,13 +307,15 @@ class SessionStore:
                 content = data.get("content", "")
                 if query_lower in content.lower():
                     meta = r.hgetall(_rkey(f"session:{sid}:meta"))
-                    results.append({
-                        "session_id": sid,
-                        "project_path": meta.get("project_path", "") if meta else "",
-                        "entry_type": data.get("entry_type", ""),
-                        "content_preview": content[:300],
-                        "timestamp": data.get("timestamp", ""),
-                    })
+                    results.append(
+                        {
+                            "session_id": sid,
+                            "project_path": meta.get("project_path", "") if meta else "",
+                            "entry_type": data.get("entry_type", ""),
+                            "content_preview": content[:300],
+                            "timestamp": data.get("timestamp", ""),
+                        }
+                    )
                     if len(results) >= limit:
                         return results
                     break  # One match per session is enough
@@ -310,7 +339,7 @@ class SessionStore:
             if sid == session_id:
                 entries, _ = parse_transcript_entries(filepath)
                 # Filter to user/assistant text (skip tool_result already done in parser)
-                return entries[offset:offset + limit]
+                return entries[offset : offset + limit]
         return []
 
     def _file_list_sessions(self, project, limit, offset, since_hours) -> List[SessionMeta]:
@@ -320,7 +349,8 @@ class SessionStore:
         if project:
             project_lower = project.lower()
             all_files = [
-                (sid, pe, fp) for sid, pe, fp in all_files
+                (sid, pe, fp)
+                for sid, pe, fp in all_files
                 if project_lower in pe.lower() or project_lower in decode_project_path(pe).lower()
             ]
 
@@ -331,7 +361,7 @@ class SessionStore:
             cutoff = time() - since_hours * 3600
             all_files = [(s, p, f) for s, p, f in all_files if f.stat().st_mtime > cutoff]
 
-        sliced = all_files[offset:offset + limit]
+        sliced = all_files[offset : offset + limit]
         results = []
         for sid, pe, fp in sliced:
             meta = parse_transcript_meta(fp, pe)
@@ -347,7 +377,8 @@ class SessionStore:
         if project:
             project_lower = project.lower()
             all_files = [
-                (sid, pe, fp) for sid, pe, fp in all_files
+                (sid, pe, fp)
+                for sid, pe, fp in all_files
                 if project_lower in pe.lower() or project_lower in decode_project_path(pe).lower()
             ]
 
@@ -359,13 +390,15 @@ class SessionStore:
             entries, _ = parse_transcript_entries(fp)
             for entry in entries:
                 if query_lower in entry.content.lower():
-                    results.append({
-                        "session_id": sid,
-                        "project_path": decode_project_path(pe),
-                        "entry_type": entry.entry_type,
-                        "content_preview": entry.content[:300],
-                        "timestamp": entry.timestamp,
-                    })
+                    results.append(
+                        {
+                            "session_id": sid,
+                            "project_path": decode_project_path(pe),
+                            "entry_type": entry.entry_type,
+                            "content_preview": entry.content[:300],
+                            "timestamp": entry.timestamp,
+                        }
+                    )
                     if len(results) >= limit:
                         return results
                     break  # One match per session
@@ -376,7 +409,12 @@ class SessionStore:
     # File-based position tracking
     # ------------------------------------------------------------------
 
-    _POS_DIR = Path("/tmp/session_bridge_positions")
+    _POS_DIR = Path(
+        os.getenv(
+            "SESSION_BRIDGE_POSITIONS_DIR",
+            str(Path.home() / ".cache" / "agentic-bridge" / "positions"),
+        )
+    )
 
     def _file_get_position(self, filepath: str) -> int:
         pos_file = self._POS_DIR / f"{_filepath_hash(filepath)}.pos"

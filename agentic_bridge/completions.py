@@ -55,9 +55,17 @@ from agentic_bridge.logging import log
 # AGENT_API_KEY - API key for authentication
 # AGENT_API_TIMEOUT - Request timeout in seconds (default: 300)
 
-DEFAULT_BASE_URL = os.environ.get("AGENT_API_ENDPOINT", "http://localhost:8000")
-DEFAULT_API_KEY = os.environ.get("AGENT_API_KEY", "")
-DEFAULT_TIMEOUT_SECONDS = float(os.environ.get("AGENT_API_TIMEOUT", "300"))
+
+def _default_base_url() -> str:
+    return os.environ.get("AGENT_API_ENDPOINT", "http://localhost:8000")
+
+
+def _default_api_key() -> str:
+    return os.environ.get("AGENT_API_KEY", "")
+
+
+def _default_timeout() -> float:
+    return float(os.environ.get("AGENT_API_TIMEOUT", "300"))
 
 
 # =============================================================================
@@ -105,9 +113,9 @@ class CompletionsClient:
             api_key: API key for authentication (default: AGENT_API_KEY env)
             timeout: Request timeout in seconds (default: AGENT_API_TIMEOUT env or 300s)
         """
-        self.base_url = base_url or DEFAULT_BASE_URL
-        self.api_key = api_key or DEFAULT_API_KEY
-        self.timeout = timeout or DEFAULT_TIMEOUT_SECONDS
+        self.base_url = base_url or _default_base_url()
+        self.api_key = api_key or _default_api_key()
+        self.timeout = timeout or _default_timeout()
 
     @classmethod
     def get_client(cls, **kwargs) -> "CompletionsClient":
@@ -214,10 +222,13 @@ class CompletionsClient:
 
         except httpx.HTTPStatusError as e:
             error_msg = f"HTTP {e.response.status_code}: {str(e)}"
-            log("CompletionsClient HTTP error", {
-                "status": e.response.status_code,
-                "error": str(e),
-            })
+            log(
+                "CompletionsClient HTTP error",
+                {
+                    "status": e.response.status_code,
+                    "error": str(e),
+                },
+            )
             return CompletionResult(success=False, error=error_msg)
 
         except httpx.TimeoutException as e:

@@ -1,0 +1,61 @@
+# All-in-one Agentic Bridge image: Python + embedded Redis + supervisord.
+# Single container, single `docker run` command.
+#
+# Build:
+#   docker build -f Dockerfile.allinone -t agentic-bridge:allinone .
+#
+# Run:
+#   docker run -d -p 8100:8100 \
+#     -v ~/.claude/projects:/home/appuser/.claude/projects:ro \
+#     --name agentic-bridge \
+#     agentic-bridge:allinone
+
+FROM python:3.12-slim
+
+# Runtime deps: Redis + supervisor + curl (healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    redis-server \
+    supervisor \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN useradd -m -u 1000 -s /bin/bash appuser
+
+WORKDIR /app
+
+# Python deps
+RUN pip install --no-cache-dir \
+    "fastmcp>=2.0" \
+    "redis>=7.0" \
+    "uvicorn[standard]>=0.30" \
+    "httpx>=0.25" \
+    "anthropic>=0.40"
+
+# Copy application
+COPY --chown=appuser:appuser agentic_bridge/ ./agentic_bridge/
+
+# Copy supervisor config
+COPY deploy/supervisord.conf /etc/supervisor/conf.d/agentic-bridge.conf
+
+# Create directories
+RUN mkdir -p /app/logs /data /home/appuser/.claude/projects \
+    && chown -R appuser:appuser /app/logs /data /home/appuser/.claude
+
+# Expose SSE port
+EXPOSE 8100
+
+# Environment defaults
+ENV PYTHONPATH=/app \
+    SESSION_BRIDGE_TRANSPORT=sse \
+    SESSION_BRIDGE_HOST=0.0.0.0 \
+    SESSION_BRIDGE_PORT=8100 \
+    SESSION_BRIDGE_POLL_INTERVAL=60 \
+    REDIS_URL=redis://127.0.0.1:6379/0
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -sf http://localhost:8100/health || exit 1
+
+# supervisord manages both redis-server and agentic-bridge
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/agentic-bridge.conf"]

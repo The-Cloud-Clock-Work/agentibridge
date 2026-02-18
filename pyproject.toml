@@ -1,8 +1,8 @@
 [project]
 name = "agentic-bridge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Claude CLI transcript indexer and MCP server"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=2.0",
     "redis>=7.0",
@@ -14,8 +14,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.23",
+    "fakeredis>=2.21",
     "numpy",
+    "ruff>=0.4",
 ]
+
+[project.scripts]
+agentic-bridge = "agentic_bridge.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
@@ -23,3 +30,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["agentic_bridge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: no external deps",
+    "integration: requires Docker",
+    "stress: large data",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
