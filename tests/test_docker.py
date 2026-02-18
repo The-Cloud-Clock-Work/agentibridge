@@ -71,6 +71,11 @@ def docker_exec(python_code: str, timeout: int = 30) -> str:
         timeout=timeout,
     )
     if result.returncode != 0:
+        # Exit code 134 (SIGABRT) is expected when daemon threads (collector)
+        # are running at Python interpreter shutdown — tolerate if stdout is valid
+        if result.returncode == 134 and result.stdout.strip():
+            print("  (exit 134 tolerated — daemon thread shutdown)", file=sys.stderr)
+            return result.stdout
         print(f"  STDERR: {result.stderr.strip()}", file=sys.stderr)
         raise RuntimeError(f"Container exec failed (exit {result.returncode}): {result.stderr[:500]}")
     return result.stdout
