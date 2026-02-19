@@ -7,6 +7,7 @@ Usage:
     agentic-bridge help       — Available MCP tools and configuration reference
     agentic-bridge connect    — Connection strings for Claude Code, ChatGPT, etc.
     agentic-bridge config     — Current config dump / generate .env template
+    agentic-bridge tunnel     — Cloudflare Tunnel status and URL
     agentic-bridge install    — Install as systemd user service
     agentic-bridge uninstall  — Remove systemd service
     agentic-bridge version    — Print version
@@ -15,6 +16,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -89,6 +91,41 @@ def cmd_status(args: argparse.Namespace) -> None:
     except Exception as e:
         print(f"  status: error ({e})")
 
+    # Check Cloudflare Tunnel
+    print("\n[Tunnel]")
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}}", "session-bridge-tunnel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            tunnel_status = result.stdout.strip()
+            print(f"  cloudflared: {tunnel_status}")
+            if tunnel_status == "running":
+                # Try to extract quick tunnel URL from logs
+                log_result = subprocess.run(
+                    ["docker", "logs", "--tail", "50", "session-bridge-tunnel"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                log_output = log_result.stdout + log_result.stderr
+                url = _extract_tunnel_url(log_output)
+                if url:
+                    print(f"  url: {url}")
+                elif "Starting named tunnel" in log_output:
+                    print("  mode: named tunnel")
+                else:
+                    print("  url: (detecting...)")
+        else:
+            print("  cloudflared: not running")
+    except FileNotFoundError:
+        print("  cloudflared: not checked (docker unavailable)")
+    except Exception:
+        print("  cloudflared: not checked")
+
     # Check projects directory
     print("\n[Transcripts]")
     projects_dir = Path(
@@ -146,6 +183,7 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("  SESSION_BRIDGE_PROJECTS_DIR     Claude projects directory")
     print("  EMBEDDING_BACKEND              ollama or bedrock (optional)")
     print("  AGENTIC_BRIDGE_SUMMARY_MODEL   Model for summaries (default: claude-sonnet-4-5-20250929)")
+    print("  CLOUDFLARE_TUNNEL_TOKEN        Token for named Cloudflare Tunnel (optional)")
     print()
     print("USAGE")
     print("-" * 60)
@@ -153,6 +191,7 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("  Local (stdio):   python -m agentic_bridge")
     print("  Remote (SSE):    SESSION_BRIDGE_TRANSPORT=sse python -m agentic_bridge")
     print("  Docker:          docker compose up --build -d")
+    print("  Tunnel:          docker compose --profile tunnel up -d")
     print(
         "  All-in-one:      docker run -d -p 8100:8100 -v ~/.claude/projects:/home/appuser/.claude/projects:ro agentic-bridge:allinone"
     )
@@ -199,8 +238,110 @@ def cmd_connect(args: argparse.Namespace) -> None:
     print(f"  Auth header:   X-API-Key: {api_key}")
 
     print()
+    print("=== Cloudflare Tunnel ===")
+    print("  Start a quick tunnel (no account needed):")
+    print("    docker compose --profile tunnel up -d")
+    print("  Then run 'agentic-bridge tunnel' to get the public URL.")
+
+    print()
     print("=== curl test ===")
     print(f"  curl -s http://{host}:{port}/health")
+
+
+def _extract_tunnel_url(log_output: str) -> str | None:
+    """Extract *.trycloudflare.com URL from cloudflared log output."""
+    match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", log_output)
+    return match.group(0) if match else None
+
+
+def cmd_tunnel(args: argparse.Namespace) -> None:
+    # Check docker availability
+    if not shutil.which("docker"):
+        print("Docker is not installed or not in PATH.")
+        print("Install Docker to use Cloudflare Tunnel integration.")
+        return
+
+    # Check if tunnel container is running
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}}", "session-bridge-tunnel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        print("Could not inspect tunnel container.")
+        return
+
+    if result.returncode != 0:
+        print("Cloudflare Tunnel is not running.")
+        print()
+        print("Start a quick tunnel (no Cloudflare account needed):")
+        print("  docker compose --profile tunnel up -d")
+        print()
+        print("Start a named tunnel (persistent hostname):")
+        print("  CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel up -d")
+        return
+
+    status = result.stdout.strip()
+    print(f"Cloudflare Tunnel: {status}")
+
+    if status != "running":
+        print("Container exists but is not running. Check logs:")
+        print("  docker logs session-bridge-tunnel")
+        return
+
+    # Read logs to detect mode and URL
+    try:
+        log_result = subprocess.run(
+            ["docker", "logs", "--tail", "50", "session-bridge-tunnel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        print("Could not read tunnel container logs.")
+        return
+
+    log_output = log_result.stdout + log_result.stderr
+
+    # Quick tunnel — extract URL
+    url = _extract_tunnel_url(log_output)
+    if url:
+        print("Mode: quick tunnel")
+        print(f"URL:  {url}")
+        print()
+        print("Add to ~/.mcp.json:")
+        config = {
+            "mcpServers": {
+                "session-bridge": {
+                    "url": f"{url}/sse",
+                }
+            }
+        }
+        api_keys = os.getenv("SESSION_BRIDGE_API_KEYS", "")
+        if api_keys:
+            first_key = api_keys.split(",")[0].strip()
+            config["mcpServers"]["session-bridge"]["headers"] = {"X-API-Key": first_key}
+        print(json.dumps(config, indent=2))
+        print()
+        print("Test:")
+        print(f"  curl -s {url}/health")
+        return
+
+    # Named tunnel
+    if "Starting named tunnel" in log_output:
+        print("Mode: named tunnel")
+        print("The tunnel is connected via your Cloudflare configuration.")
+        print("Check your Cloudflare Zero Trust dashboard for the hostname.")
+        print()
+        print("Logs:")
+        print("  docker logs session-bridge-tunnel")
+        return
+
+    # Unknown state
+    print("Tunnel is running but could not determine mode.")
+    print("Check logs: docker logs session-bridge-tunnel")
 
 
 def cmd_config(args: argparse.Namespace) -> None:
@@ -267,6 +408,9 @@ SESSION_BRIDGE_MAX_ENTRIES=500
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true
 # AGENTIC_BRIDGE_LOG_FILE=~/.cache/agentic-bridge/agentic-bridge.log
+
+# Cloudflare Tunnel (optional — use docker compose --profile tunnel)
+# CLOUDFLARE_TUNNEL_TOKEN=your-tunnel-token-here
 """
     print(template)
 
@@ -371,6 +515,9 @@ def main() -> None:
     connect_parser.add_argument("--port", default=None, help="Server port (default: 8100)")
     connect_parser.add_argument("--api-key", default=None, help="API key to include in examples")
 
+    # tunnel
+    subparsers.add_parser("tunnel", help="Show Cloudflare Tunnel status and URL")
+
     # config
     config_parser = subparsers.add_parser("config", help="Show current config or generate .env template")
     config_parser.add_argument("--generate-env", action="store_true", help="Print .env template")
@@ -394,6 +541,7 @@ def main() -> None:
         "status": cmd_status,
         "help": cmd_help,
         "connect": cmd_connect,
+        "tunnel": cmd_tunnel,
         "config": cmd_config,
         "install": cmd_install,
         "uninstall": cmd_uninstall,

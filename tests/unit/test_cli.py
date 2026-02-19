@@ -4,7 +4,15 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from agentic_bridge.cli import main, cmd_version, cmd_help, cmd_connect, cmd_config
+from agentic_bridge.cli import (
+    main,
+    cmd_version,
+    cmd_help,
+    cmd_connect,
+    cmd_config,
+    cmd_tunnel,
+    _extract_tunnel_url,
+)
 
 
 @pytest.mark.unit
@@ -36,6 +44,7 @@ class TestCmdHelp:
         assert "REDIS_URL" in output
         assert "SESSION_BRIDGE_TRANSPORT" in output
         assert "EMBEDDING_BACKEND" in output
+        assert "CLOUDFLARE_TUNNEL_TOKEN" in output
 
 
 @pytest.mark.unit
@@ -97,3 +106,93 @@ class TestMain:
             main()
         output = capsys.readouterr().out
         assert "0.2.0" in output
+
+
+@pytest.mark.unit
+class TestExtractTunnelUrl:
+    def test_extracts_quick_tunnel_url(self):
+        logs = (
+            "2024-01-01 INFO Starting quick tunnel...\n"
+            "2024-01-01 INFO +----------------------------+\n"
+            "2024-01-01 INFO | https://foo-bar-baz.trycloudflare.com |\n"
+            "2024-01-01 INFO +----------------------------+\n"
+        )
+        assert _extract_tunnel_url(logs) == "https://foo-bar-baz.trycloudflare.com"
+
+    def test_returns_none_for_no_url(self):
+        assert _extract_tunnel_url("Starting named tunnel...\nConnected.") is None
+
+    def test_returns_none_for_empty(self):
+        assert _extract_tunnel_url("") is None
+
+
+@pytest.mark.unit
+class TestCmdTunnel:
+    def test_tunnel_no_docker(self, capsys):
+        with patch("shutil.which", return_value=None):
+            args = MagicMock()
+            cmd_tunnel(args)
+        output = capsys.readouterr().out
+        assert "Docker is not installed" in output
+
+    def test_tunnel_not_running(self, capsys):
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            mock_result = MagicMock()
+            mock_result.returncode = 1
+            mock_result.stdout = ""
+            with patch("agentic_bridge.cli.subprocess.run", return_value=mock_result):
+                args = MagicMock()
+                cmd_tunnel(args)
+        output = capsys.readouterr().out
+        assert "not running" in output
+        assert "docker compose --profile tunnel up -d" in output
+
+    def test_tunnel_quick_url_detected(self, capsys):
+        inspect_result = MagicMock()
+        inspect_result.returncode = 0
+        inspect_result.stdout = "running"
+
+        log_result = MagicMock()
+        log_result.returncode = 0
+        log_result.stdout = ""
+        log_result.stderr = (
+            "INF +-------------------------------------------+\n"
+            "INF | https://my-test-tunnel.trycloudflare.com  |\n"
+            "INF +-------------------------------------------+\n"
+        )
+
+        def side_effect(cmd, **kwargs):
+            if "inspect" in cmd:
+                return inspect_result
+            return log_result
+
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            with patch("agentic_bridge.cli.subprocess.run", side_effect=side_effect):
+                args = MagicMock()
+                cmd_tunnel(args)
+        output = capsys.readouterr().out
+        assert "https://my-test-tunnel.trycloudflare.com" in output
+        assert "quick tunnel" in output
+        assert "/sse" in output
+
+    def test_tunnel_named_connected(self, capsys):
+        inspect_result = MagicMock()
+        inspect_result.returncode = 0
+        inspect_result.stdout = "running"
+
+        log_result = MagicMock()
+        log_result.returncode = 0
+        log_result.stdout = "Starting named tunnel...\nConnection registered."
+        log_result.stderr = ""
+
+        def side_effect(cmd, **kwargs):
+            if "inspect" in cmd:
+                return inspect_result
+            return log_result
+
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            with patch("agentic_bridge.cli.subprocess.run", side_effect=side_effect):
+                args = MagicMock()
+                cmd_tunnel(args)
+        output = capsys.readouterr().out
+        assert "named tunnel" in output

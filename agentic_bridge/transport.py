@@ -1,13 +1,14 @@
-"""SSE/HTTP transport with API key authentication for remote access.
+"""HTTP transport with API key authentication for remote access.
 
 Enables the session-bridge MCP server to be accessed remotely via
-SSE (Server-Sent Events) over HTTP, with API key validation.
+streamable HTTP (/mcp endpoint), with API key validation.
+Legacy SSE transport (/sse) is also supported for backward compatibility.
 
 Usage:
     SESSION_BRIDGE_TRANSPORT=sse SESSION_BRIDGE_PORT=8100 python -m agentic_bridge
 
 Remote clients connect via:
-    {"url": "http://host:8100/sse", "headers": {"X-API-Key": "your-key"}}
+    {"url": "http://host:8100/mcp", "headers": {"X-API-Key": "your-key"}}
 
 Environment:
     SESSION_BRIDGE_TRANSPORT  — "stdio" (default) or "sse"
@@ -207,14 +208,71 @@ class CORSMiddleware:
 # =============================================================================
 
 
-def run_sse_server(mcp) -> None:
-    """Build the ASGI app stack and run with uvicorn.
+def _build_app(mcp):
+    """Build the ASGI app stack with both /mcp and /sse endpoints.
 
-    Wraps FastMCP's SSE app with:
+    Wraps FastMCP's apps with:
     1. CORS middleware (outermost)
     2. API key auth middleware
     3. Health endpoint router
-    4. FastMCP SSE app (innermost)
+    4. Dual-transport router: /mcp (streamable HTTP) + /sse (legacy)
+    """
+    from contextlib import asynccontextmanager
+
+    http_app = mcp.streamable_http_app()  # Starlette app with /mcp route + lifespan
+    sse_app = mcp.sse_app()  # Starlette app with /sse, /messages
+
+    # The streamable HTTP app needs its session manager lifespan started.
+    # We call it directly, then route /mcp to the HTTP app and everything
+    # else to the legacy SSE app.
+    session_manager = mcp.session_manager
+
+    @asynccontextmanager
+    async def lifespan():
+        async with session_manager.run():
+            yield
+
+    _lifespan_cm = None
+
+    async def dual_transport(scope, receive, send):
+        nonlocal _lifespan_cm
+        if scope["type"] == "lifespan":
+            # Start the streamable HTTP session manager on startup
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                try:
+                    _lifespan_cm = lifespan()
+                    await _lifespan_cm.__aenter__()
+                    await send({"type": "lifespan.startup.complete"})
+                except Exception:
+                    await send({"type": "lifespan.startup.failed"})
+                    return
+            message = await receive()
+            if message["type"] == "lifespan.shutdown":
+                if _lifespan_cm:
+                    await _lifespan_cm.__aexit__(None, None, None)
+                await send({"type": "lifespan.shutdown.complete"})
+            return
+
+        path = scope.get("path", "")
+        if path.startswith("/mcp"):
+            await http_app(scope, receive, send)
+        else:
+            await sse_app(scope, receive, send)
+
+    app = dual_transport
+
+    app = HealthRouter(app)
+    app = APIKeyAuthMiddleware(app)
+    app = CORSMiddleware(app)
+    return app
+
+
+def run_sse_server(mcp) -> None:
+    """Build the ASGI app stack and run with uvicorn.
+
+    Serves both /mcp (streamable HTTP, preferred) and /sse (legacy)
+    endpoints behind auth + CORS middleware.
 
     Args:
         mcp: The FastMCP server instance (with host/port already configured)
@@ -230,22 +288,16 @@ def run_sse_server(mcp) -> None:
     if api_keys:
         print(f"API key auth enabled ({len(api_keys)} key(s))", file=sys.stderr)
     else:
-        print("WARNING: No API keys configured — SSE endpoint is unauthenticated", file=sys.stderr)
+        print("WARNING: No API keys configured — endpoint is unauthenticated", file=sys.stderr)
 
-    # Get the Starlette SSE app from FastMCP
-    sse_app = mcp.sse_app()
-
-    # Build middleware stack (applied inside-out):
-    #   request -> CORS -> Auth -> Health -> SSE app
-    app = HealthRouter(sse_app)
-    app = APIKeyAuthMiddleware(app)
-    app = CORSMiddleware(app)
+    app = _build_app(mcp)
 
     host = mcp.settings.host
     port = mcp.settings.port
 
-    print(f"SSE transport ready on {host}:{port}", file=sys.stderr)
-    print(f"  SSE endpoint: http://{host}:{port}/sse", file=sys.stderr)
-    print(f"  Health check: http://{host}:{port}/health", file=sys.stderr)
+    print(f"MCP transport ready on {host}:{port}", file=sys.stderr)
+    print(f"  Streamable HTTP: http://{host}:{port}/mcp", file=sys.stderr)
+    print(f"  Legacy SSE:      http://{host}:{port}/sse", file=sys.stderr)
+    print(f"  Health check:    http://{host}:{port}/health", file=sys.stderr)
 
     uvicorn.run(app, host=host, port=port, log_level="info")

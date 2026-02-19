@@ -54,29 +54,15 @@ Caddy automatically handles SSL via Let's Encrypt.
 
 ## Cloudflare Tunnel
 
+The easiest way to expose Agentic Bridge — no port forwarding or public IP needed.
+
 ```bash
-# Install cloudflared
-# https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
-
-# Create tunnel
-cloudflared tunnel create agentic-bridge
-
-# Configure
-cat > ~/.cloudflared/config.yml << EOF
-tunnel: <TUNNEL_ID>
-credentials-file: /home/user/.cloudflared/<TUNNEL_ID>.json
-
-ingress:
-  - hostname: bridge.example.com
-    service: http://localhost:8100
-    originRequest:
-      noTLSVerify: true
-  - service: http_status:404
-EOF
-
-# Run
-cloudflared tunnel run agentic-bridge
+# Quick tunnel (no Cloudflare account needed)
+docker compose --profile tunnel up -d
+agentic-bridge tunnel   # shows the public URL
 ```
+
+See [docs/cloudflare-tunnel.md](cloudflare-tunnel.md) for the full guide including named tunnels with persistent hostnames.
 
 ## Traefik (Docker Compose)
 

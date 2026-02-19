@@ -66,6 +66,17 @@ agentic-bridge install --docker    # Docker-based
 agentic-bridge install --native    # Native Python
 ```
 
+### Expose via Cloudflare Tunnel
+
+Access your bridge from anywhere — no port forwarding needed:
+
+```bash
+docker compose --profile tunnel up -d
+agentic-bridge tunnel   # prints the public URL
+```
+
+For persistent hostnames, set `CLOUDFLARE_TUNNEL_TOKEN`. See [docs/cloudflare-tunnel.md](docs/cloudflare-tunnel.md).
+
 ### Verify
 
 ```bash
@@ -118,6 +129,7 @@ agentic-bridge version              # Print version
 agentic-bridge status               # Service status, Redis, session count
 agentic-bridge help                 # Tools reference, config guide
 agentic-bridge connect              # Connection strings for all clients
+agentic-bridge tunnel               # Cloudflare Tunnel status and URL
 agentic-bridge config               # Current config dump
 agentic-bridge config --generate-env  # Generate .env template
 agentic-bridge install --docker     # Install as systemd service (Docker)
@@ -203,6 +215,7 @@ python tests/integration/test_docker.py --stop
 ## Documentation
 
 - [Connecting Clients](docs/connecting-clients.md) — Setup guides for Claude Code, ChatGPT, Claude Web, Grok
+- [Cloudflare Tunnel](docs/cloudflare-tunnel.md) — Expose to internet securely (quick & named tunnels)
 - [Reverse Proxy](docs/reverse-proxy.md) — Nginx, Caddy, Cloudflare Tunnel, Traefik configs
 
 ## License

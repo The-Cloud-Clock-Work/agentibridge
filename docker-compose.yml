@@ -7,6 +7,10 @@
 # Usage:
 #   docker compose up --build -d
 #
+# With Cloudflare Tunnel (expose to internet):
+#   docker compose --profile tunnel up -d                                    # quick tunnel
+#   CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d  # named tunnel
+#
 # Connect from Claude Code (.mcp.json):
 #   {
 #     "mcpServers": {
@@ -43,6 +47,12 @@ services:
       redis:
         condition: service_started
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   redis:
     container_name: session-bridge-redis
@@ -54,6 +64,36 @@ services:
       - sb-network
     restart: unless-stopped
     # Redis port NOT exposed to host (internal only)
+
+  # Quick tunnel: docker compose --profile tunnel up -d
+  #   → temporary *.trycloudflare.com URL, no account needed
+  # Named tunnel: CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d
+  #   → persistent hostname via Cloudflare Zero Trust
+  cloudflared:
+    container_name: session-bridge-tunnel
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
+    networks:
+      - sb-network
+    depends_on:
+      session-bridge:
+        condition: service_healthy
+    restart: unless-stopped
+    command: >-
+      tunnel --no-autoupdate --url http://session-bridge:8100
+
+  cloudflared-named:
+    container_name: session-bridge-tunnel-named
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel-named]
+    networks:
+      - sb-network
+    depends_on:
+      session-bridge:
+        condition: service_healthy
+    restart: unless-stopped
+    command: >-
+      tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
 
 volumes:
   sb_redis_data:
