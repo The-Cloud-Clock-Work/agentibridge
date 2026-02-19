@@ -87,6 +87,93 @@ curl https://bridge.example.com/health
 # {"status": "ok", "service": "session-bridge"}
 ```
 
+## Named Tunnel via CLI (Non-Docker)
+
+If you run session-bridge directly on the host (not in Docker), you can create a named tunnel using the `cloudflared` CLI. This is ideal for exposing a stable URL to GitHub Actions CI.
+
+### 1. Install cloudflared
+
+```bash
+# Debian/Ubuntu
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+  -o /usr/local/bin/cloudflared
+chmod +x /usr/local/bin/cloudflared
+
+# macOS
+brew install cloudflared
+```
+
+### 2. Authenticate
+
+```bash
+cloudflared tunnel login
+```
+
+This opens your browser to authorize cloudflared with your Cloudflare account.
+
+### 3. Create the tunnel
+
+```bash
+cloudflared tunnel create session-bridge
+```
+
+Note the tunnel UUID printed in the output. Credentials are saved to `~/.cloudflared/<tunnel-id>.json`.
+
+### 4. Add a DNS route
+
+Pick a subdomain on any domain already in your Cloudflare account:
+
+```bash
+cloudflared tunnel route dns session-bridge mcp.yourdomain.com
+```
+
+This creates a CNAME record `mcp.yourdomain.com` -> `<tunnel-id>.cfargotunnel.com` automatically. No manual DNS editing needed.
+
+### 5. Configure the tunnel
+
+Create `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: <tunnel-id>
+credentials-file: /home/<user>/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: mcp.yourdomain.com
+    service: http://localhost:8100
+  - service: http_status:404
+```
+
+The `ingress` list must end with a catch-all rule. Port `8100` is the default `SESSION_BRIDGE_PORT`.
+
+### 6. Run the tunnel
+
+```bash
+# Foreground (for testing)
+cloudflared tunnel run session-bridge
+
+# As a systemd service (persistent across reboots)
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+```
+
+### 7. Verify
+
+```bash
+curl -s https://mcp.yourdomain.com/health
+# {"status": "ok", "service": "session-bridge"}
+```
+
+### 8. Use in GitHub Actions
+
+Set these in your repo settings (Settings > Secrets and variables > Actions):
+
+| Type | Name | Value |
+|------|------|-------|
+| Variable | `MCP_SERVER_URL` | `https://mcp.yourdomain.com/mcp` |
+| Secret | `MCP_API_KEY` | Your `SESSION_BRIDGE_API_KEYS` value |
+
+The `e2e-smoke.yml` workflow uses these to generate `.mcp.json` and run smoke tests against your tunnel.
+
 ## Security Checklist
 
 1. **Set API keys** — Always set `SESSION_BRIDGE_API_KEYS` when exposing to the internet:

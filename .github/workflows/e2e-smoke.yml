@@ -1,0 +1,101 @@
+name: E2E MCP Smoke Tests
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      mcp_url:
+        description: "Override MCP server URL (leave empty to use MCP_SERVER_URL variable)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Probe Anthropic endpoints (BASE → FALLBACK → fail) ──────────────
+      - name: Probe Anthropic endpoints
+        id: anthropic
+        env:
+          BASE_URL: ${{ vars.ANTHROPIC_URL_BASE }}
+          FALLBACK_URL: ${{ vars.ANTHROPIC_URL_FALLBACK }}
+        run: |
+          echo "Probing BASE: ${BASE_URL}"
+          HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "${BASE_URL}" 2>/dev/null || true)
+          echo "  HTTP status: ${HTTP_CODE}"
+
+          if [[ "$HTTP_CODE" != "000" && -n "$HTTP_CODE" ]]; then
+            echo "BASE endpoint reachable"
+            echo "selected=base" >> "$GITHUB_OUTPUT"
+            echo "url=${BASE_URL}" >> "$GITHUB_OUTPUT"
+            echo "model=${{ vars.ANTHROPIC_MODEL_BASE }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "BASE unreachable, trying FALLBACK: ${FALLBACK_URL}"
+          HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "${FALLBACK_URL}" 2>/dev/null || true)
+          echo "  HTTP status: ${HTTP_CODE}"
+
+          if [[ "$HTTP_CODE" != "000" && -n "$HTTP_CODE" ]]; then
+            echo "FALLBACK endpoint reachable"
+            echo "selected=fallback" >> "$GITHUB_OUTPUT"
+            echo "url=${FALLBACK_URL}" >> "$GITHUB_OUTPUT"
+            echo "model=${{ vars.ANTHROPIC_MODEL_FALLBACK }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::error::Both Anthropic endpoints unreachable"
+          exit 1
+
+      # ── Resolve API key for selected endpoint ───────────────────────────
+      - name: Resolve API key
+        id: resolve_key
+        env:
+          TOKEN_BASE: ${{ secrets.ANTHROPIC_TOKEN_BASE }}
+          TOKEN_FALLBACK: ${{ secrets.ANTHROPIC_TOKEN_FALLBACK }}
+        run: |
+          if [ "${{ steps.anthropic.outputs.selected }}" = "base" ]; then
+            echo "api_key=${TOKEN_BASE}" >> "$GITHUB_OUTPUT"
+          else
+            echo "api_key=${TOKEN_FALLBACK}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Install Claude CLI ──────────────────────────────────────────────
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # ── Generate .mcp.json ──────────────────────────────────────────────
+      - name: Generate .mcp.json
+        env:
+          MCP_URL: ${{ inputs.mcp_url || vars.MCP_SERVER_URL }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+        run: |
+          if [[ -z "$MCP_URL" ]]; then
+            echo "::error::MCP_SERVER_URL variable not set and no mcp_url input provided"
+            exit 1
+          fi
+          echo "MCP server: ${MCP_URL}"
+          jq -n --arg url "$MCP_URL" --arg key "$MCP_API_KEY" \
+            '{mcpServers:{"session-bridge":{type:"http",url:$url,headers:{"X-API-Key":$key}}}}' \
+            > .mcp.json
+
+      # ── Run smoke tests ─────────────────────────────────────────────────
+      - name: Run smoke tests
+        env:
+          ANTHROPIC_API_KEY: ${{ steps.resolve_key.outputs.api_key }}
+          ANTHROPIC_BASE_URL: ${{ steps.anthropic.outputs.url }}
+          CLAUDE_MODEL: ${{ steps.anthropic.outputs.model }}
+        run: |
+          echo "Endpoint: ${ANTHROPIC_BASE_URL}"
+          echo "Model:    ${CLAUDE_MODEL}"
+          echo ""
+          chmod +x tests/e2e/test_mcp_smoke.sh
+          ./tests/e2e/test_mcp_smoke.sh
