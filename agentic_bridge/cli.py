@@ -8,6 +8,7 @@ Usage:
     agentic-bridge connect    — Connection strings for Claude Code, ChatGPT, etc.
     agentic-bridge config     — Current config dump / generate .env template
     agentic-bridge tunnel     — Cloudflare Tunnel status and URL
+    agentic-bridge locks      — Show Redis keys, file locks, and bridge resource state
     agentic-bridge install    — Install as systemd user service
     agentic-bridge uninstall  — Remove systemd service
     agentic-bridge version    — Print version
@@ -488,6 +489,171 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
     print("Remove manually if no longer needed.")
 
 
+def cmd_locks(args: argparse.Namespace) -> None:
+    """Show Redis keys, file position locks, and bridge resource state."""
+    print(f"Agentic Bridge v{_version()} — Lock & Resource Inspector")
+    print("=" * 60)
+
+    # ── Redis locks / keys ────────────────────────────────────────────
+    print("\n[Redis Keys]")
+    try:
+        from agentic_bridge.redis_client import get_redis
+
+        r = get_redis()
+        if r is None:
+            print("  Redis: unavailable (REDIS_URL not set or connection failed)")
+        else:
+            r.ping()
+            prefix = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+
+            # Session index
+            idx_all = f"{prefix}:sb:idx:all"
+            session_count = r.zcard(idx_all)
+            print(f"  Session index ({idx_all}): {session_count} sessions")
+
+            # Project indexes
+            cursor = 0
+            project_indexes = []
+            while True:
+                cursor, keys = r.scan(cursor, match=f"{prefix}:sb:idx:project:*", count=100)
+                project_indexes.extend(keys)
+                if cursor == 0:
+                    break
+            print(f"  Project indexes: {len(project_indexes)}")
+            for key in sorted(project_indexes):
+                count = r.zcard(key)
+                # Extract project name from key
+                proj_name = key.replace(f"{prefix}:sb:idx:project:", "")
+                print(f"    {proj_name}: {count} sessions")
+
+            # Position keys (collector file offsets)
+            cursor = 0
+            pos_keys = []
+            while True:
+                cursor, keys = r.scan(cursor, match=f"{prefix}:sb:pos:*", count=100)
+                pos_keys.extend(keys)
+                if cursor == 0:
+                    break
+            print(f"  Position locks (file offsets): {len(pos_keys)}")
+            for key in sorted(pos_keys):
+                val = r.get(key)
+                short_key = key.replace(f"{prefix}:sb:pos:", "")
+                print(f"    {short_key}: offset {val}")
+
+            # Session data keys (meta + entries)
+            cursor = 0
+            meta_keys = []
+            entry_keys = []
+            while True:
+                cursor, keys = r.scan(cursor, match=f"{prefix}:sb:session:*", count=100)
+                for k in keys:
+                    if k.endswith(":meta"):
+                        meta_keys.append(k)
+                    elif k.endswith(":entries"):
+                        entry_keys.append(k)
+                if cursor == 0:
+                    break
+            print(f"  Session metadata keys: {len(meta_keys)}")
+            print(f"  Session entry lists: {len(entry_keys)}")
+
+            # Total memory usage estimate
+            info = r.info("memory")
+            used_mb = info.get("used_memory_human", "unknown")
+            print(f"  Redis memory usage: {used_mb}")
+
+    except Exception as e:
+        print(f"  Redis error: {e}")
+
+    # ── File-based position locks ─────────────────────────────────────
+    print("\n[File Position Locks]")
+    pos_dir = Path(
+        os.getenv(
+            "SESSION_BRIDGE_POSITIONS_DIR",
+            str(Path.home() / ".cache" / "agentic-bridge" / "positions"),
+        )
+    )
+    if pos_dir.exists():
+        pos_files = list(pos_dir.glob("*.pos"))
+        print(f"  Directory: {pos_dir}")
+        print(f"  Position files: {len(pos_files)}")
+        for pf in sorted(pos_files):
+            try:
+                offset = pf.read_text().strip()
+                print(f"    {pf.name}: offset {offset}")
+            except OSError:
+                print(f"    {pf.name}: (unreadable)")
+    else:
+        print(f"  Directory: {pos_dir} (not found — no file locks)")
+
+    # ── Bridge process locks ──────────────────────────────────────────
+    print("\n[Bridge Processes]")
+
+    # Check for running session-bridge processes
+    try:
+        result = subprocess.run(
+            ["pgrep", "-af", "agentic.bridge"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.stdout.strip():
+            for line in result.stdout.strip().splitlines():
+                print(f"  PID {line}")
+        else:
+            print("  No agentic-bridge processes found")
+    except Exception:
+        print("  Process check unavailable (pgrep not found)")
+
+    # Docker containers
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "name=session-bridge", "--format", "{{.Names}}\t{{.Status}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            print("\n  Docker containers:")
+            for line in result.stdout.strip().splitlines():
+                print(f"    {line}")
+        else:
+            print("  No session-bridge Docker containers running")
+    except Exception:
+        print("  Docker check unavailable")
+
+    if args.clear:
+        print("\n[Clearing locks]")
+        # Clear file position locks
+        if pos_dir.exists():
+            cleared = 0
+            for pf in pos_dir.glob("*.pos"):
+                pf.unlink()
+                cleared += 1
+            print(f"  Cleared {cleared} file position lock(s)")
+
+        # Clear Redis position keys
+        try:
+            from agentic_bridge.redis_client import get_redis
+
+            r = get_redis()
+            if r is not None:
+                prefix = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+                cursor = 0
+                cleared = 0
+                while True:
+                    cursor, keys = r.scan(cursor, match=f"{prefix}:sb:pos:*", count=100)
+                    if keys:
+                        r.delete(*keys)
+                        cleared += len(keys)
+                    if cursor == 0:
+                        break
+                print(f"  Cleared {cleared} Redis position key(s)")
+        except Exception as e:
+            print(f"  Redis clear failed: {e}")
+
+        print("  Done. Next collection cycle will re-index from scratch.")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -534,6 +700,10 @@ def main() -> None:
     # uninstall
     subparsers.add_parser("uninstall", help="Remove systemd service")
 
+    # locks
+    locks_parser = subparsers.add_parser("locks", help="Show Redis keys, file locks, and bridge resource state")
+    locks_parser.add_argument("--clear", action="store_true", help="Clear all position locks (forces re-index)")
+
     args = parser.parse_args()
 
     commands = {
@@ -545,6 +715,7 @@ def main() -> None:
         "config": cmd_config,
         "install": cmd_install,
         "uninstall": cmd_uninstall,
+        "locks": cmd_locks,
     }
 
     if args.command in commands:

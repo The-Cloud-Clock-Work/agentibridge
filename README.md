@@ -2,6 +2,32 @@
 
 Standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 10 tools across 4 phases. Any Claude Code session, ChatGPT, or other AI client can connect and ask "what have my agents been doing?"
 
+## TL;DR — Fastest Start
+
+```bash
+git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
+cd agentic-bridge
+docker compose up --build -d
+curl http://localhost:8100/health
+# {"status": "ok", "service": "session-bridge"}
+```
+
+Add to your `~/.mcp.json` and start using the 10 MCP tools:
+
+```json
+{
+  "mcpServers": {
+    "session-bridge": {
+      "url": "http://localhost:8100/sse"
+    }
+  }
+}
+```
+
+Done. Your Claude Code sessions are now searchable.
+
+## Architecture
+
 ```
 ┌─────────────────────────────────────┐
 │  MCP Server (server.py)             │
@@ -24,9 +50,19 @@ Standalone MCP server that indexes Claude Code CLI transcripts and exposes them 
 └──────────┘
 ```
 
-## Quick Start
+## Installation Options
 
-### Option 1: All-in-One Docker (simplest)
+### Option 1: Docker Compose (recommended)
+
+```bash
+git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
+cd agentic-bridge
+docker compose up --build -d
+```
+
+Separate containers for app and Redis. The `docker-compose.yml` mounts `~/.claude/projects` read-only and starts session-bridge on port `8100`.
+
+### Option 2: All-in-One Docker
 
 ```bash
 docker run -d -p 8100:8100 \
@@ -36,16 +72,6 @@ docker run -d -p 8100:8100 \
 ```
 
 Single container with embedded Redis. No external dependencies.
-
-### Option 2: Docker Compose (production)
-
-```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
-cd agentic-bridge
-docker compose up --build -d
-```
-
-Separate containers for app and Redis. Better for scaling and monitoring.
 
 ### Option 3: pip install (local/development)
 
@@ -66,23 +92,35 @@ agentic-bridge install --docker    # Docker-based
 agentic-bridge install --native    # Native Python
 ```
 
-### Expose via Cloudflare Tunnel
+## Expose via Cloudflare Tunnel
 
-Access your bridge from anywhere — no port forwarding needed:
+Access your bridge from anywhere — no port forwarding needed.
+
+### Quick tunnel (no Cloudflare account)
 
 ```bash
 docker compose --profile tunnel up -d
 agentic-bridge tunnel   # prints the public URL
 ```
 
-For persistent hostnames, set `CLOUDFLARE_TUNNEL_TOKEN`. See [docs/cloudflare-tunnel.md](docs/cloudflare-tunnel.md).
+### Named tunnel (persistent hostname)
 
-### Verify
+Use the interactive setup script to create a named tunnel with a stable subdomain:
 
 ```bash
-curl http://localhost:8100/health
-# {"status": "ok", "service": "session-bridge"}
+chmod +x automation/cloudfared.sh
+./automation/cloudfared.sh
 ```
+
+The script is idempotent — safe to re-run. It installs `cloudflared`, authenticates, creates the tunnel, routes DNS, writes the config, and optionally installs a systemd service.
+
+Alternatively, set a tunnel token and use Docker:
+
+```bash
+CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d
+```
+
+See [docs/cloudflare-tunnel.md](docs/cloudflare-tunnel.md) for full details.
 
 ## Connect Your AI Client
 
@@ -107,7 +145,7 @@ Run `agentic-bridge connect` for ready-to-paste configs for ChatGPT, Claude Web,
 
 See [docs/connecting-clients.md](docs/connecting-clients.md) for detailed setup instructions.
 
-## Tools
+## MCP Tools (10 total)
 
 | Phase | Tool | Description |
 |-------|------|-------------|
@@ -132,6 +170,8 @@ agentic-bridge connect              # Connection strings for all clients
 agentic-bridge tunnel               # Cloudflare Tunnel status and URL
 agentic-bridge config               # Current config dump
 agentic-bridge config --generate-env  # Generate .env template
+agentic-bridge locks                # Show Redis keys, file locks, bridge resources
+agentic-bridge locks --clear        # Clear position locks (forces re-index)
 agentic-bridge install --docker     # Install as systemd service (Docker)
 agentic-bridge install --native     # Install as systemd service (native)
 agentic-bridge uninstall            # Remove systemd service
@@ -157,9 +197,7 @@ agentic-bridge uninstall            # Remove systemd service
 
 Generate a `.env` template: `agentic-bridge config --generate-env`
 
-## Architecture
-
-### Key Modules
+## Key Modules
 
 | Module | Purpose |
 |--------|---------|
@@ -173,7 +211,7 @@ Generate a `.env` template: `agentic-bridge config --generate-env`
 | `completions.py` | Completions API client |
 | `redis_client.py` | Redis helper |
 | `config.py` | Configuration with validation |
-| `cli.py` | CLI helper tool |
+| `cli.py` | CLI helper tool (status, locks, connect, tunnel) |
 | `logging.py` | Structured JSON logging |
 
 ### Redis + File Fallback
@@ -196,27 +234,61 @@ Raw transcripts live in `~/.claude/projects/{path-encoded}/` as `.jsonl` files:
 # Install with dev dependencies
 pip install -e ".[dev]"
 
-# Run unit tests
+# Run unit tests (365 tests)
 pytest tests/unit -v -m unit --cov=agentic_bridge
 
-# Run lint
+# Run lint + format check
 ruff check agentic_bridge/ tests/
 ruff format --check agentic_bridge/ tests/
 
 # Run stress tests
 pytest tests/stress -v -m stress
+```
 
-# Run integration tests (requires Docker)
+### Integration Tests
+
+Docker-based integration tests validate the full stack (app + Redis):
+
+```bash
 python tests/integration/test_docker.py --start
 python tests/integration/test_docker.py --test
 python tests/integration/test_docker.py --stop
 ```
+
+### E2E Smoke Tests
+
+End-to-end tests that call all 6 Phase 1 MCP tools via the Claude CLI against a live bridge:
+
+```bash
+# Requires: claude CLI, .mcp.json with session-bridge config, running bridge
+./tests/e2e/test_mcp_smoke.sh
+```
+
+These also run on a daily schedule via GitHub Actions (`e2e-smoke.yml`).
+
+### Automation
+
+| Script | Purpose |
+|--------|---------|
+| `automation/cloudfared.sh` | Idempotent Cloudflare Tunnel setup (install, auth, create, DNS route, config, systemd) |
+
+## CI/CD
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `test.yml` | Push/PR | Unit tests (Python 3.11 + 3.12 matrix), lint (ruff) |
+| `build.yml` | Push to main | Builds Docker images → GHCR (standard + all-in-one) |
+| `e2e-smoke.yml` | Daily + manual | Runs 6 MCP tool smoke tests via Claude CLI against live tunnel |
+| `claude.yml` | Issue/PR comments | Claude Code integration for automated code review |
 
 ## Documentation
 
 - [Connecting Clients](docs/connecting-clients.md) — Setup guides for Claude Code, ChatGPT, Claude Web, Grok
 - [Cloudflare Tunnel](docs/cloudflare-tunnel.md) — Expose to internet securely (quick & named tunnels)
 - [Reverse Proxy](docs/reverse-proxy.md) — Nginx, Caddy, Cloudflare Tunnel, Traefik configs
+- [Phase 2: Semantic Search](docs/phase2-semantic-search.md) — Embedding backends and semantic search
+- [Phase 3: Remote Access](docs/phase3-remote-access.md) — SSE/HTTP transport and API key auth
+- [Phase 4: Dispatch](docs/phase4-dispatch.md) — Session restore and task dispatch
 
 ## License
 
