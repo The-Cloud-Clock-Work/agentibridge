@@ -186,13 +186,15 @@ class SessionStore:
         }
         pipe.hset(meta_key, mapping=mapping)
 
-        # Index by recency
-        try:
-            from datetime import datetime
+        # Index by recency — sessions without timestamps sort to the bottom
+        score = 0.0
+        if meta.last_update:
+            try:
+                from datetime import datetime
 
-            score = datetime.fromisoformat(meta.last_update.replace("Z", "+00:00")).timestamp()
-        except (ValueError, AttributeError):
-            score = time()
+                score = datetime.fromisoformat(meta.last_update.replace("Z", "+00:00")).timestamp()
+            except (ValueError, AttributeError):
+                score = 0.0
 
         pipe.zadd(_rkey("idx:all"), {meta.session_id: score})
         pipe.zadd(_rkey(f"idx:project:{meta.project_encoded}"), {meta.session_id: score})
