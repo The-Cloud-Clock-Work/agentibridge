@@ -105,16 +105,38 @@ agentic-bridge tunnel   # prints the public URL
 
 ### Named tunnel (persistent hostname)
 
-Use the interactive setup script to create a named tunnel with a stable subdomain:
+For a stable URL like `https://mcp.yourdomain.com` that survives restarts, use the setup script. You need a **Cloudflare account** with at least one domain added to it.
 
 ```bash
 chmod +x automation/cloudfared.sh
 ./automation/cloudfared.sh
 ```
 
-The script is idempotent — safe to re-run. It installs `cloudflared`, authenticates, creates the tunnel, routes DNS, writes the config, and optionally installs a systemd service.
+The script walks you through 10 steps interactively:
 
-Alternatively, set a tunnel token and use Docker:
+| Step | What it does | What you do |
+|------|-------------|-------------|
+| 1 | Installs `cloudflared` binary (Linux/macOS) | Nothing — skips if already installed |
+| 2 | Authenticates with Cloudflare | Opens your browser to log in (one-time) |
+| 3 | Creates a named tunnel | Enter a tunnel name (default: `session-bridge`) |
+| 4 | Checks if tunnel already exists | Nothing — skips if it exists |
+| 5-6 | Sets up your hostname | Enter your **subdomain** (e.g. `mcp`) and **domain** (e.g. `yourdomain.com`) |
+| 7 | Creates DNS CNAME route | Automatic — points `mcp.yourdomain.com` → tunnel |
+| 8 | Writes `~/.cloudflared/config.yml` | Nothing — backs up existing config if different |
+| 9 | Optionally installs systemd service | Answer y/N |
+| 10 | Health check | Verifies the tunnel is reachable |
+
+The script is **idempotent** — safe to re-run. If everything is already set up, every step shows "already exists / skipping".
+
+After the script finishes, start the bridge and verify:
+
+```bash
+docker compose up --build -d
+curl https://mcp.yourdomain.com/health
+# {"status": "ok", "service": "session-bridge"}
+```
+
+**Alternative (Docker-only):** If you already created a tunnel in the Cloudflare Zero Trust dashboard, pass the token directly:
 
 ```bash
 CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d
