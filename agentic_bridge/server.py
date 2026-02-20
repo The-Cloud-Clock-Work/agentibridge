@@ -35,14 +35,61 @@ from agentic_bridge.logging import log
 
 _SUMMARY_TRUNCATE_LENGTH = 200
 
+
+# =============================================================================
+# OAUTH SETUP
+# =============================================================================
+
+
+def _build_oauth_config():
+    """Build OAuth provider + settings if OAUTH_ISSUER_URL is set."""
+    issuer = os.getenv("OAUTH_ISSUER_URL")
+    if not issuer:
+        return None, None
+
+    from agentic_bridge.oauth_provider import BridgeOAuthProvider
+
+    try:
+        from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
+    except ImportError:
+        print("WARNING: mcp package does not support OAuth (upgrade to >=1.26)", file=sys.stderr)
+        return None, None
+
+    client_id = os.getenv("OAUTH_CLIENT_ID", "")
+    client_secret = os.getenv("OAUTH_CLIENT_SECRET", "")
+
+    provider = BridgeOAuthProvider(
+        issuer_url=issuer,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+
+    # Disable dynamic registration when pre-configured credentials are set
+    registration_enabled = not (client_id and client_secret)
+
+    resource_url = os.getenv("OAUTH_RESOURCE_URL") or (issuer.rstrip("/") + "/mcp")
+    settings = AuthSettings(
+        issuer_url=issuer,
+        resource_server_url=resource_url,
+        client_registration_options=ClientRegistrationOptions(enabled=registration_enabled),
+        revocation_options=RevocationOptions(enabled=True),
+    )
+    return provider, settings
+
+
 # =============================================================================
 # MCP SERVER
 # =============================================================================
+
+_oauth_provider, _oauth_settings = _build_oauth_config()
 
 mcp = FastMCP(
     "session-bridge",
     host=os.getenv("SESSION_BRIDGE_HOST", "127.0.0.1"),
     port=int(os.getenv("SESSION_BRIDGE_PORT", "8100")),
+    json_response=True,
+    auth_server_provider=_oauth_provider,
+    auth=_oauth_settings,
 )
 
 # Lazy singletons

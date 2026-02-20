@@ -77,3 +77,23 @@ SESSION_BRIDGE_HOST = os.getenv("SESSION_BRIDGE_HOST", "127.0.0.1")
 
 # Comma-separated API keys for remote access auth
 SESSION_BRIDGE_API_KEYS = os.getenv("SESSION_BRIDGE_API_KEYS", "")
+
+# =============================================================================
+# SESSION BRIDGE — OAUTH 2.1 (opt-in)
+# =============================================================================
+
+# OAuth issuer URL — enables OAuth 2.1 when set (e.g., https://homebridge.example.com)
+OAUTH_ISSUER_URL = os.getenv("OAUTH_ISSUER_URL", "")
+
+# OAuth resource server URL — defaults to {OAUTH_ISSUER_URL}/mcp
+OAUTH_RESOURCE_URL = os.getenv("OAUTH_RESOURCE_URL", "")
+
+# Pre-configured OAuth client credentials — disables dynamic registration when set
+OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "")
+OAUTH_CLIENT_SECRET = os.getenv("OAUTH_CLIENT_SECRET", "")
+
+# Comma-separated allowed OAuth redirect URIs (required for pre-configured clients)
+OAUTH_ALLOWED_REDIRECT_URIS = os.getenv("OAUTH_ALLOWED_REDIRECT_URIS", "")
+
+# Space-separated OAuth scopes the client is allowed to request (e.g. "claudeai")
+OAUTH_ALLOWED_SCOPES = os.getenv("OAUTH_ALLOWED_SCOPES", "")

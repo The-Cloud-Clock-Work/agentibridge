@@ -1008,3 +1008,311 @@ class TestPublicPaths:
         from agentic_bridge.transport import _PUBLIC_PATHS
 
         assert isinstance(_PUBLIC_PATHS, frozenset)
+
+
+# ============================================================================
+# _is_oauth_public_path
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestIsOAuthPublicPath:
+    """Tests for _is_oauth_public_path helper."""
+
+    def test_authorize_is_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/authorize") is True
+
+    def test_token_is_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/token") is True
+
+    def test_register_is_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/register") is True
+
+    def test_revoke_is_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/revoke") is True
+
+    def test_well_known_paths_are_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/.well-known/oauth-authorization-server") is True
+        assert _is_oauth_public_path("/.well-known/oauth-protected-resource") is True
+
+    def test_mcp_is_not_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/mcp") is False
+
+    def test_sse_is_not_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/sse") is False
+
+    def test_health_is_not_oauth_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/health") is False
+
+    def test_random_path_is_not_public(self):
+        from agentic_bridge.transport import _is_oauth_public_path
+
+        assert _is_oauth_public_path("/random") is False
+
+
+# ============================================================================
+# OAuthCompatAuthMiddleware
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestOAuthCompatAuthMiddleware:
+    """Tests for OAuthCompatAuthMiddleware ASGI middleware."""
+
+    @pytest.mark.asyncio
+    async def test_health_passes_through(self, monkeypatch):
+        """Health path bypasses auth."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(path="/health", headers=[])
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        assert recorder.status == 200
+
+    @pytest.mark.asyncio
+    async def test_oauth_endpoints_pass_through(self, monkeypatch):
+        """OAuth protocol endpoints bypass auth."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        for path in ["/authorize", "/token", "/register", "/revoke"]:
+            inner = _DummyApp()
+            mw = OAuthCompatAuthMiddleware(inner)
+            scope = _make_http_scope(path=path, headers=[])
+            recorder = _Recorder()
+
+            await mw(scope, _noop_receive, recorder)
+
+            assert inner.called is True, f"{path} should pass through"
+            assert recorder.status == 200
+
+    @pytest.mark.asyncio
+    async def test_well_known_passes_through(self, monkeypatch):
+        """/.well-known/* paths bypass auth."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(path="/.well-known/oauth-authorization-server", headers=[])
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        assert recorder.status == 200
+
+    @pytest.mark.asyncio
+    async def test_mcp_with_bearer_passes_through(self, monkeypatch):
+        """/mcp with Authorization: Bearer passes through to FastMCP."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(
+            path="/mcp",
+            headers=[[b"authorization", b"Bearer some-token"]],
+        )
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        assert recorder.status == 200
+
+    @pytest.mark.asyncio
+    async def test_mcp_with_api_key_converts_to_bearer(self, monkeypatch):
+        """/mcp with X-API-Key gets converted to Authorization: Bearer."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "my-key")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(
+            path="/mcp",
+            headers=[[b"x-api-key", b"my-key"]],
+        )
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        # Verify the scope was modified
+        forwarded_headers = dict(
+            (h[0].decode() if isinstance(h[0], bytes) else h[0], h[1].decode() if isinstance(h[1], bytes) else h[1])
+            for h in inner.last_scope.get("headers", [])
+        )
+        assert forwarded_headers.get("authorization") == "Bearer my-key"
+        # X-API-Key header should be removed
+        assert "x-api-key" not in forwarded_headers
+
+    @pytest.mark.asyncio
+    async def test_mcp_with_no_auth_passes_through(self, monkeypatch):
+        """/mcp with no auth passes through (FastMCP will reject it)."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(path="/mcp", headers=[])
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        # Passes through — FastMCP's auth will handle rejection
+        assert inner.called is True
+
+    @pytest.mark.asyncio
+    async def test_mcp_api_key_not_converted_when_bearer_exists(self, monkeypatch):
+        """When both X-API-Key and Authorization exist, Bearer is kept."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "my-key")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(
+            path="/mcp",
+            headers=[
+                [b"x-api-key", b"my-key"],
+                [b"authorization", b"Bearer existing-token"],
+            ],
+        )
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        # Original Authorization header should be preserved
+        forwarded_headers = dict(
+            (h[0].decode() if isinstance(h[0], bytes) else h[0], h[1].decode() if isinstance(h[1], bytes) else h[1])
+            for h in inner.last_scope.get("headers", [])
+        )
+        assert forwarded_headers.get("authorization") == "Bearer existing-token"
+
+    @pytest.mark.asyncio
+    async def test_sse_with_valid_api_key_passes(self, monkeypatch):
+        """/sse with valid API key passes through."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(
+            path="/sse",
+            headers=[[b"x-api-key", b"secret"]],
+        )
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        assert recorder.status == 200
+
+    @pytest.mark.asyncio
+    async def test_sse_with_invalid_key_returns_401(self, monkeypatch):
+        """/sse with invalid API key returns 401."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(
+            path="/sse",
+            headers=[[b"x-api-key", b"wrong"]],
+        )
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is False
+        assert recorder.status == 401
+
+    @pytest.mark.asyncio
+    async def test_sse_with_no_auth_when_keys_configured_returns_401(self, monkeypatch):
+        """/sse without any auth when keys are configured returns 401."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(path="/sse", headers=[])
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is False
+        assert recorder.status == 401
+
+    @pytest.mark.asyncio
+    async def test_sse_no_keys_configured_passes_through(self, monkeypatch):
+        """/sse with no API keys configured passes through (auth disabled)."""
+        monkeypatch.delenv("SESSION_BRIDGE_API_KEYS", raising=False)
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(path="/sse", headers=[])
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        assert recorder.status == 200
+
+    @pytest.mark.asyncio
+    async def test_sse_query_string_key_passes(self, monkeypatch):
+        """/sse with API key in query string passes through."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "qs-key")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = _make_http_scope(
+            path="/sse",
+            headers=[],
+            query_string=b"api_key=qs-key",
+        )
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True
+        assert recorder.status == 200
+
+    @pytest.mark.asyncio
+    async def test_non_http_scope_passes_through(self, monkeypatch):
+        """Non-http/websocket scope types pass through without auth check."""
+        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "secret")
+        from agentic_bridge.transport import OAuthCompatAuthMiddleware
+
+        inner = _DummyApp()
+        mw = OAuthCompatAuthMiddleware(inner)
+        scope = {"type": "lifespan"}
+        recorder = _Recorder()
+
+        await mw(scope, _noop_receive, recorder)
+
+        assert inner.called is True

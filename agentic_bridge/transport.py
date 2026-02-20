@@ -58,6 +58,14 @@ def validate_api_key(key: Optional[str]) -> bool:
 # Paths that bypass authentication.
 _PUBLIC_PATHS = frozenset({"/health"})
 
+# OAuth endpoint paths that must be publicly accessible.
+_OAUTH_PUBLIC_PATHS = frozenset({"/authorize", "/token", "/register", "/revoke"})
+
+
+def _is_oauth_public_path(path: str) -> bool:
+    """Check if a path should bypass auth for OAuth protocol endpoints."""
+    return path in _OAUTH_PUBLIC_PATHS or path.startswith("/.well-known/")
+
 
 class APIKeyAuthMiddleware:
     """ASGI middleware that validates X-API-Key header or api_key query param.
@@ -92,6 +100,92 @@ class APIKeyAuthMiddleware:
                     break
 
             # Fallback: check query string
+            if key is None:
+                qs = scope.get("query_string", b"").decode("utf-8")
+                for param in qs.split("&"):
+                    if param.startswith("api_key="):
+                        key = param[8:]
+                        break
+
+            if not validate_api_key(key):
+                log("SSE auth rejected", {"path": path})
+                body = json.dumps({"error": "Invalid or missing API key"}).encode()
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            [b"content-type", b"application/json"],
+                            [b"content-length", str(len(body)).encode()],
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+
+        await self.app(scope, receive, send)
+
+
+class OAuthCompatAuthMiddleware:
+    """ASGI middleware for dual auth: OAuth Bearer tokens + API keys.
+
+    Used when OAuth is enabled. Routes:
+    - /health, OAuth endpoints, /.well-known/* → pass through (public)
+    - /mcp + X-API-Key → convert to Authorization: Bearer header, pass to FastMCP
+    - /mcp + Authorization: Bearer → pass through (FastMCP validates)
+    - /mcp + nothing → pass through (FastMCP returns 401)
+    - /sse, /messages + API key → validate with API key auth
+    - /sse, /messages + no key → reject 401
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self.api_keys = _get_api_keys()
+        self.auth_enabled = len(self.api_keys) > 0
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+
+        # Public paths: health + OAuth protocol endpoints
+        if path in _PUBLIC_PATHS or _is_oauth_public_path(path):
+            await self.app(scope, receive, send)
+            return
+
+        # /mcp path: handled by FastMCP's built-in Bearer auth
+        if path.startswith("/mcp"):
+            # Check for X-API-Key header and convert to Bearer for FastMCP
+            headers = list(scope.get("headers", []))
+            api_key = None
+            has_auth_header = False
+
+            for header_name, header_value in headers:
+                name_lower = header_name.lower() if isinstance(header_name, bytes) else header_name
+                if name_lower == b"x-api-key":
+                    api_key = header_value.decode("utf-8") if isinstance(header_value, bytes) else header_value
+                if name_lower == b"authorization":
+                    has_auth_header = True
+
+            if api_key and not has_auth_header:
+                # Convert API key to Bearer token so FastMCP's auth can validate it
+                new_headers = [h for h in headers if h[0].lower() != b"x-api-key"]
+                new_headers.append([b"authorization", f"Bearer {api_key}".encode()])
+                scope = {**scope, "headers": new_headers}
+
+            await self.app(scope, receive, send)
+            return
+
+        # SSE/messages paths: use API key auth (existing behavior)
+        if self.auth_enabled:
+            key = None
+            for header_name, header_value in scope.get("headers", []):
+                if header_name.lower() == b"x-api-key":
+                    key = header_value.decode("utf-8")
+                    break
+
             if key is None:
                 qs = scope.get("query_string", b"").decode("utf-8")
                 for param in qs.split("&"):
@@ -183,7 +277,7 @@ class CORSMiddleware:
                     "headers": [
                         [b"access-control-allow-origin", b"*"],
                         [b"access-control-allow-methods", b"GET, POST, OPTIONS"],
-                        [b"access-control-allow-headers", b"content-type, x-api-key"],
+                        [b"access-control-allow-headers", b"content-type, x-api-key, authorization"],
                         [b"access-control-max-age", b"86400"],
                     ],
                 }
@@ -213,14 +307,20 @@ def _build_app(mcp):
 
     Wraps FastMCP's apps with:
     1. CORS middleware (outermost)
-    2. API key auth middleware
+    2. Auth middleware (OAuthCompat when OAuth enabled, APIKey otherwise)
     3. Health endpoint router
     4. Dual-transport router: /mcp (streamable HTTP) + /sse (legacy)
+
+    When OAuth is enabled, OAuth protocol paths (/authorize, /token,
+    /register, /revoke, /.well-known/*) are routed to the HTTP app
+    alongside /mcp.
     """
     from contextlib import asynccontextmanager
 
     http_app = mcp.streamable_http_app()  # Starlette app with /mcp route + lifespan
     sse_app = mcp.sse_app()  # Starlette app with /sse, /messages
+
+    oauth_enabled = mcp.settings.auth is not None
 
     # The streamable HTTP app needs its session manager lifespan started.
     # We call it directly, then route /mcp to the HTTP app and everything
@@ -255,7 +355,11 @@ def _build_app(mcp):
             return
 
         path = scope.get("path", "")
+
+        # Route to HTTP app: /mcp + OAuth endpoints (when enabled)
         if path.startswith("/mcp"):
+            await http_app(scope, receive, send)
+        elif oauth_enabled and _is_oauth_public_path(path):
             await http_app(scope, receive, send)
         else:
             await sse_app(scope, receive, send)
@@ -263,7 +367,10 @@ def _build_app(mcp):
     app = dual_transport
 
     app = HealthRouter(app)
-    app = APIKeyAuthMiddleware(app)
+    if oauth_enabled:
+        app = OAuthCompatAuthMiddleware(app)
+    else:
+        app = APIKeyAuthMiddleware(app)
     app = CORSMiddleware(app)
     return app
 
@@ -285,9 +392,13 @@ def run_sse_server(mcp) -> None:
         sys.exit(1)
 
     api_keys = _get_api_keys()
+    oauth_enabled = mcp.settings.auth is not None
+
+    if oauth_enabled:
+        print("OAuth 2.1 auth enabled (API keys also accepted)", file=sys.stderr)
     if api_keys:
         print(f"API key auth enabled ({len(api_keys)} key(s))", file=sys.stderr)
-    else:
+    elif not oauth_enabled:
         print("WARNING: No API keys configured — endpoint is unauthenticated", file=sys.stderr)
 
     app = _build_app(mcp)
@@ -299,5 +410,7 @@ def run_sse_server(mcp) -> None:
     print(f"  Streamable HTTP: http://{host}:{port}/mcp", file=sys.stderr)
     print(f"  Legacy SSE:      http://{host}:{port}/sse", file=sys.stderr)
     print(f"  Health check:    http://{host}:{port}/health", file=sys.stderr)
+    if oauth_enabled:
+        print(f"  OAuth metadata:  http://{host}:{port}/.well-known/oauth-authorization-server", file=sys.stderr)
 
     uvicorn.run(app, host=host, port=port, log_level="info")
