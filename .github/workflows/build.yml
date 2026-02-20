@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "agentic_bridge/**"
+      - "agentibridge/**"
       - "Dockerfile"
       - "Dockerfile.allinone"
       - "docker-compose.yml"

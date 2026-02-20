@@ -1,6 +1,6 @@
 # Reverse Proxy Configuration
 
-Guide for exposing Agentic Bridge behind a reverse proxy with SSL termination.
+Guide for exposing AgentiBridge behind a reverse proxy with SSL termination.
 
 ## Nginx
 
@@ -54,12 +54,12 @@ Caddy automatically handles SSL via Let's Encrypt.
 
 ## Cloudflare Tunnel
 
-The easiest way to expose Agentic Bridge — no port forwarding or public IP needed.
+The easiest way to expose AgentiBridge — no port forwarding or public IP needed.
 
 ```bash
 # Quick tunnel (no Cloudflare account needed)
 docker compose --profile tunnel up -d
-agentic-bridge tunnel   # shows the public URL
+agentibridge tunnel   # shows the public URL
 ```
 
 See [docs/cloudflare-tunnel.md](cloudflare-tunnel.md) for the full guide including named tunnels with persistent hostnames.
@@ -70,7 +70,7 @@ Add labels to your `docker-compose.yml`:
 
 ```yaml
 services:
-  session-bridge:
+  agentibridge:
     # ... existing config ...
     labels:
       - "traefik.enable=true"
@@ -89,6 +89,6 @@ services:
 
 2. **Timeout settings** — SSE connections are long-lived. Set proxy timeouts high (24h+) or disable idle timeouts.
 
-3. **API Key auth** — When using a reverse proxy, set `SESSION_BRIDGE_API_KEYS` to protect the endpoint. The key is passed in the `X-API-Key` header.
+3. **API Key auth** — When using a reverse proxy, set `AGENTIBRIDGE_API_KEYS` to protect the endpoint. The key is passed in the `X-API-Key` header.
 
 4. **Health checks** — The `/health` endpoint is unauthenticated and can be used for load balancer health checks.

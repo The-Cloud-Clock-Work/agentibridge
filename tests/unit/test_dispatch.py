@@ -1,10 +1,10 @@
-"""Tests for agentic_bridge.dispatch module."""
+"""Tests for agentibridge.dispatch module."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentic_bridge.dispatch import restore_session_context, dispatch_task
+from agentibridge.dispatch import restore_session_context, dispatch_task
 from tests.conftest import make_entry, make_meta
 
 
@@ -26,7 +26,7 @@ class TestRestoreSessionContext:
         mock_store.get_session_meta.return_value = meta
         mock_store.get_session_entries.return_value = entries
 
-        with patch("agentic_bridge.store.SessionStore", return_value=mock_store):
+        with patch("agentibridge.store.SessionStore", return_value=mock_store):
             context = restore_session_context("s1", last_n=20)
 
         assert "RESTORED SESSION CONTEXT" in context
@@ -43,7 +43,7 @@ class TestRestoreSessionContext:
         mock_store = MagicMock()
         mock_store.get_session_meta.return_value = None
 
-        with patch("agentic_bridge.store.SessionStore", return_value=mock_store):
+        with patch("agentibridge.store.SessionStore", return_value=mock_store):
             with pytest.raises(ValueError, match="Session not found"):
                 restore_session_context("nonexistent")
 
@@ -55,7 +55,7 @@ class TestRestoreSessionContext:
         mock_store.get_session_meta.return_value = meta
         mock_store.get_session_entries.return_value = entries
 
-        with patch("agentic_bridge.store.SessionStore", return_value=mock_store):
+        with patch("agentibridge.store.SessionStore", return_value=mock_store):
             context = restore_session_context("s1", last_n=5)
 
         # Should contain turns 15-19 but not 0-14
@@ -73,7 +73,7 @@ class TestRestoreSessionContext:
         mock_store.get_session_meta.return_value = meta
         mock_store.get_session_entries.return_value = entries
 
-        with patch("agentic_bridge.store.SessionStore", return_value=mock_store):
+        with patch("agentibridge.store.SessionStore", return_value=mock_store):
             context = restore_session_context("s1")
 
         assert "[SUMMARY]" in context
@@ -83,7 +83,7 @@ class TestRestoreSessionContext:
 @pytest.mark.unit
 class TestDispatchTask:
     def test_basic_dispatch(self):
-        with patch("agentic_bridge.completions.CompletionsClient.get_client") as mock_get:
+        with patch("agentibridge.completions.CompletionsClient.get_client") as mock_get:
             mock_client = MagicMock()
             mock_client.call.return_value = MagicMock(
                 success=True,
@@ -102,7 +102,7 @@ class TestDispatchTask:
             assert result["error"] is None
 
     def test_with_project(self):
-        with patch("agentic_bridge.completions.CompletionsClient.get_client") as mock_get:
+        with patch("agentibridge.completions.CompletionsClient.get_client") as mock_get:
             mock_client = MagicMock()
             mock_client.call.return_value = MagicMock(
                 success=True,
@@ -130,8 +130,8 @@ class TestDispatchTask:
         ]
 
         with (
-            patch("agentic_bridge.store.SessionStore", return_value=mock_store),
-            patch("agentic_bridge.completions.CompletionsClient.get_client") as mock_get,
+            patch("agentibridge.store.SessionStore", return_value=mock_store),
+            patch("agentibridge.completions.CompletionsClient.get_client") as mock_get,
         ):
             mock_client = MagicMock()
             mock_client.call.return_value = MagicMock(
@@ -155,8 +155,8 @@ class TestDispatchTask:
         mock_store.get_session_meta.return_value = None
 
         with (
-            patch("agentic_bridge.store.SessionStore", return_value=mock_store),
-            patch("agentic_bridge.completions.CompletionsClient.get_client") as mock_get,
+            patch("agentibridge.store.SessionStore", return_value=mock_store),
+            patch("agentibridge.completions.CompletionsClient.get_client") as mock_get,
         ):
             mock_client = MagicMock()
             mock_client.call.return_value = MagicMock(
@@ -177,7 +177,7 @@ class TestDispatchTask:
             assert "Failed to restore" in prompt
 
     def test_api_failure(self):
-        with patch("agentic_bridge.completions.CompletionsClient.get_client") as mock_get:
+        with patch("agentibridge.completions.CompletionsClient.get_client") as mock_get:
             mock_client = MagicMock()
             mock_client.call.return_value = MagicMock(
                 success=False,

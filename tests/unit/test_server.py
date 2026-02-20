@@ -1,4 +1,4 @@
-"""Tests for agentic_bridge.server module — all 10 MCP tools."""
+"""Tests for agentibridge.server module — all 10 MCP tools."""
 
 import json
 from unittest.mock import MagicMock, patch
@@ -37,7 +37,7 @@ class TestListSessions:
         store = _mock_store(sessions=[meta])
         collector = _mock_collector()
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = collector
@@ -52,7 +52,7 @@ class TestListSessions:
         store = _mock_store(sessions=[])
         collector = _mock_collector()
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = collector
@@ -72,7 +72,7 @@ class TestListSessions:
         store.list_sessions.side_effect = Exception("db error")
         collector = _mock_collector()
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = collector
@@ -89,7 +89,7 @@ class TestGetSession:
         entries = [make_entry("user", content="Hello"), make_entry("assistant", content="Hi")]
         store = _mock_store(sessions=[meta], entries=entries, count=2)
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = _mock_collector()
@@ -104,7 +104,7 @@ class TestGetSession:
         store = MagicMock()
         store.get_session_meta.return_value = None
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = _mock_collector()
@@ -118,7 +118,7 @@ class TestGetSession:
         entries = [make_entry() for _ in range(10)]
         store = _mock_store(sessions=[meta], entries=entries, count=10)
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = _mock_collector()
@@ -133,7 +133,7 @@ class TestGetSessionSegment:
         entries = [make_entry() for _ in range(5)]
         store = _mock_store(entries=entries, count=20)
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = _mock_collector()
@@ -158,7 +158,7 @@ class TestGetSessionSegment:
         ]
         store = _mock_store(entries=entries, count=3)
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = _mock_collector()
@@ -186,7 +186,7 @@ class TestGetSessionActions:
         ]
         store = _mock_store(entries=entries)
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = _mock_collector()
@@ -216,7 +216,7 @@ class TestSearchSessions:
             ]
         )
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = store
         srv._collector = _mock_collector()
@@ -231,7 +231,7 @@ class TestSearchSessions:
 @pytest.mark.unit
 class TestCollectNow:
     def test_success(self, reset_singletons):
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
@@ -248,7 +248,7 @@ class TestSearchSemantic:
         embedder = MagicMock()
         embedder.is_available.return_value = False
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
@@ -263,7 +263,7 @@ class TestSearchSemantic:
         embedder.is_available.return_value = True
         embedder.search_semantic.return_value = [{"session_id": "s1", "score": 0.95}]
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
@@ -280,7 +280,7 @@ class TestGenerateSummary:
         embedder = MagicMock()
         embedder.generate_summary.return_value = "Built a REST API with auth."
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
@@ -294,7 +294,7 @@ class TestGenerateSummary:
         embedder = MagicMock()
         embedder.generate_summary.side_effect = Exception("API error")
 
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
@@ -307,12 +307,12 @@ class TestGenerateSummary:
 @pytest.mark.unit
 class TestRestoreSession:
     def test_success(self, reset_singletons):
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
 
-        with patch("agentic_bridge.dispatch.restore_session_context") as mock_restore:
+        with patch("agentibridge.dispatch.restore_session_context") as mock_restore:
             mock_restore.return_value = "RESTORED SESSION CONTEXT\nproject info\nentries"
 
             result = json.loads(srv.restore_session(session_id="test", last_n=20))
@@ -321,12 +321,12 @@ class TestRestoreSession:
             assert result["char_count"] > 0
 
     def test_not_found(self, reset_singletons):
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
 
-        with patch("agentic_bridge.dispatch.restore_session_context") as mock_restore:
+        with patch("agentibridge.dispatch.restore_session_context") as mock_restore:
             mock_restore.side_effect = ValueError("Session not found: test")
 
             result = json.loads(srv.restore_session(session_id="test"))
@@ -336,12 +336,12 @@ class TestRestoreSession:
 @pytest.mark.unit
 class TestDispatchTask:
     def test_success(self, reset_singletons):
-        import agentic_bridge.server as srv
+        import agentibridge.server as srv
 
         srv._store = MagicMock()
         srv._collector = _mock_collector()
 
-        with patch("agentic_bridge.dispatch.dispatch_task") as mock_dispatch:
+        with patch("agentibridge.dispatch.dispatch_task") as mock_dispatch:
             mock_dispatch.return_value = {
                 "dispatched": True,
                 "completed": True,

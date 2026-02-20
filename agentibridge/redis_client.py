@@ -1,10 +1,10 @@
-"""Shared Redis helper for agentic-bridge.
+"""Shared Redis helper for agentibridge.
 
 Provides a standalone Redis connection by reading environment variables directly.
 
 Usage::
 
-    from agentic_bridge.redis_client import get_redis, redis_key, POSITION_TTL, SESSION_TTL
+    from agentibridge.redis_client import get_redis, redis_key, POSITION_TTL, SESSION_TTL
 
     r = get_redis()
     if r is not None:
@@ -18,10 +18,10 @@ import sys
 _redis_client = None
 _redis_checked = False
 
-# TTLs from environment (matching agenticore settings defaults)
+# TTLs from environment (matching agentibridge settings defaults)
 SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))  # 24h
 POSITION_TTL: int = int(os.getenv("REDIS_POSITION_TTL", "3600"))  # 1h
-_KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+_KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
 
 
 def get_redis():
@@ -63,6 +63,6 @@ def redis_key(type_name: str, id_value: str) -> str:
 
     Example::
 
-        redis_key("pos:transcript", "abc") -> "agenticore:pos:transcript:abc"
+        redis_key("pos:transcript", "abc") -> "agentibridge:pos:transcript:abc"
     """
     return f"{_KEY_PREFIX}:{type_name}:{id_value}"

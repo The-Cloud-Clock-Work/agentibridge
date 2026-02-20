@@ -3,7 +3,7 @@
 Call the /completions endpoint to invoke Claude agents remotely.
 
 Usage:
-    from agentic_bridge.completions import CompletionsClient, call_completions
+    from agentibridge.completions import CompletionsClient, call_completions
 
     # Simple call
     result = call_completions("Create a diagram for S3 pipeline")
@@ -44,7 +44,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from agentic_bridge.logging import log
+from agentibridge.logging import log
 
 
 # =============================================================================
@@ -173,7 +173,7 @@ class CompletionsClient:
         if meta is None:
             meta = {
                 "conversation_id": uuid,
-                "platform": "agentic-bridge",
+                "platform": "agentibridge",
                 "user": os.environ.get("USER", "system"),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }

@@ -1,4 +1,4 @@
-# Agentic Bridge — Phase 4: Write-back & Dispatch
+# AgentiBridge — Phase 4: Write-back & Dispatch
 
 ## Overview
 
@@ -24,7 +24,7 @@ Formatted context blob        /completions API call
 
 ## Components
 
-### `agentic_bridge/dispatch.py`
+### `agentibridge/dispatch.py`
 
 Two main functions:
 
@@ -66,7 +66,7 @@ Dispatches a task to the agent via `/completions` API:
 
 1. If `session_id` provided, calls `restore_session_context()` to get context
 2. Builds a prompt: context + project hint + task description
-3. Calls `/completions` endpoint via `agentic_bridge.completions`
+3. Calls `/completions` endpoint via `agentibridge.completions`
 4. Returns result with dispatch metadata
 
 **Return format:**
@@ -141,8 +141,8 @@ context = restore_session("agent-a-research-session", last_n=50)
 
 ## Dependencies
 
-- `agentic_bridge.store` — SessionStore for reading sessions
-- `agentic_bridge.completions` — `/completions` API client for dispatch
+- `agentibridge.store` — SessionStore for reading sessions
+- `agentibridge.completions` — `/completions` API client for dispatch
 - Agent API must be running at `AGENT_API_ENDPOINT` for dispatch_task to work
 
 ## Configuration

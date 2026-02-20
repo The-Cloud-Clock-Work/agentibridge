@@ -1,4 +1,4 @@
-# Agentic Bridge
+# AgentiBridge
 
 Standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 10 tools across 4 phases. Any Claude Code session, ChatGPT, or other AI client can connect and ask "what have my agents been doing?"
 
@@ -7,8 +7,8 @@ Standalone MCP server that indexes Claude Code CLI transcripts and exposes them 
 ### Local only (same machine)
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
-cd agentic-bridge
+git clone https://github.com/The-Cloud-Clock-Work/agentibridge.git
+cd agentibridge
 docker compose up --build -d
 curl http://localhost:8100/health
 ```
@@ -18,7 +18,7 @@ Add to `~/.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "session-bridge": { "url": "http://localhost:8100/sse" }
+    "agentibridge": { "url": "http://localhost:8100/sse" }
   }
 }
 ```
@@ -28,8 +28,8 @@ Add to `~/.mcp.json`:
 If you want a persistent URL like `https://mcp.yourdomain.com`, set up the Cloudflare Tunnel **first**, then start the bridge:
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
-cd agentic-bridge
+git clone https://github.com/The-Cloud-Clock-Work/agentibridge.git
+cd agentibridge
 ./automation/cloudfared.sh          # 1. sets up tunnel + DNS (interactive)
 docker compose up --build -d        # 2. starts the bridge on :8100
 curl https://mcp.yourdomain.com/health
@@ -40,7 +40,7 @@ Add to `~/.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "session-bridge": { "url": "https://mcp.yourdomain.com/mcp" }
+    "agentibridge": { "url": "https://mcp.yourdomain.com/mcp" }
   }
 }
 ```
@@ -78,20 +78,20 @@ Done. Your Claude Code sessions are now searchable.
 ### Option 1: Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
-cd agentic-bridge
+git clone https://github.com/The-Cloud-Clock-Work/agentibridge.git
+cd agentibridge
 docker compose up --build -d
 ```
 
-Separate containers for app and Redis. The `docker-compose.yml` mounts `~/.claude/projects` read-only and starts session-bridge on port `8100`.
+Separate containers for app and Redis. The `docker-compose.yml` mounts `~/.claude/projects` read-only and starts agentibridge on port `8100`.
 
 ### Option 2: All-in-One Docker
 
 ```bash
 docker run -d -p 8100:8100 \
   -v ~/.claude/projects:/home/appuser/.claude/projects:ro \
-  --name agentic-bridge \
-  ghcr.io/the-cloud-clock-work/agentic-bridge:allinone-latest
+  --name agentibridge \
+  ghcr.io/the-cloud-clock-work/agentibridge:allinone-latest
 ```
 
 Single container with embedded Redis. No external dependencies.
@@ -100,19 +100,19 @@ Single container with embedded Redis. No external dependencies.
 
 ```bash
 pip install -e .
-python -m agentic_bridge          # stdio transport (local MCP)
+python -m agentibridge          # stdio transport (local MCP)
 
 # Or with SSE for remote clients:
-SESSION_BRIDGE_TRANSPORT=sse python -m agentic_bridge
+AGENTIBRIDGE_TRANSPORT=sse python -m agentibridge
 ```
 
 ### Option 4: systemd service (auto-start on boot)
 
 ```bash
 pip install -e .
-agentic-bridge install --docker    # Docker-based
+agentibridge install --docker    # Docker-based
 # or
-agentic-bridge install --native    # Native Python
+agentibridge install --native    # Native Python
 ```
 
 ## Expose via Cloudflare Tunnel
@@ -127,7 +127,7 @@ Temporary `*.trycloudflare.com` URL that changes on every restart. Good for test
 
 ```bash
 docker compose --profile tunnel up -d
-agentic-bridge tunnel   # prints the public URL
+agentibridge tunnel   # prints the public URL
 ```
 
 ### Named tunnel (persistent hostname)
@@ -149,7 +149,7 @@ The script walks you through 10 steps interactively:
 |------|-------------|-----------------|
 | 1 | Installs `cloudflared` binary (Linux/macOS) | Nothing — skips if already installed |
 | 2 | Authenticates with Cloudflare | Opens your browser to log in (one-time) |
-| 3 | Prompts for tunnel name | A name, or press Enter for `session-bridge` |
+| 3 | Prompts for tunnel name | A name, or press Enter for `agentibridge` |
 | 4 | Creates the tunnel | Nothing — skips if it already exists |
 | 5 | Prompts for subdomain | **Required** — e.g. `mcp` |
 | 6 | Prompts for domain | **Required** — e.g. `yourdomain.com` |
@@ -178,7 +178,7 @@ The script is **idempotent** — safe to re-run. If everything is already set up
 ```bash
 docker compose up --build -d
 curl https://mcp.yourdomain.com/health
-# {"status": "ok", "service": "session-bridge"}
+# {"status": "ok", "service": "agentibridge"}
 ```
 
 **Alternative (Docker-only):** If you already created a tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/), pass the token directly:
@@ -198,7 +198,7 @@ Add to `~/.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "session-bridge": {
+    "agentibridge": {
       "url": "http://localhost:8100/sse",
       "headers": {"X-API-Key": "your-key"}
     }
@@ -208,7 +208,7 @@ Add to `~/.mcp.json`:
 
 ### Other Clients
 
-Run `agentic-bridge connect` for ready-to-paste configs for ChatGPT, Claude Web, Grok, and generic MCP clients.
+Run `agentibridge connect` for ready-to-paste configs for ChatGPT, Claude Web, Grok, and generic MCP clients.
 
 See [docs/connecting-clients.md](docs/connecting-clients.md) for detailed setup instructions.
 
@@ -230,18 +230,18 @@ See [docs/connecting-clients.md](docs/connecting-clients.md) for detailed setup 
 ## CLI
 
 ```bash
-agentic-bridge version              # Print version
-agentic-bridge status               # Service status, Redis, session count
-agentic-bridge help                 # Tools reference, config guide
-agentic-bridge connect              # Connection strings for all clients
-agentic-bridge tunnel               # Cloudflare Tunnel status and URL
-agentic-bridge config               # Current config dump
-agentic-bridge config --generate-env  # Generate .env template
-agentic-bridge locks                # Show Redis keys, file locks, bridge resources
-agentic-bridge locks --clear        # Clear position locks (forces re-index)
-agentic-bridge install --docker     # Install as systemd service (Docker)
-agentic-bridge install --native     # Install as systemd service (native)
-agentic-bridge uninstall            # Remove systemd service
+agentibridge version              # Print version
+agentibridge status               # Service status, Redis, session count
+agentibridge help                 # Tools reference, config guide
+agentibridge connect              # Connection strings for all clients
+agentibridge tunnel               # Cloudflare Tunnel status and URL
+agentibridge config               # Current config dump
+agentibridge config --generate-env  # Generate .env template
+agentibridge locks                # Show Redis keys, file locks, bridge resources
+agentibridge locks --clear        # Clear position locks (forces re-index)
+agentibridge install --docker     # Install as systemd service (Docker)
+agentibridge install --native     # Install as systemd service (native)
+agentibridge uninstall            # Remove systemd service
 ```
 
 ## Configuration
@@ -249,20 +249,20 @@ agentic-bridge uninstall            # Remove systemd service
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REDIS_URL` | _(none)_ | Redis connection URL (optional — falls back to filesystem) |
-| `REDIS_KEY_PREFIX` | `agenticore` | Redis key namespace |
-| `SESSION_BRIDGE_TRANSPORT` | `stdio` | `stdio` (local MCP) or `sse` (HTTP remote) |
-| `SESSION_BRIDGE_HOST` | `127.0.0.1` | Bind address for SSE transport |
-| `SESSION_BRIDGE_PORT` | `8100` | HTTP port for SSE transport |
-| `SESSION_BRIDGE_API_KEYS` | _(none)_ | Comma-separated API keys (empty = no auth) |
-| `SESSION_BRIDGE_POLL_INTERVAL` | `60` | Collector poll interval in seconds (min: 5) |
-| `SESSION_BRIDGE_MAX_ENTRIES` | `500` | Max entries per session in Redis (0 = unlimited) |
-| `SESSION_BRIDGE_PROJECTS_DIR` | `~/.claude/projects` | Claude transcript directory |
+| `REDIS_KEY_PREFIX` | `agentibridge` | Redis key namespace |
+| `AGENTIBRIDGE_TRANSPORT` | `stdio` | `stdio` (local MCP) or `sse` (HTTP remote) |
+| `AGENTIBRIDGE_HOST` | `127.0.0.1` | Bind address for SSE transport |
+| `AGENTIBRIDGE_PORT` | `8100` | HTTP port for SSE transport |
+| `AGENTIBRIDGE_API_KEYS` | _(none)_ | Comma-separated API keys (empty = no auth) |
+| `AGENTIBRIDGE_POLL_INTERVAL` | `60` | Collector poll interval in seconds (min: 5) |
+| `AGENTIBRIDGE_MAX_ENTRIES` | `500` | Max entries per session in Redis (0 = unlimited) |
+| `AGENTIBRIDGE_PROJECTS_DIR` | `~/.claude/projects` | Claude transcript directory |
 | `EMBEDDING_BACKEND` | _(none)_ | `ollama` or `bedrock` for semantic search |
-| `AGENTIC_BRIDGE_SUMMARY_MODEL` | `claude-sonnet-4-5-20250929` | Model for AI summaries |
+| `AGENTIBRIDGE_SUMMARY_MODEL` | `claude-sonnet-4-5-20250929` | Model for AI summaries |
 | `CLAUDE_HOOK_LOG_ENABLED` | `true` | Enable/disable logging |
-| `AGENTIC_BRIDGE_LOG_FILE` | _auto_ | Log file path (auto-detects Docker vs native) |
+| `AGENTIBRIDGE_LOG_FILE` | _auto_ | Log file path (auto-detects Docker vs native) |
 
-Generate a `.env` template: `agentic-bridge config --generate-env`
+Generate a `.env` template: `agentibridge config --generate-env`
 
 ## Key Modules
 
@@ -302,11 +302,11 @@ Raw transcripts live in `~/.claude/projects/{path-encoded}/` as `.jsonl` files:
 pip install -e ".[dev]"
 
 # Run unit tests (365 tests)
-pytest tests/unit -v -m unit --cov=agentic_bridge
+pytest tests/unit -v -m unit --cov=agentibridge
 
 # Run lint + format check
-ruff check agentic_bridge/ tests/
-ruff format --check agentic_bridge/ tests/
+ruff check agentibridge/ tests/
+ruff format --check agentibridge/ tests/
 
 # Run stress tests
 pytest tests/stress -v -m stress
@@ -327,7 +327,7 @@ python tests/integration/test_docker.py --stop
 End-to-end tests that call all 6 Phase 1 MCP tools via the Claude CLI against a live bridge:
 
 ```bash
-# Requires: claude CLI, .mcp.json with session-bridge config, running bridge
+# Requires: claude CLI, .mcp.json with agentibridge config, running bridge
 ./tests/e2e/test_mcp_smoke.sh
 ```
 

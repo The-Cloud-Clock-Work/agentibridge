@@ -1,11 +1,11 @@
-"""Unit tests for agentic_bridge.oauth_provider module."""
+"""Unit tests for agentibridge.oauth_provider module."""
 
 import time
 
 import pytest
 from pydantic import AnyUrl
 
-from agentic_bridge.oauth_provider import (
+from agentibridge.oauth_provider import (
     BridgeOAuthProvider,
     _ACCESS_TOKEN_TTL,
     _AUTH_CODE_TTL,
@@ -454,7 +454,7 @@ class TestAccessToken:
 
     @pytest.mark.asyncio
     async def test_api_key_accepted_as_access_token(self, monkeypatch):
-        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "my-api-key,other-key")
+        monkeypatch.setenv("AGENTIBRIDGE_API_KEYS", "my-api-key,other-key")
         provider = BridgeOAuthProvider(issuer_url=_ISSUER)
 
         at = await provider.load_access_token("my-api-key")
@@ -464,7 +464,7 @@ class TestAccessToken:
 
     @pytest.mark.asyncio
     async def test_invalid_api_key_not_accepted(self, monkeypatch):
-        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "my-api-key")
+        monkeypatch.setenv("AGENTIBRIDGE_API_KEYS", "my-api-key")
         provider = BridgeOAuthProvider(issuer_url=_ISSUER)
 
         at = await provider.load_access_token("wrong-key")
@@ -472,7 +472,7 @@ class TestAccessToken:
 
     @pytest.mark.asyncio
     async def test_no_api_keys_configured_returns_none(self, monkeypatch):
-        monkeypatch.delenv("SESSION_BRIDGE_API_KEYS", raising=False)
+        monkeypatch.delenv("AGENTIBRIDGE_API_KEYS", raising=False)
         provider = BridgeOAuthProvider(issuer_url=_ISSUER)
 
         at = await provider.load_access_token("some-token")
@@ -480,7 +480,7 @@ class TestAccessToken:
 
     @pytest.mark.asyncio
     async def test_empty_api_keys_returns_none(self, monkeypatch):
-        monkeypatch.setenv("SESSION_BRIDGE_API_KEYS", "")
+        monkeypatch.setenv("AGENTIBRIDGE_API_KEYS", "")
         provider = BridgeOAuthProvider(issuer_url=_ISSUER)
 
         at = await provider.load_access_token("some-token")

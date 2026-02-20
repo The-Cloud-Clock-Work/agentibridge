@@ -1,15 +1,15 @@
-"""Session restore and task dispatch for Agentic Bridge.
+"""Session restore and task dispatch for AgentiBridge.
 
 Enables:
 1. Extracting context from past sessions for injection into new conversations
 2. Dispatching tasks to agents with optional session context
 
-Uses agentic_bridge.completions for agent dispatch via /completions API.
+Uses agentibridge.completions for agent dispatch via /completions API.
 """
 
 from typing import Any, Dict
 
-from agentic_bridge.logging import log
+from agentibridge.logging import log
 
 
 def restore_session_context(session_id: str, last_n: int = 20) -> str:
@@ -26,7 +26,7 @@ def restore_session_context(session_id: str, last_n: int = 20) -> str:
     Returns:
         Formatted context string
     """
-    from agentic_bridge.store import SessionStore
+    from agentibridge.store import SessionStore
 
     store = SessionStore()
     meta = store.get_session_meta(session_id)
@@ -103,7 +103,7 @@ def dispatch_task(
     Returns:
         Dict with dispatch result, including success status and output
     """
-    from agentic_bridge.completions import call_completions
+    from agentibridge.completions import call_completions
 
     # Build prompt
     prompt_parts = []

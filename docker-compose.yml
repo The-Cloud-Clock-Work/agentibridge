@@ -1,4 +1,4 @@
-# Standalone Agentic Bridge stack.
+# Standalone AgentiBridge stack.
 #
 # Indexes Claude CLI transcripts and serves them via SSE/HTTP MCP.
 # Any Claude Code session or cloud AI can connect and ask
@@ -14,7 +14,7 @@
 # Connect from Claude Code (.mcp.json):
 #   {
 #     "mcpServers": {
-#       "session-bridge": {
+#       "agentibridge": {
 #         "url": "http://your-host:8100/sse",
 #         "headers": {"X-API-Key": "your-key"}
 #       }
@@ -22,25 +22,25 @@
 #   }
 
 services:
-  session-bridge:
-    container_name: session-bridge
+  agentibridge:
+    container_name: agentibridge
     build:
       context: .
       dockerfile: Dockerfile
-    image: agentic-bridge:latest
+    image: agentibridge:latest
     ports:
       - "8100:8100"
     volumes:
       # Mount host Claude CLI transcripts (read-only)
       - ${CLAUDE_PROJECTS_DIR:-~/.claude/projects}:/home/appuser/.claude/projects:ro
     environment:
-      - SESSION_BRIDGE_TRANSPORT=sse
-      - SESSION_BRIDGE_HOST=0.0.0.0
-      - SESSION_BRIDGE_PORT=8100
-      - SESSION_BRIDGE_API_KEYS=${SESSION_BRIDGE_API_KEYS:-}
-      - SESSION_BRIDGE_POLL_INTERVAL=${SESSION_BRIDGE_POLL_INTERVAL:-60}
+      - AGENTIBRIDGE_TRANSPORT=sse
+      - AGENTIBRIDGE_HOST=0.0.0.0
+      - AGENTIBRIDGE_PORT=8100
+      - AGENTIBRIDGE_API_KEYS=${AGENTIBRIDGE_API_KEYS:-}
+      - AGENTIBRIDGE_POLL_INTERVAL=${AGENTIBRIDGE_POLL_INTERVAL:-60}
       - REDIS_URL=redis://redis:6379/0
-      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-agenticore}
+      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-agentibridge}
       - OAUTH_ISSUER_URL=${OAUTH_ISSUER_URL:-}
       - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
       - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
@@ -61,7 +61,7 @@ services:
       retries: 3
 
   redis:
-    container_name: session-bridge-redis
+    container_name: agentibridge-redis
     image: redis:7-alpine
     command: redis-server --appendonly yes
     volumes:
@@ -76,26 +76,26 @@ services:
   # Named tunnel: CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d
   #   → persistent hostname via Cloudflare Zero Trust
   cloudflared:
-    container_name: session-bridge-tunnel
+    container_name: agentibridge-tunnel
     image: cloudflare/cloudflared:latest
     profiles: [tunnel]
     networks:
       - sb-network
     depends_on:
-      session-bridge:
+      agentibridge:
         condition: service_healthy
     restart: unless-stopped
     command: >-
-      tunnel --no-autoupdate --url http://session-bridge:8100
+      tunnel --no-autoupdate --url http://agentibridge:8100
 
   cloudflared-named:
-    container_name: session-bridge-tunnel-named
+    container_name: agentibridge-tunnel-named
     image: cloudflare/cloudflared:latest
     profiles: [tunnel-named]
     networks:
       - sb-network
     depends_on:
-      session-bridge:
+      agentibridge:
         condition: service_healthy
     restart: unless-stopped
     command: >-

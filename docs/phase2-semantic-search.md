@@ -1,8 +1,8 @@
-# Agentic Bridge — Phase 2: Semantic Search
+# AgentiBridge — Phase 2: Semantic Search
 
 ## Overview
 
-Phase 2 adds AI-powered semantic search to Agentic Bridge, enabling natural language queries across all indexed Claude Code transcripts. Instead of exact keyword matching (Phase 1), users can ask questions like "how does authentication work" and get semantically relevant results.
+Phase 2 adds AI-powered semantic search to AgentiBridge, enabling natural language queries across all indexed Claude Code transcripts. Instead of exact keyword matching (Phase 1), users can ask questions like "how does authentication work" and get semantically relevant results.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ Phase 2 adds AI-powered semantic search to Agentic Bridge, enabling natural lang
 Query: "how does auth work?"
         |
         v
-  embed_query()              <- agenticore/search.py (Bedrock Titan / Ollama)
+  embed_query()              <- agentibridge/search.py (Bedrock Titan / Ollama)
         |
         v
   cosine_similarity()        <- brute-force over stored vectors (numpy-accelerated)
@@ -24,7 +24,7 @@ Query: "how does auth work?"
 
 ## Components
 
-### `agentic_bridge/embeddings.py` — TranscriptEmbedder
+### `agentibridge/embeddings.py` — TranscriptEmbedder
 
 Core class for the embedding pipeline:
 
@@ -59,7 +59,7 @@ Vectors are stored in Redis hashes with a set index:
 
 ### Search Algorithm
 
-1. **Embed query** via `agenticore.search.embed_query()` (Bedrock Titan or Ollama)
+1. **Embed query** via `agentibridge.search.embed_query()` (Bedrock Titan or Ollama)
 2. **Load all vectors** from Redis via pipeline (batched for performance)
 3. **Cosine similarity** computed in batch (numpy when available, pure Python fallback)
 4. **Deduplicate** by session_id, keeping the highest-scoring chunk per session
@@ -103,9 +103,9 @@ Uses Claude Sonnet to produce 2-3 sentence session summaries.
 
 ```bash
 # Enable/disable embedding (default: false — opt-in)
-SESSION_BRIDGE_EMBEDDING_ENABLED=false
+AGENTIBRIDGE_EMBEDDING_ENABLED=false
 
-# Embedding backend (inherited from agenticore settings)
+# Embedding backend (inherited from agentibridge settings)
 EMBEDDING_BACKEND=bedrock    # or "ollama"
 
 # Required for Bedrock:
@@ -118,7 +118,7 @@ ANTHROPIC_API_KEY=...
 
 ## Dependencies
 
-- `agenticore.search` — `embed_query()` function (optional, for embedding backend)
+- `agentibridge.search` — `embed_query()` function (optional, for embedding backend)
 - `numpy` — optional, for batch cosine similarity acceleration
 - `anthropic` — optional, for summary generation (falls back to /completions API)
 - Redis — required for vector storage (no file fallback for vectors)

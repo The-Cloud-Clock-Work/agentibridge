@@ -24,7 +24,7 @@ def docker_stack():
     )
 
     # Wait for container
-    container = "session-bridge"
+    container = "agentibridge"
     for _ in range(60):
         try:
             result = subprocess.run(
@@ -51,7 +51,7 @@ def docker_stack():
                     container,
                     "python3",
                     "-c",
-                    "from agentic_bridge.redis_client import get_redis; r=get_redis(); print(r.ping())",
+                    "from agentibridge.redis_client import get_redis; r=get_redis(); print(r.ping())",
                 ],
                 capture_output=True,
                 text=True,

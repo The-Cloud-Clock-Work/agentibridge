@@ -1,4 +1,4 @@
-"""Simplified logging utility for agentic-bridge.
+"""Simplified logging utility for agentibridge.
 
 Writes structured JSON log entries to a file.
 """
@@ -22,11 +22,11 @@ LOG_ENABLED = _env_bool("CLAUDE_HOOK_LOG_ENABLED", "true")
 def _default_log_file() -> str:
     """Determine default log file path. Use /app/logs inside Docker, ~/.cache otherwise."""
     if Path("/.dockerenv").exists():
-        return "/app/logs/agentic-bridge.log"
-    return str(Path.home() / ".cache" / "agentic-bridge" / "agentic-bridge.log")
+        return "/app/logs/agentibridge.log"
+    return str(Path.home() / ".cache" / "agentibridge" / "agentibridge.log")
 
 
-LOG_FILE = os.getenv("AGENTIC_BRIDGE_LOG_FILE", _default_log_file())
+LOG_FILE = os.getenv("AGENTIBRIDGE_LOG_FILE", _default_log_file())
 
 
 def log(message: str, payload: Optional[dict] = None) -> None:

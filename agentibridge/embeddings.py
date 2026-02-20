@@ -1,7 +1,7 @@
 """Transcript embedding pipeline for semantic search.
 
 Chunks transcripts into conversation turns, generates embeddings via
-agenticore.search infrastructure, stores vectors in Redis, and performs
+agentibridge.search infrastructure, stores vectors in Redis, and performs
 cosine similarity search.
 
 Requires:
@@ -14,7 +14,7 @@ import math
 import os
 from typing import Any, Dict, List, Optional
 
-from agentic_bridge.logging import log
+from agentibridge.logging import log
 
 
 def _get_embed_fn():
@@ -92,7 +92,7 @@ class TranscriptEmbedder:
         self._redis_checked = False
         self._embed_fn = None
         self._embed_checked = False
-        self._prefix = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+        self._prefix = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
 
     # ------------------------------------------------------------------
     # Lazy connections
@@ -103,7 +103,7 @@ class TranscriptEmbedder:
             return self._redis
         self._redis_checked = True
         try:
-            from agentic_bridge.redis_client import get_redis
+            from agentibridge.redis_client import get_redis
 
             self._redis = get_redis()
         except Exception:
@@ -141,7 +141,7 @@ class TranscriptEmbedder:
         if r is None:
             raise RuntimeError("Redis required for vector storage")
 
-        from agentic_bridge.store import SessionStore
+        from agentibridge.store import SessionStore
 
         store = SessionStore()
         entries = store.get_session_entries(session_id, offset=0, limit=10000)
@@ -285,7 +285,7 @@ class TranscriptEmbedder:
 
     def generate_summary(self, session_id: str) -> str:
         """Generate session summary via Claude API (Anthropic SDK)."""
-        from agentic_bridge.store import SessionStore
+        from agentibridge.store import SessionStore
 
         store = SessionStore()
         entries = store.get_session_entries(session_id, offset=0, limit=10000)
@@ -310,7 +310,7 @@ class TranscriptEmbedder:
 
             client = anthropic.Anthropic()
             response = client.messages.create(
-                model=os.getenv("AGENTIC_BRIDGE_SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
+                model=os.getenv("AGENTIBRIDGE_SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -318,7 +318,7 @@ class TranscriptEmbedder:
         except ImportError:
             # Fallback: completions API
             try:
-                from agentic_bridge.completions import call_completions
+                from agentibridge.completions import call_completions
 
                 result = call_completions(prompt=prompt, command="default", stateless=True)
                 if result.success and result.parsed_output:

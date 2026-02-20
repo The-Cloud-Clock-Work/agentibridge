@@ -1,4 +1,4 @@
-"""Tests for agentic_bridge.collector module."""
+"""Tests for agentibridge.collector module."""
 
 import time
 from pathlib import Path
@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentic_bridge.collector import SessionCollector
-from agentic_bridge.store import SessionStore
+from agentibridge.collector import SessionCollector
+from agentibridge.store import SessionStore
 
 
 @pytest.mark.unit
@@ -22,7 +22,7 @@ class TestSessionCollector:
         assert collector._thread is None
 
     def test_init_custom_interval(self, monkeypatch):
-        monkeypatch.setenv("SESSION_BRIDGE_POLL_INTERVAL", "30")
+        monkeypatch.setenv("AGENTIBRIDGE_POLL_INTERVAL", "30")
         store = MagicMock(spec=SessionStore)
         collector = SessionCollector(store)
         assert collector._interval == 30
@@ -112,7 +112,7 @@ class TestSessionCollector:
 
         filepath = temp_projects_dir / "-home-user-dev-myapp" / "session-001.jsonl"
 
-        with patch("agentic_bridge.collector.parse_transcript_meta") as mock_meta:
+        with patch("agentibridge.collector.parse_transcript_meta") as mock_meta:
             mock_meta.return_value = MagicMock()
             collector._scan_file("session-001", "-home-user-dev-myapp", filepath)
             # entries arg should be passed (not None)

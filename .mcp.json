@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "session-bridge": {
+    "agentibridge": {
       "type": "http",
       "url": "https://engagement-thinks-disco-type.trycloudflare.com/mcp",
       "headers": {
-        "X-API-Key": "{SESSION_BRIDGE_API_KEYS}"
+        "X-API-Key": "{AGENTIBRIDGE_API_KEYS}"
       }
     }
   }

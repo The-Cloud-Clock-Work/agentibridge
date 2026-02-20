@@ -1,14 +1,14 @@
-# Agentic Bridge — Phase 3: Remote Access
+# AgentiBridge — Phase 3: Remote Access
 
 ## Overview
 
-Phase 3 enables Agentic Bridge to be accessed remotely via SSE (Server-Sent Events) over HTTP, allowing external clients like claude.ai, mobile apps, or other API consumers to query session transcripts without local filesystem access.
+Phase 3 enables AgentiBridge to be accessed remotely via SSE (Server-Sent Events) over HTTP, allowing external clients like claude.ai, mobile apps, or other API consumers to query session transcripts without local filesystem access.
 
 ## Architecture
 
 ```
 +------------------+     SSE/HTTP      +--------------------------+
-|  claude.ai       | ----------------->|  Agentic Bridge          |
+|  claude.ai       | ----------------->|  AgentiBridge          |
 |  Mobile app      |   X-API-Key auth  |  SSE transport (:8100)   |
 |  API client      | <---------------- |                          |
 +------------------+     Events        |  All 10 MCP tools        |
@@ -18,18 +18,18 @@ Phase 3 enables Agentic Bridge to be accessed remotely via SSE (Server-Sent Even
 
 ## Transport Modes
 
-Agentic Bridge supports two transport modes:
+AgentiBridge supports two transport modes:
 
 | Mode | Default | Use Case |
 |------|---------|----------|
 | `stdio` | Yes | Local MCP client (Claude Code CLI) |
 | `sse` | No | Remote HTTP clients |
 
-Transport is selected via the `SESSION_BRIDGE_TRANSPORT` environment variable.
+Transport is selected via the `AGENTIBRIDGE_TRANSPORT` environment variable.
 
 ## Components
 
-### `agentic_bridge/transport.py`
+### `agentibridge/transport.py`
 
 Provides SSE transport configuration with API key authentication.
 
@@ -37,12 +37,12 @@ Provides SSE transport configuration with API key authentication.
 
 | Function | Description |
 |----------|-------------|
-| `validate_api_key(key)` | Check key against SESSION_BRIDGE_API_KEYS |
+| `validate_api_key(key)` | Check key against AGENTIBRIDGE_API_KEYS |
 | `run_sse_server(mcp)` | Build ASGI stack and start SSE server with auth |
 
 ### Authentication
 
-When `SESSION_BRIDGE_API_KEYS` is set, all requests must include a valid API key:
+When `AGENTIBRIDGE_API_KEYS` is set, all requests must include a valid API key:
 
 - **Header**: `X-API-Key: your-key`
 - **Query param**: `?api_key=your-key`
@@ -52,9 +52,9 @@ When no keys are configured, auth is disabled (open access).
 ### Transport Selection in `server.py`
 
 ```python
-transport = os.getenv("SESSION_BRIDGE_TRANSPORT", "stdio")
+transport = os.getenv("AGENTIBRIDGE_TRANSPORT", "stdio")
 if transport == "sse":
-    from agentic_bridge.transport import run_sse_server
+    from agentibridge.transport import run_sse_server
     run_sse_server(mcp)
 else:
     mcp.run()  # stdio (default)
@@ -64,13 +64,13 @@ else:
 
 ```bash
 # Transport mode
-SESSION_BRIDGE_TRANSPORT=stdio     # "stdio" (default) or "sse"
+AGENTIBRIDGE_TRANSPORT=stdio     # "stdio" (default) or "sse"
 
 # SSE port
-SESSION_BRIDGE_PORT=8100           # HTTP port for SSE transport
+AGENTIBRIDGE_PORT=8100           # HTTP port for SSE transport
 
 # API key auth (comma-separated, empty = no auth)
-SESSION_BRIDGE_API_KEYS=key1,key2
+AGENTIBRIDGE_API_KEYS=key1,key2
 ```
 
 ## Remote Client Configuration
@@ -80,7 +80,7 @@ SESSION_BRIDGE_API_KEYS=key1,key2
 ```json
 {
   "mcpServers": {
-    "session-bridge": {
+    "agentibridge": {
       "url": "http://your-host:8100/sse",
       "headers": {
         "X-API-Key": "your-api-key"
@@ -106,7 +106,7 @@ docker compose up --build -d
 
 ## Security Notes
 
-- Always set `SESSION_BRIDGE_API_KEYS` when exposing SSE transport to a network
+- Always set `AGENTIBRIDGE_API_KEYS` when exposing SSE transport to a network
 - Use HTTPS (reverse proxy) for production deployments
 - API keys are checked against a simple comma-separated list (no hashing)
 - Consider network-level restrictions (firewall, VPN) in addition to API key auth

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-# cloudfared.sh — Idempotent Cloudflare Tunnel setup for Agentic Bridge
+# cloudfared.sh — Idempotent Cloudflare Tunnel setup for AgentiBridge
 #
 # Sets up a named Cloudflare Tunnel pointing at localhost:$PORT
-# so remote MCP clients can reach the session-bridge over HTTPS.
+# so remote MCP clients can reach the agentibridge over HTTPS.
 #
 # Safe to re-run: every step checks before acting.
 #
@@ -27,7 +27,7 @@ err()  { printf "${RED}✖${NC} %s\n" "$*" >&2; }
 hdr()  { printf "\n${CYAN}${BOLD}── %s ──${NC}\n" "$*"; }
 
 # ── Configuration ────────────────────────────────────────────
-PORT="${SESSION_BRIDGE_PORT:-8100}"
+PORT="${AGENTIBRIDGE_PORT:-8100}"
 CONFIG_DIR="${HOME}/.cloudflared"
 CONFIG_FILE="${CONFIG_DIR}/config.yml"
 
@@ -98,8 +98,8 @@ fi
 # ═════════════════════════════════════════════════════════════
 hdr "3/10  Tunnel name"
 
-read -rp "Tunnel name [session-bridge]: " TUNNEL_NAME
-TUNNEL_NAME="${TUNNEL_NAME:-session-bridge}"
+read -rp "Tunnel name [agentibridge]: " TUNNEL_NAME
+TUNNEL_NAME="${TUNNEL_NAME:-agentibridge}"
 ok "Using tunnel name: ${TUNNEL_NAME}"
 
 # ═════════════════════════════════════════════════════════════
@@ -273,7 +273,7 @@ fi
 hdr "10/10  Validation"
 
 info "Checking if tunnel is reachable at https://${HOSTNAME}/health …"
-info "(Make sure session-bridge is running on localhost:${PORT})"
+info "(Make sure agentibridge is running on localhost:${PORT})"
 
 # Give the tunnel a moment to come up if systemd just started it
 sleep 2
@@ -282,7 +282,7 @@ if curl -sf --max-time 10 "https://${HOSTNAME}/health" >/dev/null 2>&1; then
     HEALTH_RESPONSE=$(curl -sf --max-time 10 "https://${HOSTNAME}/health")
     ok "Health check passed: ${HEALTH_RESPONSE}"
 else
-    info "Health check did not succeed (this is expected if session-bridge isn't running yet)"
+    info "Health check did not succeed (this is expected if agentibridge isn't running yet)"
     info "Start the bridge first, then verify with:"
     printf "  ${BOLD}curl https://%s/health${NC}\n" "$HOSTNAME"
 fi
@@ -296,6 +296,6 @@ printf "  Local target: ${BOLD}http://localhost:%s${NC}\n" "$PORT"
 printf "  Config file:  ${BOLD}%s${NC}\n" "$CONFIG_FILE"
 printf "\n"
 printf "  ${CYAN}Next steps:${NC}\n"
-printf "  1. docker compose up --build -d     # start session-bridge\n"
+printf "  1. docker compose up --build -d     # start agentibridge\n"
 printf "  2. curl https://%s/health   # verify\n" "$HOSTNAME"
 printf "\n"

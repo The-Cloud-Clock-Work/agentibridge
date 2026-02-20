@@ -1,10 +1,10 @@
-"""Tests for agentic_bridge.cli module."""
+"""Tests for agentibridge.cli module."""
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from agentic_bridge.cli import (
+from agentibridge.cli import (
     main,
     cmd_version,
     cmd_help,
@@ -21,7 +21,7 @@ class TestCmdVersion:
         args = MagicMock()
         cmd_version(args)
         output = capsys.readouterr().out
-        assert "agentic-bridge" in output
+        assert "agentibridge" in output
         assert "0.2.0" in output
 
 
@@ -42,7 +42,7 @@ class TestCmdHelp:
         cmd_help(args)
         output = capsys.readouterr().out
         assert "REDIS_URL" in output
-        assert "SESSION_BRIDGE_TRANSPORT" in output
+        assert "AGENTIBRIDGE_TRANSPORT" in output
         assert "EMBEDDING_BACKEND" in output
         assert "CLOUDFLARE_TUNNEL_TOKEN" in output
 
@@ -80,15 +80,15 @@ class TestCmdConfig:
         args.generate_env = False
         cmd_config(args)
         output = capsys.readouterr().out
-        assert "SESSION_BRIDGE_TRANSPORT" in output
-        assert "SESSION_BRIDGE_PORT" in output
+        assert "AGENTIBRIDGE_TRANSPORT" in output
+        assert "AGENTIBRIDGE_PORT" in output
 
     def test_generate_env(self, capsys):
         args = MagicMock()
         args.generate_env = True
         cmd_config(args)
         output = capsys.readouterr().out
-        assert "SESSION_BRIDGE_TRANSPORT" in output
+        assert "AGENTIBRIDGE_TRANSPORT" in output
         assert "REDIS_URL" in output
         assert "EMBEDDING_BACKEND" in output
 
@@ -96,13 +96,13 @@ class TestCmdConfig:
 @pytest.mark.unit
 class TestMain:
     def test_no_args_prints_help(self, capsys):
-        with patch("sys.argv", ["agentic-bridge"]):
+        with patch("sys.argv", ["agentibridge"]):
             main()
         output = capsys.readouterr().out
-        assert "agentic-bridge" in output.lower() or "usage" in output.lower()
+        assert "agentibridge" in output.lower() or "usage" in output.lower()
 
     def test_version_command(self, capsys):
-        with patch("sys.argv", ["agentic-bridge", "version"]):
+        with patch("sys.argv", ["agentibridge", "version"]):
             main()
         output = capsys.readouterr().out
         assert "0.2.0" in output
@@ -140,7 +140,7 @@ class TestCmdTunnel:
             mock_result = MagicMock()
             mock_result.returncode = 1
             mock_result.stdout = ""
-            with patch("agentic_bridge.cli.subprocess.run", return_value=mock_result):
+            with patch("agentibridge.cli.subprocess.run", return_value=mock_result):
                 args = MagicMock()
                 cmd_tunnel(args)
         output = capsys.readouterr().out
@@ -167,7 +167,7 @@ class TestCmdTunnel:
             return log_result
 
         with patch("shutil.which", return_value="/usr/bin/docker"):
-            with patch("agentic_bridge.cli.subprocess.run", side_effect=side_effect):
+            with patch("agentibridge.cli.subprocess.run", side_effect=side_effect):
                 args = MagicMock()
                 cmd_tunnel(args)
         output = capsys.readouterr().out
@@ -191,7 +191,7 @@ class TestCmdTunnel:
             return log_result
 
         with patch("shutil.which", return_value="/usr/bin/docker"):
-            with patch("agentic_bridge.cli.subprocess.run", side_effect=side_effect):
+            with patch("agentibridge.cli.subprocess.run", side_effect=side_effect):
                 args = MagicMock()
                 cmd_tunnel(args)
         output = capsys.readouterr().out

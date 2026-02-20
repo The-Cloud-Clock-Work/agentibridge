@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agentic Bridge Docker integration tests.
+"""AgentiBridge Docker integration tests.
 
 Boots the Docker Compose stack, seeds test data, and validates
 all 10 MCP tools across Phases 1-4.
@@ -38,7 +38,7 @@ import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMPOSE_FILE = os.path.join(PROJECT_ROOT, "docker-compose.yml")
-CONTAINER = "session-bridge"
+CONTAINER = "agentibridge"
 
 COMPOSE_ENV = {
     **os.environ,
@@ -61,7 +61,7 @@ def compose(*args, capture=False, check=True):
 
 
 def docker_exec(python_code: str, timeout: int = 30) -> str:
-    """Execute Python code inside the session-bridge container. Returns stdout."""
+    """Execute Python code inside the agentibridge container. Returns stdout."""
     # Wrap code with PYTHONPATH setup
     wrapped = f"import sys; sys.path.insert(0, '/app')\n{python_code}"
     result = subprocess.run(
@@ -110,7 +110,7 @@ def wait_for_redis(max_wait: int = 30):
     print("Waiting for Redis...", end="", flush=True)
     for _ in range(max_wait):
         try:
-            out = docker_exec("from agentic_bridge.redis_client import get_redis; r=get_redis(); print(r.ping())")
+            out = docker_exec("from agentibridge.redis_client import get_redis; r=get_redis(); print(r.ping())")
             if "True" in out:
                 print(" connected")
                 return True
@@ -129,8 +129,8 @@ def wait_for_redis(max_wait: int = 30):
 
 SEED_CODE = """
 import json
-from agentic_bridge.store import SessionStore
-from agentic_bridge.parser import SessionMeta, SessionEntry
+from agentibridge.store import SessionStore
+from agentibridge.parser import SessionMeta, SessionEntry
 
 store = SessionStore()
 
@@ -239,7 +239,7 @@ def test_phase1():
     print("\n[1.1] list_sessions — all")
     out = docker_exec("""
 import json
-from agentic_bridge.server import list_sessions
+from agentibridge.server import list_sessions
 result = json.loads(list_sessions(limit=50))
 print(json.dumps(result))
 """)
@@ -253,7 +253,7 @@ print(json.dumps(result))
     print("\n[1.2] list_sessions — project filter")
     out = docker_exec("""
 import json
-from agentic_bridge.server import list_sessions
+from agentibridge.server import list_sessions
 result = json.loads(list_sessions(project="myapp", limit=50))
 print(json.dumps(result))
 """)
@@ -267,7 +267,7 @@ print(json.dumps(result))
     print("\n[1.3] get_session")
     out = docker_exec("""
 import json
-from agentic_bridge.server import get_session
+from agentibridge.server import get_session
 result = json.loads(get_session(session_id="sb-test-auth-02", last_n=10))
 print(json.dumps(result))
 """)
@@ -282,7 +282,7 @@ print(json.dumps(result))
     print("\n[1.4] get_session_segment")
     out = docker_exec("""
 import json
-from agentic_bridge.server import get_session_segment
+from agentibridge.server import get_session_segment
 result = json.loads(get_session_segment(session_id="sb-test-docker-01", offset=0, limit=3))
 print(json.dumps(result))
 """)
@@ -297,7 +297,7 @@ print(json.dumps(result))
     print("\n[1.5] get_session_actions")
     out = docker_exec("""
 import json
-from agentic_bridge.server import get_session_actions
+from agentibridge.server import get_session_actions
 result = json.loads(get_session_actions(session_id="sb-test-auth-02"))
 print(json.dumps(result))
 """)
@@ -314,7 +314,7 @@ print(json.dumps(result))
     print("\n[1.6] search_sessions — keyword")
     out = docker_exec("""
 import json
-from agentic_bridge.server import search_sessions
+from agentibridge.server import search_sessions
 result = json.loads(search_sessions(query="JWT authentication"))
 print(json.dumps(result))
 """)
@@ -329,7 +329,7 @@ print(json.dumps(result))
     print("\n[1.7] collect_now")
     out = docker_exec("""
 import json
-from agentic_bridge.server import collect_now
+from agentibridge.server import collect_now
 result = json.loads(collect_now())
 print(json.dumps(result))
 """)
@@ -359,7 +359,7 @@ def test_phase2():
     print("\n[2.1] Embedder availability check")
     out = docker_exec("""
 import json
-from agentic_bridge.embeddings import TranscriptEmbedder
+from agentibridge.embeddings import TranscriptEmbedder
 e = TranscriptEmbedder()
 print(json.dumps({"available": e.is_available()}))
 """)
@@ -371,8 +371,8 @@ print(json.dumps({"available": e.is_available()}))
     print("\n[2.2] Transcript chunking")
     out = docker_exec("""
 import json
-from agentic_bridge.embeddings import TranscriptEmbedder
-from agentic_bridge.parser import SessionEntry
+from agentibridge.embeddings import TranscriptEmbedder
+from agentibridge.parser import SessionEntry
 e = TranscriptEmbedder()
 entries = [
     SessionEntry("user", "2025-01-01T00:00:00Z", "Fix the bug"),
@@ -392,7 +392,7 @@ print(json.dumps({"chunks": len(chunks), "texts": [c["text"][:60] for c in chunk
     print("\n[2.3] Cosine similarity (batch)")
     out = docker_exec("""
 import json
-from agentic_bridge.embeddings import _cosine_similarity_batch
+from agentibridge.embeddings import _cosine_similarity_batch
 q = [1.0, 0.0, 0.0]
 vecs = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.7, 0.7, 0.0]]
 scores = _cosine_similarity_batch(q, vecs)
@@ -410,7 +410,7 @@ print(json.dumps({"scores": [round(s, 3) for s in scores]}))
     print("\n[2.4] search_semantic — no embeddings yet")
     out = docker_exec("""
 import json
-from agentic_bridge.server import search_semantic
+from agentibridge.server import search_semantic
 result = json.loads(search_semantic(query="Docker setup"))
 print(json.dumps(result))
 """)
@@ -425,8 +425,8 @@ print(json.dumps(result))
     print("\n[2.5] generate_summary — format check")
     out = docker_exec("""
 import json
-from agentic_bridge.embeddings import TranscriptEmbedder
-from agentic_bridge.parser import SessionEntry
+from agentibridge.embeddings import TranscriptEmbedder
+from agentibridge.parser import SessionEntry
 e = TranscriptEmbedder()
 entries = [
     SessionEntry("user", "T1", "Build a REST API"),
@@ -463,7 +463,7 @@ def test_phase3():
     print("\n[3.1] Auth — no keys configured (pass-through)")
     out = docker_exec("""
 import json
-from agentic_bridge.transport import validate_api_key
+from agentibridge.transport import validate_api_key
 results = {
     "none_key": validate_api_key(None),
     "any_key": validate_api_key("anything"),
@@ -481,9 +481,9 @@ print(json.dumps(results))
     print("\n[3.2] Auth — with API keys")
     out = docker_exec("""
 import os, json
-os.environ["SESSION_BRIDGE_API_KEYS"] = "key-alpha,key-beta"
+os.environ["AGENTIBRIDGE_API_KEYS"] = "key-alpha,key-beta"
 # Reimport to pick up new env
-from agentic_bridge import transport
+from agentibridge import transport
 transport._get_api_keys.__module__  # force module reference
 results = {
     "valid_key": transport.validate_api_key("key-alpha"),
@@ -491,7 +491,7 @@ results = {
     "invalid_key": transport.validate_api_key("wrong-key"),
     "no_key": transport.validate_api_key(None),
 }
-os.environ.pop("SESSION_BRIDGE_API_KEYS", None)
+os.environ.pop("AGENTIBRIDGE_API_KEYS", None)
 print(json.dumps(results))
 """)
     data = json.loads(out.strip().split("\n")[-1])
@@ -506,8 +506,8 @@ print(json.dumps(results))
     print("\n[3.3] Transport config defaults")
     out = docker_exec("""
 import json
-from agentic_bridge.config import SESSION_BRIDGE_TRANSPORT, SESSION_BRIDGE_PORT
-print(json.dumps({"transport": SESSION_BRIDGE_TRANSPORT, "port": SESSION_BRIDGE_PORT}))
+from agentibridge.config import AGENTIBRIDGE_TRANSPORT, AGENTIBRIDGE_PORT
+print(json.dumps({"transport": AGENTIBRIDGE_TRANSPORT, "port": AGENTIBRIDGE_PORT}))
 """)
     data = json.loads(out.strip().split("\n")[-1])
     # In the container, transport is set to "sse" via env
@@ -518,7 +518,7 @@ print(json.dumps({"transport": SESSION_BRIDGE_TRANSPORT, "port": SESSION_BRIDGE_
     print("\n[3.4] SSE transport module loads")
     out = docker_exec("""
 import json
-from agentic_bridge.transport import run_sse_server, validate_api_key
+from agentibridge.transport import run_sse_server, validate_api_key
 print(json.dumps({"run_sse_server": "ok", "validate_api_key": "ok"}))
 """)
     data = json.loads(out.strip().split("\n")[-1])
@@ -547,7 +547,7 @@ def test_phase4():
     print("\n[4.1] restore_session — Docker session")
     out = docker_exec("""
 import json
-from agentic_bridge.server import restore_session
+from agentibridge.server import restore_session
 result = json.loads(restore_session(session_id="sb-test-docker-01", last_n=10))
 print(json.dumps({"success": result["success"], "chars": result.get("char_count", 0), "preview": result.get("context", "")[:200]}))
 """)
@@ -562,7 +562,7 @@ print(json.dumps({"success": result["success"], "chars": result.get("char_count"
     print("\n[4.2] restore_session — content validation")
     out = docker_exec("""
 import json
-from agentic_bridge.server import restore_session
+from agentibridge.server import restore_session
 result = json.loads(restore_session(session_id="sb-test-auth-02", last_n=5))
 ctx = result.get("context", "")
 checks = {
@@ -585,7 +585,7 @@ print(json.dumps(checks))
     print("\n[4.3] restore_session — missing session")
     out = docker_exec("""
 import json
-from agentic_bridge.server import restore_session
+from agentibridge.server import restore_session
 result = json.loads(restore_session(session_id="nonexistent-session"))
 print(json.dumps({"success": result["success"], "error": result.get("error", "")[:100]}))
 """)
@@ -599,7 +599,7 @@ print(json.dumps({"success": result["success"], "error": result.get("error", "")
     print("\n[4.4] dispatch_task — import check")
     out = docker_exec("""
 import json
-from agentic_bridge.dispatch import restore_session_context, dispatch_task
+from agentibridge.dispatch import restore_session_context, dispatch_task
 print(json.dumps({"restore": "ok", "dispatch": "ok"}))
 """)
     data = json.loads(out.strip().split("\n")[-1])
@@ -622,7 +622,7 @@ def cleanup_test_data():
     print("\nCleaning up test data...")
     out = docker_exec("""
 import json
-from agentic_bridge.redis_client import get_redis
+from agentibridge.redis_client import get_redis
 r = get_redis()
 if r is None:
     print(json.dumps({"cleaned": 0}))
@@ -677,7 +677,7 @@ def stop_stack():
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Agentic Bridge Docker integration tests")
+    parser = argparse.ArgumentParser(description="AgentiBridge Docker integration tests")
     parser.add_argument("--start", action="store_true", help="Start stack only")
     parser.add_argument("--stop", action="store_true", help="Stop stack")
     parser.add_argument("--test", action="store_true", help="Run tests only (stack must be running)")

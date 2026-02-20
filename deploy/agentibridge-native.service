@@ -1,11 +1,11 @@
 [Unit]
-Description=Agentic Bridge MCP Server (Native)
+Description=AgentiBridge MCP Server (Native)
 After=network.target redis-server.service
 
 [Service]
 Type=simple
-EnvironmentFile=%h/.config/agentic-bridge/env
-ExecStart=%h/.local/bin/python3 -m agentic_bridge
+EnvironmentFile=%h/.config/agentibridge/env
+ExecStart=%h/.local/bin/python3 -m agentibridge
 WorkingDirectory=%h
 Restart=on-failure
 RestartSec=10

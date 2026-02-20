@@ -1,17 +1,17 @@
 # Connecting Clients
 
-Step-by-step instructions for connecting various AI clients to Agentic Bridge.
+Step-by-step instructions for connecting various AI clients to AgentiBridge.
 
 ## Prerequisites
 
-- Agentic Bridge running with SSE transport (`SESSION_BRIDGE_TRANSPORT=sse`)
+- AgentiBridge running with SSE transport (`AGENTIBRIDGE_TRANSPORT=sse`)
 - Server accessible at `http://HOST:PORT` (default: `http://localhost:8100`)
-- API key configured if using authentication (`SESSION_BRIDGE_API_KEYS`)
+- API key configured if using authentication (`AGENTIBRIDGE_API_KEYS`)
 
 Quick check:
 ```bash
 curl http://localhost:8100/health
-# Should return: {"status": "ok", "service": "session-bridge"}
+# Should return: {"status": "ok", "service": "agentibridge"}
 ```
 
 ## Claude Code CLI
@@ -21,7 +21,7 @@ Add to `~/.mcp.json` (or project-level `.mcp.json`):
 ```json
 {
   "mcpServers": {
-    "session-bridge": {
+    "agentibridge": {
       "url": "http://localhost:8100/sse",
       "headers": {
         "X-API-Key": "your-api-key"
@@ -34,7 +34,7 @@ Add to `~/.mcp.json` (or project-level `.mcp.json`):
 Verify:
 ```bash
 claude --mcp-debug
-# Should show "session-bridge" in the connected servers list
+# Should show "agentibridge" in the connected servers list
 ```
 
 ### Available Tools in Claude Code
@@ -55,7 +55,7 @@ Once connected, Claude Code can use all 10 tools:
 2. In the **Configure** tab, click **Create new action**
 3. Set:
    - **Authentication**: API Key
-   - **API Key**: Your `SESSION_BRIDGE_API_KEYS` value
+   - **API Key**: Your `AGENTIBRIDGE_API_KEYS` value
    - **Auth Type**: Custom Header
    - **Header Name**: `X-API-Key`
 4. Import the OpenAPI schema from your server, or manually configure the SSE endpoint URL
@@ -65,7 +65,7 @@ Once connected, Claude Code can use all 10 tools:
 ```yaml
 openapi: 3.0.0
 info:
-  title: Agentic Bridge
+  title: AgentiBridge
   version: 0.2.0
 servers:
   - url: http://your-host:8100
@@ -87,7 +87,7 @@ Claude.ai supports connecting to remote MCP servers:
 
 1. Go to **Settings** → **MCP Servers** → **Add Server**
 2. Enter:
-   - **Name**: Agentic Bridge
+   - **Name**: AgentiBridge
    - **URL**: `http://your-host:8100/sse`
    - **Headers**: `X-API-Key: your-api-key`
 
@@ -131,7 +131,7 @@ async with sse_client(
 - If behind a firewall, ensure port 8100 is allowed
 
 ### 401 Unauthorized
-- Check your API key matches one in `SESSION_BRIDGE_API_KEYS`
+- Check your API key matches one in `AGENTIBRIDGE_API_KEYS`
 - Verify the header name is `X-API-Key` (case-insensitive)
 - Try with `?api_key=your-key` as a query parameter
 
@@ -141,6 +141,6 @@ async with sse_client(
 - Verify the server isn't running out of memory
 
 ### No sessions found
-- Run `agentic-bridge status` to check transcript directory
+- Run `agentibridge status` to check transcript directory
 - Trigger collection: call the `collect_now` tool
 - Verify `~/.claude/projects/` contains `.jsonl` files

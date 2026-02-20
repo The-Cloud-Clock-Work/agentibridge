@@ -1,20 +1,20 @@
 """HTTP transport with API key authentication for remote access.
 
-Enables the session-bridge MCP server to be accessed remotely via
+Enables the AgentiBridge MCP server to be accessed remotely via
 streamable HTTP (/mcp endpoint), with API key validation.
 Legacy SSE transport (/sse) is also supported for backward compatibility.
 
 Usage:
-    SESSION_BRIDGE_TRANSPORT=sse SESSION_BRIDGE_PORT=8100 python -m agentic_bridge
+    AGENTIBRIDGE_TRANSPORT=sse AGENTIBRIDGE_PORT=8100 python -m agentibridge
 
 Remote clients connect via:
     {"url": "http://host:8100/mcp", "headers": {"X-API-Key": "your-key"}}
 
 Environment:
-    SESSION_BRIDGE_TRANSPORT  — "stdio" (default) or "sse"
-    SESSION_BRIDGE_HOST       — Bind address (default: 127.0.0.1)
-    SESSION_BRIDGE_PORT       — HTTP port (default: 8100)
-    SESSION_BRIDGE_API_KEYS   — Comma-separated valid API keys (empty = no auth)
+    AGENTIBRIDGE_TRANSPORT  — "stdio" (default) or "sse"
+    AGENTIBRIDGE_HOST       — Bind address (default: 127.0.0.1)
+    AGENTIBRIDGE_PORT       — HTTP port (default: 8100)
+    AGENTIBRIDGE_API_KEYS   — Comma-separated valid API keys (empty = no auth)
 """
 
 import json
@@ -22,7 +22,7 @@ import os
 import sys
 from typing import List, Optional
 
-from agentic_bridge.logging import log
+from agentibridge.logging import log
 
 
 # =============================================================================
@@ -32,7 +32,7 @@ from agentic_bridge.logging import log
 
 def _get_api_keys() -> List[str]:
     """Load valid API keys from environment."""
-    raw = os.getenv("SESSION_BRIDGE_API_KEYS", "")
+    raw = os.getenv("AGENTIBRIDGE_API_KEYS", "")
     if not raw.strip():
         return []
     return [k.strip() for k in raw.split(",") if k.strip()]
@@ -219,7 +219,7 @@ class OAuthCompatAuthMiddleware:
 
 async def _health_endpoint(scope, receive, send):
     """Lightweight /health ASGI endpoint."""
-    body = json.dumps({"status": "ok", "service": "session-bridge"}).encode()
+    body = json.dumps({"status": "ok", "service": "agentibridge"}).encode()
     await send(
         {
             "type": "http.response.start",

@@ -1,9 +1,9 @@
-# Lightweight standalone image for the Agentic Bridge MCP server.
+# Lightweight standalone image for the AgentiBridge MCP server.
 # Indexes Claude CLI transcripts from ~/.claude/projects/ and serves
 # them via SSE/HTTP for remote MCP clients.
 #
 # Build:
-#   docker build -t agentic-bridge .
+#   docker build -t agentibridge .
 #
 # ~200MB vs ~1.5GB for the full agent image (no Claude CLI, Node, AWS CLI, gh).
 
@@ -19,7 +19,7 @@ RUN useradd -m -u 1000 -s /bin/bash appuser
 
 WORKDIR /app
 
-# Install Python dependencies (pinned to what agentic-bridge actually needs)
+# Install Python dependencies (pinned to what agentibridge actually needs)
 RUN pip install --no-cache-dir \
     "fastmcp>=2.0" \
     "redis>=7.0" \
@@ -27,8 +27,8 @@ RUN pip install --no-cache-dir \
     "httpx>=0.25" \
     "anthropic>=0.40"
 
-# Copy agentic_bridge package
-COPY --chown=appuser:appuser agentic_bridge/ ./agentic_bridge/
+# Copy agentibridge package
+COPY --chown=appuser:appuser agentibridge/ ./agentibridge/
 
 # Create log directory
 RUN mkdir -p /app/logs && chown appuser:appuser /app/logs
@@ -44,13 +44,13 @@ EXPOSE 8100
 
 # Environment defaults
 ENV PYTHONPATH=/app \
-    SESSION_BRIDGE_TRANSPORT=sse \
-    SESSION_BRIDGE_HOST=0.0.0.0 \
-    SESSION_BRIDGE_PORT=8100 \
-    SESSION_BRIDGE_POLL_INTERVAL=60
+    AGENTIBRIDGE_TRANSPORT=sse \
+    AGENTIBRIDGE_HOST=0.0.0.0 \
+    AGENTIBRIDGE_PORT=8100 \
+    AGENTIBRIDGE_POLL_INTERVAL=60
 
 # Health check against /health (unauthenticated)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://localhost:8100/health || exit 1
 
-CMD ["python3", "-m", "agentic_bridge"]
+CMD ["python3", "-m", "agentibridge"]

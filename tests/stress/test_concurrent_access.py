@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from agentic_bridge.parser import parse_transcript_entries
-from agentic_bridge.store import SessionStore
+from agentibridge.parser import parse_transcript_entries
+from agentibridge.store import SessionStore
 
 
 @pytest.mark.stress

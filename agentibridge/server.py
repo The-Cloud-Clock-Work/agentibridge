@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Agentic Bridge MCP Server.
+"""AgentiBridge MCP Server.
 
 Indexes and exposes ALL Claude Code CLI transcripts from
 ~/.claude/projects/ via MCP tools. Background collector polls
 for new data; all tools work with Redis or filesystem fallback.
 
 Usage:
-    python -m agentic_bridge
+    python -m agentibridge
 
 Available tools:
     Phase 1 — Foundation:
@@ -31,7 +31,7 @@ from typing import Dict
 
 from mcp.server.fastmcp import FastMCP
 
-from agentic_bridge.logging import log
+from agentibridge.logging import log
 
 _SUMMARY_TRUNCATE_LENGTH = 200
 
@@ -47,7 +47,7 @@ def _build_oauth_config():
     if not issuer:
         return None, None
 
-    from agentic_bridge.oauth_provider import BridgeOAuthProvider
+    from agentibridge.oauth_provider import BridgeOAuthProvider
 
     try:
         from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
@@ -84,9 +84,9 @@ def _build_oauth_config():
 _oauth_provider, _oauth_settings = _build_oauth_config()
 
 mcp = FastMCP(
-    "session-bridge",
-    host=os.getenv("SESSION_BRIDGE_HOST", "127.0.0.1"),
-    port=int(os.getenv("SESSION_BRIDGE_PORT", "8100")),
+    "agentibridge",
+    host=os.getenv("AGENTIBRIDGE_HOST", "127.0.0.1"),
+    port=int(os.getenv("AGENTIBRIDGE_PORT", "8100")),
     json_response=True,
     auth_server_provider=_oauth_provider,
     auth=_oauth_settings,
@@ -101,7 +101,7 @@ _embedder = None
 def _get_store():
     global _store
     if _store is None:
-        from agentic_bridge.store import SessionStore
+        from agentibridge.store import SessionStore
 
         _store = SessionStore()
     return _store
@@ -110,7 +110,7 @@ def _get_store():
 def _get_collector():
     global _collector
     if _collector is None:
-        from agentic_bridge.collector import SessionCollector
+        from agentibridge.collector import SessionCollector
 
         _collector = SessionCollector(_get_store())
         _collector.start()
@@ -120,7 +120,7 @@ def _get_collector():
 def _get_embedder():
     global _embedder
     if _embedder is None:
-        from agentic_bridge.embeddings import TranscriptEmbedder
+        from agentibridge.embeddings import TranscriptEmbedder
 
         _embedder = TranscriptEmbedder()
     return _embedder
@@ -510,7 +510,7 @@ def restore_session(
         JSON with formatted context string ready for injection
     """
     try:
-        from agentic_bridge.dispatch import restore_session_context
+        from agentibridge.dispatch import restore_session_context
 
         context = restore_session_context(session_id, last_n=last_n)
 
@@ -552,7 +552,7 @@ def dispatch_task(
         JSON with dispatch result
     """
     try:
-        from agentic_bridge.dispatch import dispatch_task as _dispatch
+        from agentibridge.dispatch import dispatch_task as _dispatch
 
         result = _dispatch(
             task_description=task_description,
@@ -575,8 +575,8 @@ def dispatch_task(
 
 
 def main():
-    """Run the session-bridge MCP server."""
-    print("Starting session-bridge MCP server...", file=sys.stderr)
+    """Run the AgentiBridge MCP server."""
+    print("Starting AgentiBridge MCP server...", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
     available_tools = mcp._tool_manager.list_tools()
@@ -586,9 +586,9 @@ def main():
 
     print("=" * 60, file=sys.stderr)
 
-    transport = os.getenv("SESSION_BRIDGE_TRANSPORT", "stdio")
+    transport = os.getenv("AGENTIBRIDGE_TRANSPORT", "stdio")
     if transport == "sse":
-        from agentic_bridge.transport import run_sse_server
+        from agentibridge.transport import run_sse_server
 
         print(f"Starting SSE transport on {mcp.settings.host}:{mcp.settings.port}...", file=sys.stderr)
         run_sse_server(mcp)

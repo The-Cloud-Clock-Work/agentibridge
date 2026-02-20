@@ -12,13 +12,13 @@ from pathlib import Path
 from time import time
 from typing import Optional
 
-from agentic_bridge.logging import log
-from agentic_bridge.parser import (
+from agentibridge.logging import log
+from agentibridge.parser import (
     parse_transcript_entries,
     parse_transcript_meta,
     scan_projects_dir,
 )
-from agentic_bridge.store import SessionStore
+from agentibridge.store import SessionStore
 
 
 class SessionCollector:
@@ -26,10 +26,10 @@ class SessionCollector:
 
     def __init__(self, store: SessionStore) -> None:
         self._store = store
-        self._interval = int(os.getenv("SESSION_BRIDGE_POLL_INTERVAL", "60"))
+        self._interval = int(os.getenv("AGENTIBRIDGE_POLL_INTERVAL", "60"))
         self._projects_dir = Path(
             os.getenv(
-                "SESSION_BRIDGE_PROJECTS_DIR",
+                "AGENTIBRIDGE_PROJECTS_DIR",
                 str(Path.home() / ".claude" / "projects"),
             )
         )

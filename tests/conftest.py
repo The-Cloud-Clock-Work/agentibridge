@@ -1,4 +1,4 @@
-"""Shared test fixtures for agentic-bridge."""
+"""Shared test fixtures for agentibridge."""
 
 import json
 import shutil
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_bridge.parser import SessionEntry, SessionMeta
+from agentibridge.parser import SessionEntry, SessionMeta
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def mock_redis():
 
     fake = fakeredis.FakeRedis(decode_responses=True)
 
-    import agentic_bridge.redis_client as rc
+    import agentibridge.redis_client as rc
 
     original_client = rc._redis_client
     original_checked = rc._redis_checked
@@ -180,8 +180,8 @@ def mock_redis():
 @pytest.fixture
 def reset_singletons():
     """Reset module-level singletons used by server.py and completions.py."""
-    import agentic_bridge.server as srv
-    import agentic_bridge.completions as comp
+    import agentibridge.server as srv
+    import agentibridge.completions as comp
 
     # Save
     old_store = srv._store

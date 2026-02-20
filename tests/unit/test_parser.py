@@ -1,11 +1,11 @@
-"""Unit tests for agentic_bridge.parser module."""
+"""Unit tests for agentibridge.parser module."""
 
 import json
 from pathlib import Path
 
 import pytest
 
-from agentic_bridge.parser import (
+from agentibridge.parser import (
     SessionEntry,
     SessionMeta,
     decode_project_path,

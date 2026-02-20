@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# E2E MCP Smoke Test — verifies all session-bridge MCP tools via claude CLI
+# E2E MCP Smoke Test — verifies all AgentiBridge MCP tools via claude CLI
 #
 # Usage:
 #   ./tests/e2e/test_mcp_smoke.sh
 #
 # Prerequisites:
 #   - claude CLI installed and on PATH
-#   - .mcp.json in project root with session-bridge config
-#   - session-bridge reachable (Docker Compose + tunnel, or local)
+#   - .mcp.json in project root with agentibridge config
+#   - agentibridge reachable (Docker Compose + tunnel, or local)
 #
 # Each test calls `claude -p` targeting one MCP tool and checks the result.
 
@@ -40,16 +40,16 @@ if [[ ! -f .mcp.json ]]; then
 fi
 
 # Extract health URL from .mcp.json (replace /mcp with /health)
-MCP_URL=$(jq -r '.mcpServers["session-bridge"].url' .mcp.json)
+MCP_URL=$(jq -r '.mcpServers["agentibridge"].url' .mcp.json)
 HEALTH_URL="${MCP_URL%/mcp}/health"
-API_KEY=$(jq -r '.mcpServers["session-bridge"].headers["X-API-Key"] // empty' .mcp.json)
+API_KEY=$(jq -r '.mcpServers["agentibridge"].headers["X-API-Key"] // empty' .mcp.json)
 
-echo "Checking session-bridge health at ${HEALTH_URL} ..."
+echo "Checking agentibridge health at ${HEALTH_URL} ..."
 HEALTH_ARGS=(-sf --max-time 10)
 [[ -n "$API_KEY" ]] && HEALTH_ARGS+=(-H "X-API-Key: ${API_KEY}")
 
 if ! curl "${HEALTH_ARGS[@]}" "$HEALTH_URL" >/dev/null 2>&1; then
-  echo "ABORT: session-bridge not reachable at ${HEALTH_URL}"
+  echo "ABORT: agentibridge not reachable at ${HEALTH_URL}"
   exit 1
 fi
 echo "Health check OK"

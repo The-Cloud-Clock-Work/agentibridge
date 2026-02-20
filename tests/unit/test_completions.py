@@ -1,10 +1,10 @@
-"""Tests for agentic_bridge.completions module."""
+"""Tests for agentibridge.completions module."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentic_bridge.completions import CompletionsClient, CompletionResult, call_completions
+from agentibridge.completions import CompletionsClient, CompletionResult, call_completions
 
 
 @pytest.mark.unit

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-**Agentic Bridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 10 MCP tools. It was extracted from the [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) project to run independently.
+**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 10 MCP tools. It was extracted from the [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) project to run independently.
 
 ## Build & Development
 
@@ -13,20 +13,20 @@ This file provides guidance to Claude Code when working with this repository.
 pip install -e .
 
 # Run locally (stdio transport — for Claude Code CLI)
-python -m agentic_bridge
+python -m agentibridge
 
 # Run with SSE transport (for remote MCP clients)
-SESSION_BRIDGE_TRANSPORT=sse python -m agentic_bridge
+AGENTIBRIDGE_TRANSPORT=sse python -m agentibridge
 
 # Docker (full stack with Redis)
 docker compose up --build -d
 
 # Run unit tests
-pytest tests/unit -v -m unit --cov=agentic_bridge
+pytest tests/unit -v -m unit --cov=agentibridge
 
 # Lint + format
-ruff check agentic_bridge/ tests/
-ruff format --check agentic_bridge/ tests/
+ruff check agentibridge/ tests/
+ruff format --check agentibridge/ tests/
 
 # Run integration tests (requires Docker)
 python tests/integration/test_docker.py --start
@@ -34,9 +34,9 @@ python tests/integration/test_docker.py --test
 python tests/integration/test_docker.py --stop
 
 # CLI
-agentic-bridge version
-agentic-bridge status
-agentic-bridge help
+agentibridge version
+agentibridge status
+agentibridge help
 ```
 
 ## Architecture
@@ -67,35 +67,35 @@ agentic-bridge help
 
 | Module | Purpose |
 |--------|---------|
-| `agentic_bridge/server.py` | FastMCP server with 10 tools |
-| `agentic_bridge/parser.py` | Pure-function JSONL transcript parser |
-| `agentic_bridge/store.py` | SessionStore (Redis + filesystem fallback) |
-| `agentic_bridge/collector.py` | Background polling daemon |
-| `agentic_bridge/transport.py` | SSE/HTTP transport + API key auth |
-| `agentic_bridge/embeddings.py` | Semantic search (Phase 2) |
-| `agentic_bridge/dispatch.py` | Session restore + task dispatch (Phase 4) |
-| `agentic_bridge/completions.py` | Completions API client |
-| `agentic_bridge/redis_client.py` | Redis helper |
-| `agentic_bridge/config.py` | Configuration with validation |
-| `agentic_bridge/cli.py` | CLI helper tool (status/connect/install) |
-| `agentic_bridge/logging.py` | Structured JSON logging |
+| `agentibridge/server.py` | FastMCP server with 10 tools |
+| `agentibridge/parser.py` | Pure-function JSONL transcript parser |
+| `agentibridge/store.py` | SessionStore (Redis + filesystem fallback) |
+| `agentibridge/collector.py` | Background polling daemon |
+| `agentibridge/transport.py` | SSE/HTTP transport + API key auth |
+| `agentibridge/embeddings.py` | Semantic search (Phase 2) |
+| `agentibridge/dispatch.py` | Session restore + task dispatch (Phase 4) |
+| `agentibridge/completions.py` | Completions API client |
+| `agentibridge/redis_client.py` | Redis helper |
+| `agentibridge/config.py` | Configuration with validation |
+| `agentibridge/cli.py` | CLI helper tool (status/connect/install) |
+| `agentibridge/logging.py` | Structured JSON logging |
 
 ## Key Environment Variables
 
 ```bash
 # Redis
 REDIS_URL=redis://redis:6379/0
-REDIS_KEY_PREFIX=agenticore
+REDIS_KEY_PREFIX=agentibridge
 
 # Transport
-SESSION_BRIDGE_TRANSPORT=stdio    # or "sse"
-SESSION_BRIDGE_HOST=0.0.0.0
-SESSION_BRIDGE_PORT=8100
-SESSION_BRIDGE_API_KEYS=          # comma-separated, empty = no auth
+AGENTIBRIDGE_TRANSPORT=stdio    # or "sse"
+AGENTIBRIDGE_HOST=0.0.0.0
+AGENTIBRIDGE_PORT=8100
+AGENTIBRIDGE_API_KEYS=          # comma-separated, empty = no auth
 
 # Collector
-SESSION_BRIDGE_POLL_INTERVAL=60
-SESSION_BRIDGE_MAX_ENTRIES=500
+AGENTIBRIDGE_POLL_INTERVAL=60
+AGENTIBRIDGE_MAX_ENTRIES=500
 
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true
@@ -122,7 +122,7 @@ CLAUDE_HOOK_LOG_ENABLED=true
 ## Redis + File Fallback Pattern
 
 All stateful operations follow a consistent pattern:
-1. Try Redis via `agentic_bridge.redis_client` (`get_redis()` returns client or `None`)
+1. Try Redis via `agentibridge.redis_client` (`get_redis()` returns client or `None`)
 2. Fall back to reading directly from `~/.claude/projects/` JSONL files
 3. Redis keys are namespaced: `{REDIS_KEY_PREFIX}:sb:{key}`
 

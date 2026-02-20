@@ -1,4 +1,4 @@
-"""OAuth 2.1 Authorization Server Provider for Agentic Bridge.
+"""OAuth 2.1 Authorization Server Provider for AgentiBridge.
 
 Implements the MCP OAuthAuthorizationServerProvider protocol with in-memory
 storage. Enables claude.ai to connect via OAuth 2.1 (authorization_code + PKCE)
@@ -24,7 +24,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from agentic_bridge.logging import log
+from agentibridge.logging import log
 
 # Token TTLs
 _AUTH_CODE_TTL = 300  # 5 minutes
@@ -257,7 +257,7 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
             return at
 
         # Fallback: treat the token as an API key
-        raw = os.getenv("SESSION_BRIDGE_API_KEYS", "")
+        raw = os.getenv("AGENTIBRIDGE_API_KEYS", "")
         if raw.strip():
             api_keys = [k.strip() for k in raw.split(",") if k.strip()]
             if token in api_keys:

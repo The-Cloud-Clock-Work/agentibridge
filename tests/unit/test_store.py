@@ -1,11 +1,11 @@
-"""Tests for agentic_bridge.store module."""
+"""Tests for agentibridge.store module."""
 
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from agentic_bridge.store import SessionStore, _escape_redis_glob, _filepath_hash, _rkey
+from agentibridge.store import SessionStore, _escape_redis_glob, _filepath_hash, _rkey
 
 # Re-use conftest helpers
 from tests.conftest import make_entry, make_meta
@@ -226,7 +226,7 @@ class TestRedisMaxEntriesTrimming:
         _force_redis(store, mock_redis)
 
         # Patch _MAX_ENTRIES to a small value for testing
-        with patch("agentic_bridge.store._MAX_ENTRIES", 5):
+        with patch("agentibridge.store._MAX_ENTRIES", 5):
             entries = [make_entry("user", content=f"Message {i}", uuid=f"u{i}") for i in range(10)]
             store.add_entries("s1", entries)
 
@@ -823,7 +823,7 @@ class TestSessionStoreInit:
         assert store._projects_dir == expected
 
     def test_custom_projects_dir_via_env(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("SESSION_BRIDGE_PROJECTS_DIR", str(tmp_path))
+        monkeypatch.setenv("AGENTIBRIDGE_PROJECTS_DIR", str(tmp_path))
         store = SessionStore()
         assert store._projects_dir == tmp_path
 
@@ -845,7 +845,7 @@ class TestRedisLazyConnection:
     def test_get_redis_returns_none_on_import_error(self):
         store = SessionStore()
 
-        with patch("agentic_bridge.store.SessionStore._get_redis", return_value=None):
+        with patch("agentibridge.store.SessionStore._get_redis", return_value=None):
             result = store._get_redis()
             assert result is None
 

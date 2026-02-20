@@ -98,7 +98,7 @@ def scan_projects_dir(base_dir: Optional[Path] = None) -> List[Tuple[str, str, P
     if base_dir is None:
         base_dir = Path(
             os.getenv(
-                "SESSION_BRIDGE_PROJECTS_DIR",
+                "AGENTIBRIDGE_PROJECTS_DIR",
                 str(Path.home() / ".claude" / "projects"),
             )
         )

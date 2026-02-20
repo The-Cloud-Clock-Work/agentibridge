@@ -84,7 +84,7 @@ jobs:
           fi
           echo "MCP server: ${MCP_URL}"
           jq -n --arg url "$MCP_URL" --arg key "$MCP_API_KEY" \
-            '{mcpServers:{"session-bridge":{type:"http",url:$url,headers:{"X-API-Key":$key}}}}' \
+            '{mcpServers:{"agentibridge":{type:"http",url:$url,headers:{"X-API-Key":$key}}}}' \
             > .mcp.json
 
       # ── Run smoke tests ─────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""Unit tests for agentic_bridge.embeddings module.
+"""Unit tests for agentibridge.embeddings module.
 
 Tests cosine similarity, embedding backend selection, TranscriptEmbedder
 chunk/text building, and availability checks.
@@ -8,8 +8,8 @@ import math
 
 import pytest
 
-from agentic_bridge.parser import SessionEntry
-from agentic_bridge.embeddings import (
+from agentibridge.parser import SessionEntry
+from agentibridge.embeddings import (
     _cosine_similarity,
     _cosine_similarity_batch,
     _get_embed_fn,
@@ -233,7 +233,7 @@ class TestGetEmbedFn:
 
     def test_ollama_backend(self, monkeypatch):
         """When EMBEDDING_BACKEND=ollama, returns _embed_ollama."""
-        from agentic_bridge.embeddings import _embed_ollama
+        from agentibridge.embeddings import _embed_ollama
 
         monkeypatch.setenv("EMBEDDING_BACKEND", "ollama")
         fn = _get_embed_fn()
@@ -241,7 +241,7 @@ class TestGetEmbedFn:
 
     def test_ollama_backend_case_insensitive(self, monkeypatch):
         """EMBEDDING_BACKEND is case-insensitive."""
-        from agentic_bridge.embeddings import _embed_ollama
+        from agentibridge.embeddings import _embed_ollama
 
         monkeypatch.setenv("EMBEDDING_BACKEND", "OLLAMA")
         fn = _get_embed_fn()
@@ -249,7 +249,7 @@ class TestGetEmbedFn:
 
     def test_bedrock_backend(self, monkeypatch):
         """When EMBEDDING_BACKEND=bedrock, returns _embed_bedrock."""
-        from agentic_bridge.embeddings import _embed_bedrock
+        from agentibridge.embeddings import _embed_bedrock
 
         monkeypatch.setenv("EMBEDDING_BACKEND", "bedrock")
         fn = _get_embed_fn()
@@ -257,7 +257,7 @@ class TestGetEmbedFn:
 
     def test_bedrock_backend_case_insensitive(self, monkeypatch):
         """EMBEDDING_BACKEND=Bedrock is recognized."""
-        from agentic_bridge.embeddings import _embed_bedrock
+        from agentibridge.embeddings import _embed_bedrock
 
         monkeypatch.setenv("EMBEDDING_BACKEND", "Bedrock")
         fn = _get_embed_fn()

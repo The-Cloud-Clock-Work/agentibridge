@@ -12,7 +12,7 @@ from pathlib import Path
 from time import time
 from typing import List, Optional
 
-from agentic_bridge.parser import (
+from agentibridge.parser import (
     SessionEntry,
     SessionMeta,
     decode_project_path,
@@ -22,8 +22,8 @@ from agentic_bridge.parser import (
 )
 
 
-_KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
-_MAX_ENTRIES: int = int(os.getenv("SESSION_BRIDGE_MAX_ENTRIES", "500"))
+_KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
+_MAX_ENTRIES: int = int(os.getenv("AGENTIBRIDGE_MAX_ENTRIES", "500"))
 
 
 def _rkey(suffix: str) -> str:
@@ -51,7 +51,7 @@ class SessionStore:
         self._redis_checked = False
         self._projects_dir = Path(
             os.getenv(
-                "SESSION_BRIDGE_PROJECTS_DIR",
+                "AGENTIBRIDGE_PROJECTS_DIR",
                 str(Path.home() / ".claude" / "projects"),
             )
         )
@@ -65,7 +65,7 @@ class SessionStore:
             return self._redis
         self._redis_checked = True
         try:
-            from agentic_bridge.redis_client import get_redis
+            from agentibridge.redis_client import get_redis
 
             self._redis = get_redis()
         except Exception:
@@ -413,8 +413,8 @@ class SessionStore:
 
     _POS_DIR = Path(
         os.getenv(
-            "SESSION_BRIDGE_POSITIONS_DIR",
-            str(Path.home() / ".cache" / "agentic-bridge" / "positions"),
+            "AGENTIBRIDGE_POSITIONS_DIR",
+            str(Path.home() / ".cache" / "agentibridge" / "positions"),
         )
     )
 

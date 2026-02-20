@@ -1,17 +1,17 @@
-"""CLI helper tool for agentic-bridge.
+"""CLI helper tool for agentibridge.
 
 Provides commands for status, config, connection strings, and service management.
 
 Usage:
-    agentic-bridge status     — Check if running, Redis connectivity, session count
-    agentic-bridge help       — Available MCP tools and configuration reference
-    agentic-bridge connect    — Connection strings for Claude Code, ChatGPT, etc.
-    agentic-bridge config     — Current config dump / generate .env template
-    agentic-bridge tunnel     — Cloudflare Tunnel status and URL
-    agentic-bridge locks      — Show Redis keys, file locks, and bridge resource state
-    agentic-bridge install    — Install as systemd user service
-    agentic-bridge uninstall  — Remove systemd service
-    agentic-bridge version    — Print version
+    agentibridge status     — Check if running, Redis connectivity, session count
+    agentibridge help       — Available MCP tools and configuration reference
+    agentibridge connect    — Connection strings for Claude Code, ChatGPT, etc.
+    agentibridge config     — Current config dump / generate .env template
+    agentibridge tunnel     — Cloudflare Tunnel status and URL
+    agentibridge locks      — Show Redis keys, file locks, and bridge resource state
+    agentibridge install    — Install as systemd user service
+    agentibridge uninstall  — Remove systemd service
+    agentibridge version    — Print version
 """
 
 import argparse
@@ -25,7 +25,7 @@ from pathlib import Path
 
 
 def _version() -> str:
-    from agentic_bridge import __version__
+    from agentibridge import __version__
 
     return __version__
 
@@ -36,18 +36,18 @@ def _version() -> str:
 
 
 def cmd_version(args: argparse.Namespace) -> None:
-    print(f"agentic-bridge {_version()}")
+    print(f"agentibridge {_version()}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
-    print(f"Agentic Bridge v{_version()}")
+    print(f"AgentiBridge v{_version()}")
     print("=" * 50)
 
     # Check systemd service
     print("\n[Service]")
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "is-active", "agentic-bridge"],
+            ["systemctl", "--user", "is-active", "agentibridge"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -60,7 +60,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     # Check Docker
     try:
         result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Status}}", "session-bridge"],
+            ["docker", "inspect", "-f", "{{.State.Status}}", "agentibridge"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -75,14 +75,14 @@ def cmd_status(args: argparse.Namespace) -> None:
     # Check Redis
     print("\n[Redis]")
     try:
-        from agentic_bridge.redis_client import get_redis
+        from agentibridge.redis_client import get_redis
 
         r = get_redis()
         if r is not None:
             r.ping()
             print("  status: connected")
             # Count sessions
-            from agentic_bridge.store import _rkey
+            from agentibridge.store import _rkey
 
             count = r.zcard(_rkey("idx:all"))
             print(f"  sessions indexed: {count}")
@@ -96,7 +96,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print("\n[Tunnel]")
     try:
         result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Status}}", "session-bridge-tunnel"],
+            ["docker", "inspect", "-f", "{{.State.Status}}", "agentibridge-tunnel"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -107,7 +107,7 @@ def cmd_status(args: argparse.Namespace) -> None:
             if tunnel_status == "running":
                 # Try to extract quick tunnel URL from logs
                 log_result = subprocess.run(
-                    ["docker", "logs", "--tail", "50", "session-bridge-tunnel"],
+                    ["docker", "logs", "--tail", "50", "agentibridge-tunnel"],
                     capture_output=True,
                     text=True,
                     timeout=5,
@@ -131,7 +131,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print("\n[Transcripts]")
     projects_dir = Path(
         os.getenv(
-            "SESSION_BRIDGE_PROJECTS_DIR",
+            "AGENTIBRIDGE_PROJECTS_DIR",
             str(Path.home() / ".claude" / "projects"),
         )
     )
@@ -143,13 +143,13 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"  directory: {projects_dir} (not found)")
 
     print("\n[Config]")
-    print(f"  transport: {os.getenv('SESSION_BRIDGE_TRANSPORT', 'stdio')}")
-    print(f"  port: {os.getenv('SESSION_BRIDGE_PORT', '8100')}")
-    print(f"  poll interval: {os.getenv('SESSION_BRIDGE_POLL_INTERVAL', '60')}s")
+    print(f"  transport: {os.getenv('AGENTIBRIDGE_TRANSPORT', 'stdio')}")
+    print(f"  port: {os.getenv('AGENTIBRIDGE_PORT', '8100')}")
+    print(f"  poll interval: {os.getenv('AGENTIBRIDGE_POLL_INTERVAL', '60')}s")
 
 
 def cmd_help(args: argparse.Namespace) -> None:
-    print(f"Agentic Bridge v{_version()} — Claude CLI Transcript MCP Server")
+    print(f"AgentiBridge v{_version()} — Claude CLI Transcript MCP Server")
     print("=" * 60)
     print()
     print("MCP TOOLS (10 total)")
@@ -175,34 +175,34 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("-" * 60)
     print()
     print("  REDIS_URL                       Redis connection URL")
-    print("  SESSION_BRIDGE_TRANSPORT        stdio or sse (default: stdio)")
-    print("  SESSION_BRIDGE_HOST             Bind address (default: 127.0.0.1)")
-    print("  SESSION_BRIDGE_PORT             HTTP port (default: 8100)")
-    print("  SESSION_BRIDGE_API_KEYS         Comma-separated API keys")
-    print("  SESSION_BRIDGE_POLL_INTERVAL    Poll interval in seconds (default: 60)")
-    print("  SESSION_BRIDGE_MAX_ENTRIES      Max entries per session (default: 500)")
-    print("  SESSION_BRIDGE_PROJECTS_DIR     Claude projects directory")
-    print("  EMBEDDING_BACKEND              ollama or bedrock (optional)")
-    print("  AGENTIC_BRIDGE_SUMMARY_MODEL   Model for summaries (default: claude-sonnet-4-5-20250929)")
-    print("  CLOUDFLARE_TUNNEL_TOKEN        Token for named Cloudflare Tunnel (optional)")
+    print("  AGENTIBRIDGE_TRANSPORT          stdio or sse (default: stdio)")
+    print("  AGENTIBRIDGE_HOST               Bind address (default: 127.0.0.1)")
+    print("  AGENTIBRIDGE_PORT               HTTP port (default: 8100)")
+    print("  AGENTIBRIDGE_API_KEYS           Comma-separated API keys")
+    print("  AGENTIBRIDGE_POLL_INTERVAL      Poll interval in seconds (default: 60)")
+    print("  AGENTIBRIDGE_MAX_ENTRIES        Max entries per session (default: 500)")
+    print("  AGENTIBRIDGE_PROJECTS_DIR       Claude projects directory")
+    print("  EMBEDDING_BACKEND               ollama or bedrock (optional)")
+    print("  AGENTIBRIDGE_SUMMARY_MODEL      Model for summaries (default: claude-sonnet-4-5-20250929)")
+    print("  CLOUDFLARE_TUNNEL_TOKEN         Token for named Cloudflare Tunnel (optional)")
     print()
     print("USAGE")
     print("-" * 60)
     print()
-    print("  Local (stdio):   python -m agentic_bridge")
-    print("  Remote (SSE):    SESSION_BRIDGE_TRANSPORT=sse python -m agentic_bridge")
+    print("  Local (stdio):   python -m agentibridge")
+    print("  Remote (SSE):    AGENTIBRIDGE_TRANSPORT=sse python -m agentibridge")
     print("  Docker:          docker compose up --build -d")
     print("  Tunnel:          docker compose --profile tunnel up -d")
     print(
-        "  All-in-one:      docker run -d -p 8100:8100 -v ~/.claude/projects:/home/appuser/.claude/projects:ro agentic-bridge:allinone"
+        "  All-in-one:      docker run -d -p 8100:8100 -v ~/.claude/projects:/home/appuser/.claude/projects:ro agentibridge:allinone"
     )
     print()
-    print("Run 'agentic-bridge connect' for client connection strings.")
+    print("Run 'agentibridge connect' for client connection strings.")
 
 
 def cmd_connect(args: argparse.Namespace) -> None:
-    host = args.host or os.getenv("SESSION_BRIDGE_HOST", "localhost")
-    port = args.port or os.getenv("SESSION_BRIDGE_PORT", "8100")
+    host = args.host or os.getenv("AGENTIBRIDGE_HOST", "localhost")
+    port = args.port or os.getenv("AGENTIBRIDGE_PORT", "8100")
     api_key = args.api_key or "your-api-key"
 
     print(f"Connection strings for {host}:{port}")
@@ -213,7 +213,7 @@ def cmd_connect(args: argparse.Namespace) -> None:
     print("Add to ~/.mcp.json:")
     config = {
         "mcpServers": {
-            "session-bridge": {
+            "agentibridge": {
                 "url": f"http://{host}:{port}/sse",
                 "headers": {"X-API-Key": api_key},
             }
@@ -242,7 +242,7 @@ def cmd_connect(args: argparse.Namespace) -> None:
     print("=== Cloudflare Tunnel ===")
     print("  Start a quick tunnel (no account needed):")
     print("    docker compose --profile tunnel up -d")
-    print("  Then run 'agentic-bridge tunnel' to get the public URL.")
+    print("  Then run 'agentibridge tunnel' to get the public URL.")
 
     print()
     print("=== curl test ===")
@@ -265,7 +265,7 @@ def cmd_tunnel(args: argparse.Namespace) -> None:
     # Check if tunnel container is running
     try:
         result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Status}}", "session-bridge-tunnel"],
+            ["docker", "inspect", "-f", "{{.State.Status}}", "agentibridge-tunnel"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -289,13 +289,13 @@ def cmd_tunnel(args: argparse.Namespace) -> None:
 
     if status != "running":
         print("Container exists but is not running. Check logs:")
-        print("  docker logs session-bridge-tunnel")
+        print("  docker logs agentibridge-tunnel")
         return
 
     # Read logs to detect mode and URL
     try:
         log_result = subprocess.run(
-            ["docker", "logs", "--tail", "50", "session-bridge-tunnel"],
+            ["docker", "logs", "--tail", "50", "agentibridge-tunnel"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -315,15 +315,15 @@ def cmd_tunnel(args: argparse.Namespace) -> None:
         print("Add to ~/.mcp.json:")
         config = {
             "mcpServers": {
-                "session-bridge": {
+                "agentibridge": {
                     "url": f"{url}/sse",
                 }
             }
         }
-        api_keys = os.getenv("SESSION_BRIDGE_API_KEYS", "")
+        api_keys = os.getenv("AGENTIBRIDGE_API_KEYS", "")
         if api_keys:
             first_key = api_keys.split(",")[0].strip()
-            config["mcpServers"]["session-bridge"]["headers"] = {"X-API-Key": first_key}
+            config["mcpServers"]["agentibridge"]["headers"] = {"X-API-Key": first_key}
         print(json.dumps(config, indent=2))
         print()
         print("Test:")
@@ -337,12 +337,12 @@ def cmd_tunnel(args: argparse.Namespace) -> None:
         print("Check your Cloudflare Zero Trust dashboard for the hostname.")
         print()
         print("Logs:")
-        print("  docker logs session-bridge-tunnel")
+        print("  docker logs agentibridge-tunnel")
         return
 
     # Unknown state
     print("Tunnel is running but could not determine mode.")
-    print("Check logs: docker logs session-bridge-tunnel")
+    print("Check logs: docker logs agentibridge-tunnel")
 
 
 def cmd_config(args: argparse.Namespace) -> None:
@@ -355,19 +355,19 @@ def cmd_config(args: argparse.Namespace) -> None:
 
     env_vars = [
         ("REDIS_URL", ""),
-        ("REDIS_KEY_PREFIX", "agenticore"),
-        ("SESSION_BRIDGE_TRANSPORT", "stdio"),
-        ("SESSION_BRIDGE_HOST", "127.0.0.1"),
-        ("SESSION_BRIDGE_PORT", "8100"),
-        ("SESSION_BRIDGE_API_KEYS", ""),
-        ("SESSION_BRIDGE_POLL_INTERVAL", "60"),
-        ("SESSION_BRIDGE_MAX_ENTRIES", "500"),
-        ("SESSION_BRIDGE_PROJECTS_DIR", str(Path.home() / ".claude" / "projects")),
-        ("SESSION_BRIDGE_ENABLED", "true"),
+        ("REDIS_KEY_PREFIX", "agentibridge"),
+        ("AGENTIBRIDGE_TRANSPORT", "stdio"),
+        ("AGENTIBRIDGE_HOST", "127.0.0.1"),
+        ("AGENTIBRIDGE_PORT", "8100"),
+        ("AGENTIBRIDGE_API_KEYS", ""),
+        ("AGENTIBRIDGE_POLL_INTERVAL", "60"),
+        ("AGENTIBRIDGE_MAX_ENTRIES", "500"),
+        ("AGENTIBRIDGE_PROJECTS_DIR", str(Path.home() / ".claude" / "projects")),
+        ("AGENTIBRIDGE_ENABLED", "true"),
         ("EMBEDDING_BACKEND", ""),
-        ("AGENTIC_BRIDGE_SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
+        ("AGENTIBRIDGE_SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
         ("CLAUDE_HOOK_LOG_ENABLED", "true"),
-        ("AGENTIC_BRIDGE_LOG_FILE", ""),
+        ("AGENTIBRIDGE_LOG_FILE", ""),
     ]
 
     for key, default in env_vars:
@@ -378,25 +378,25 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 
 def _generate_env_template() -> None:
-    template = """# Agentic Bridge Configuration
-# Copy to ~/.config/agentic-bridge/env or .env
+    template = """# AgentiBridge Configuration
+# Copy to ~/.config/agentibridge/env or .env
 
 # Redis (optional — falls back to filesystem)
 # REDIS_URL=redis://localhost:6379/0
-# REDIS_KEY_PREFIX=agenticore
+# REDIS_KEY_PREFIX=agentibridge
 
 # Transport: stdio (local MCP) or sse (HTTP remote)
-SESSION_BRIDGE_TRANSPORT=stdio
-SESSION_BRIDGE_HOST=127.0.0.1
-SESSION_BRIDGE_PORT=8100
+AGENTIBRIDGE_TRANSPORT=stdio
+AGENTIBRIDGE_HOST=127.0.0.1
+AGENTIBRIDGE_PORT=8100
 
 # API key auth for SSE transport (comma-separated, empty = no auth)
-# SESSION_BRIDGE_API_KEYS=key1,key2
+# AGENTIBRIDGE_API_KEYS=key1,key2
 
 # Collector
-SESSION_BRIDGE_POLL_INTERVAL=60
-SESSION_BRIDGE_MAX_ENTRIES=500
-# SESSION_BRIDGE_PROJECTS_DIR=~/.claude/projects
+AGENTIBRIDGE_POLL_INTERVAL=60
+AGENTIBRIDGE_MAX_ENTRIES=500
+# AGENTIBRIDGE_PROJECTS_DIR=~/.claude/projects
 
 # Semantic search (Phase 2)
 # EMBEDDING_BACKEND=ollama
@@ -404,11 +404,11 @@ SESSION_BRIDGE_MAX_ENTRIES=500
 # OLLAMA_EMBED_MODEL=nomic-embed-text
 
 # Summary generation model
-# AGENTIC_BRIDGE_SUMMARY_MODEL=claude-sonnet-4-5-20250929
+# AGENTIBRIDGE_SUMMARY_MODEL=claude-sonnet-4-5-20250929
 
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true
-# AGENTIC_BRIDGE_LOG_FILE=~/.cache/agentic-bridge/agentic-bridge.log
+# AGENTIBRIDGE_LOG_FILE=~/.cache/agentibridge/agentibridge.log
 
 # Cloudflare Tunnel (optional — use docker compose --profile tunnel)
 # CLOUDFLARE_TUNNEL_TOKEN=your-tunnel-token-here
@@ -418,21 +418,21 @@ CLAUDE_HOOK_LOG_ENABLED=true
 
 def cmd_install(args: argparse.Namespace) -> None:
     mode = args.mode or "docker"
-    config_dir = Path.home() / ".config" / "agentic-bridge"
+    config_dir = Path.home() / ".config" / "agentibridge"
     systemd_dir = Path.home() / ".config" / "systemd" / "user"
 
-    print(f"Installing agentic-bridge as systemd user service (mode: {mode})")
+    print(f"Installing agentibridge as systemd user service (mode: {mode})")
 
     # Create config directory
     config_dir.mkdir(parents=True, exist_ok=True)
     env_file = config_dir / "env"
     if not env_file.exists():
         env_file.write_text(
-            "# Agentic Bridge environment\n"
-            "SESSION_BRIDGE_TRANSPORT=sse\n"
-            "SESSION_BRIDGE_HOST=0.0.0.0\n"
-            "SESSION_BRIDGE_PORT=8100\n"
-            "# SESSION_BRIDGE_API_KEYS=\n"
+            "# AgentiBridge environment\n"
+            "AGENTIBRIDGE_TRANSPORT=sse\n"
+            "AGENTIBRIDGE_HOST=0.0.0.0\n"
+            "AGENTIBRIDGE_PORT=8100\n"
+            "# AGENTIBRIDGE_API_KEYS=\n"
             "# REDIS_URL=redis://localhost:6379/0\n"
         )
         print(f"  Created {env_file}")
@@ -440,9 +440,9 @@ def cmd_install(args: argparse.Namespace) -> None:
     # Determine service file
     pkg_dir = Path(__file__).parent.parent
     if mode == "docker":
-        service_src = pkg_dir / "deploy" / "agentic-bridge.service"
+        service_src = pkg_dir / "deploy" / "agentibridge.service"
     else:
-        service_src = pkg_dir / "deploy" / "agentic-bridge-native.service"
+        service_src = pkg_dir / "deploy" / "agentibridge-native.service"
 
     if not service_src.exists():
         print(f"  ERROR: Service file not found: {service_src}")
@@ -450,30 +450,30 @@ def cmd_install(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     systemd_dir.mkdir(parents=True, exist_ok=True)
-    service_dest = systemd_dir / "agentic-bridge.service"
+    service_dest = systemd_dir / "agentibridge.service"
     shutil.copy2(service_src, service_dest)
     print(f"  Installed {service_dest}")
 
     # Enable and start
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", "agentic-bridge"], check=True)
-    subprocess.run(["systemctl", "--user", "start", "agentic-bridge"], check=True)
+    subprocess.run(["systemctl", "--user", "enable", "agentibridge"], check=True)
+    subprocess.run(["systemctl", "--user", "start", "agentibridge"], check=True)
     print("  Service enabled and started")
     print()
-    print("Check status with: agentic-bridge status")
-    print("View logs with: journalctl --user -u agentic-bridge -f")
+    print("Check status with: agentibridge status")
+    print("View logs with: journalctl --user -u agentibridge -f")
 
 
 def cmd_uninstall(args: argparse.Namespace) -> None:
-    print("Uninstalling agentic-bridge systemd service...")
+    print("Uninstalling agentibridge systemd service...")
 
     try:
-        subprocess.run(["systemctl", "--user", "stop", "agentic-bridge"], check=False)
-        subprocess.run(["systemctl", "--user", "disable", "agentic-bridge"], check=False)
+        subprocess.run(["systemctl", "--user", "stop", "agentibridge"], check=False)
+        subprocess.run(["systemctl", "--user", "disable", "agentibridge"], check=False)
     except Exception:
         pass
 
-    service_file = Path.home() / ".config" / "systemd" / "user" / "agentic-bridge.service"
+    service_file = Path.home() / ".config" / "systemd" / "user" / "agentibridge.service"
     if service_file.exists():
         service_file.unlink()
         print(f"  Removed {service_file}")
@@ -485,26 +485,26 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
 
     print("  Service uninstalled")
     print()
-    print("Note: Config files in ~/.config/agentic-bridge/ were preserved.")
+    print("Note: Config files in ~/.config/agentibridge/ were preserved.")
     print("Remove manually if no longer needed.")
 
 
 def cmd_locks(args: argparse.Namespace) -> None:
     """Show Redis keys, file position locks, and bridge resource state."""
-    print(f"Agentic Bridge v{_version()} — Lock & Resource Inspector")
+    print(f"AgentiBridge v{_version()} — Lock & Resource Inspector")
     print("=" * 60)
 
     # ── Redis locks / keys ────────────────────────────────────────────
     print("\n[Redis Keys]")
     try:
-        from agentic_bridge.redis_client import get_redis
+        from agentibridge.redis_client import get_redis
 
         r = get_redis()
         if r is None:
             print("  Redis: unavailable (REDIS_URL not set or connection failed)")
         else:
             r.ping()
-            prefix = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+            prefix = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
 
             # Session index
             idx_all = f"{prefix}:sb:idx:all"
@@ -568,8 +568,8 @@ def cmd_locks(args: argparse.Namespace) -> None:
     print("\n[File Position Locks]")
     pos_dir = Path(
         os.getenv(
-            "SESSION_BRIDGE_POSITIONS_DIR",
-            str(Path.home() / ".cache" / "agentic-bridge" / "positions"),
+            "AGENTIBRIDGE_POSITIONS_DIR",
+            str(Path.home() / ".cache" / "agentibridge" / "positions"),
         )
     )
     if pos_dir.exists():
@@ -588,10 +588,10 @@ def cmd_locks(args: argparse.Namespace) -> None:
     # ── Bridge process locks ──────────────────────────────────────────
     print("\n[Bridge Processes]")
 
-    # Check for running session-bridge processes
+    # Check for running agentibridge processes
     try:
         result = subprocess.run(
-            ["pgrep", "-af", "agentic.bridge"],
+            ["pgrep", "-af", "agentibridge"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -600,14 +600,14 @@ def cmd_locks(args: argparse.Namespace) -> None:
             for line in result.stdout.strip().splitlines():
                 print(f"  PID {line}")
         else:
-            print("  No agentic-bridge processes found")
+            print("  No agentibridge processes found")
     except Exception:
         print("  Process check unavailable (pgrep not found)")
 
     # Docker containers
     try:
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=session-bridge", "--format", "{{.Names}}\t{{.Status}}"],
+            ["docker", "ps", "--filter", "name=agentibridge", "--format", "{{.Names}}\t{{.Status}}"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -617,7 +617,7 @@ def cmd_locks(args: argparse.Namespace) -> None:
             for line in result.stdout.strip().splitlines():
                 print(f"    {line}")
         else:
-            print("  No session-bridge Docker containers running")
+            print("  No agentibridge Docker containers running")
     except Exception:
         print("  Docker check unavailable")
 
@@ -633,11 +633,11 @@ def cmd_locks(args: argparse.Namespace) -> None:
 
         # Clear Redis position keys
         try:
-            from agentic_bridge.redis_client import get_redis
+            from agentibridge.redis_client import get_redis
 
             r = get_redis()
             if r is not None:
-                prefix = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+                prefix = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
                 cursor = 0
                 cleared = 0
                 while True:
@@ -661,8 +661,8 @@ def cmd_locks(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="agentic-bridge",
-        description="Agentic Bridge — Claude CLI Transcript MCP Server",
+        prog="agentibridge",
+        description="AgentiBridge — Claude CLI Transcript MCP Server",
     )
     subparsers = parser.add_subparsers(dest="command")
 
