@@ -1,8 +1,6 @@
-# AgentiBridge — Phase 4: Write-back & Dispatch
+# Session Dispatch & Context Restore
 
-## Overview
-
-Phase 4 adds session continuity and task delegation capabilities. Agents can restore context from past sessions and dispatch new tasks with that context injected, enabling multi-session workflows and context-aware task handoff.
+Session continuity and task delegation capabilities. Agents can restore context from past sessions and dispatch new tasks with that context injected, enabling multi-session workflows and context-aware task handoff.
 
 ## Architecture
 
@@ -14,11 +12,11 @@ Past Session                       New Task
 restore_session_context()    -->  dispatch_task()
      |                                 |
      v                                 v
-Formatted context blob        /completions API call
+Formatted context blob        Claude CLI subprocess
 (metadata + entries)          (prompt + injected context)
                                        |
                                        v
-                                Agent executes task
+                                Claude executes task
                                 with session awareness
 ```
 
@@ -62,11 +60,11 @@ END OF RESTORED CONTEXT
 
 #### `dispatch_task(task_description, project, session_id, command, context_turns) -> dict`
 
-Dispatches a task to the agent via `/completions` API:
+Dispatches a task via the Claude CLI as a subprocess:
 
 1. If `session_id` provided, calls `restore_session_context()` to get context
 2. Builds a prompt: context + project hint + task description
-3. Calls `/completions` endpoint via `agentibridge.completions`
+3. Runs Claude CLI via `agentibridge.claude_runner`
 4. Returns result with dispatch metadata
 
 **Return format:**
@@ -104,9 +102,9 @@ Returns: JSON with dispatch result
 ```
 
 Dispatch a task to the agent, optionally injecting context from a past session. The `command` parameter controls model selection:
-- `default` — Fast (Haiku)
-- `thinkhard` — Balanced (Sonnet)
-- `ultrathink` — Best quality (Opus)
+- `default` — Sonnet
+- `thinkhard` — Sonnet
+- `ultrathink` — Opus
 
 ## Use Cases
 
@@ -142,14 +140,14 @@ context = restore_session("agent-a-research-session", last_n=50)
 ## Dependencies
 
 - `agentibridge.store` — SessionStore for reading sessions
-- `agentibridge.completions` — `/completions` API client for dispatch
-- Agent API must be running at `AGENT_API_ENDPOINT` for dispatch_task to work
+- `agentibridge.claude_runner` — Claude CLI subprocess runner for dispatch
+- Claude CLI binary must be available at `CLAUDE_BINARY` path for dispatch_task to work
 
 ## Configuration
 
 ```bash
-# Completions API endpoint (for dispatch_task)
-AGENT_API_ENDPOINT=http://localhost:8000
-AGENT_API_KEY=your-api-key
-AGENT_API_TIMEOUT=300
+# Claude CLI dispatch (for dispatch_task)
+CLAUDE_BINARY=claude
+CLAUDE_DISPATCH_MODEL=sonnet
+CLAUDE_DISPATCH_TIMEOUT=300
 ```

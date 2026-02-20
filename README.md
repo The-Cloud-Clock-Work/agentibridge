@@ -187,7 +187,7 @@ curl https://mcp.yourdomain.com/health
 CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d
 ```
 
-See [docs/cloudflare-tunnel.md](docs/cloudflare-tunnel.md) for full details.
+See [Cloudflare Tunnel](docs/deployment/cloudflare-tunnel.md) for full details.
 
 ## Connect Your AI Client
 
@@ -210,7 +210,7 @@ Add to `~/.mcp.json`:
 
 Run `agentibridge connect` for ready-to-paste configs for ChatGPT, Claude Web, Grok, and generic MCP clients.
 
-See [docs/connecting-clients.md](docs/connecting-clients.md) for detailed setup instructions.
+See [Connecting Clients](docs/getting-started/connecting-clients.md) for detailed setup instructions.
 
 ## MCP Tools (10 total)
 
@@ -257,8 +257,14 @@ agentibridge uninstall            # Remove systemd service
 | `AGENTIBRIDGE_POLL_INTERVAL` | `60` | Collector poll interval in seconds (min: 5) |
 | `AGENTIBRIDGE_MAX_ENTRIES` | `500` | Max entries per session in Redis (0 = unlimited) |
 | `AGENTIBRIDGE_PROJECTS_DIR` | `~/.claude/projects` | Claude transcript directory |
-| `EMBEDDING_BACKEND` | _(none)_ | `ollama` or `bedrock` for semantic search |
-| `AGENTIBRIDGE_SUMMARY_MODEL` | `claude-sonnet-4-5-20250929` | Model for AI summaries |
+| `ANTHROPIC_API_KEY` | _(none)_ | Anthropic API key for summary generation |
+| `LLM_API_BASE` | _(none)_ | OpenAI-compatible API base URL for embeddings/chat |
+| `LLM_API_KEY` | _(none)_ | API key for LLM endpoint |
+| `LLM_EMBED_MODEL` | _(none)_ | Embedding model name (e.g. `text-embedding-3-small`) |
+| `LLM_CHAT_MODEL` | _(none)_ | Chat model name for summaries (fallback if no Anthropic key) |
+| `CLAUDE_BINARY` | `claude` | Path to Claude CLI binary for dispatch |
+| `CLAUDE_DISPATCH_MODEL` | `sonnet` | Model for dispatch_task (`sonnet`, `opus`) |
+| `CLAUDE_DISPATCH_TIMEOUT` | `300` | Dispatch timeout in seconds |
 | `CLAUDE_HOOK_LOG_ENABLED` | `true` | Enable/disable logging |
 | `AGENTIBRIDGE_LOG_FILE` | _auto_ | Log file path (auto-detects Docker vs native) |
 
@@ -275,7 +281,8 @@ Generate a `.env` template: `agentibridge config --generate-env`
 | `transport.py` | SSE/HTTP transport + API key auth |
 | `embeddings.py` | Semantic search (Phase 2) |
 | `dispatch.py` | Session restore + task dispatch (Phase 4) |
-| `completions.py` | Completions API client |
+| `claude_runner.py` | Claude CLI runner (dispatch) |
+| `llm_client.py` | OpenAI-compatible embeddings + chat |
 | `redis_client.py` | Redis helper |
 | `config.py` | Configuration with validation |
 | `cli.py` | CLI helper tool (status, locks, connect, tunnel) |
@@ -301,7 +308,7 @@ Raw transcripts live in `~/.claude/projects/{path-encoded}/` as `.jsonl` files:
 # Install with dev dependencies
 pip install -e ".[dev]"
 
-# Run unit tests (365 tests)
+# Run unit tests (452 tests)
 pytest tests/unit -v -m unit --cov=agentibridge
 
 # Run lint + format check
@@ -350,12 +357,12 @@ These also run on a daily schedule via GitHub Actions (`e2e-smoke.yml`).
 
 ## Documentation
 
-- [Connecting Clients](docs/connecting-clients.md) — Setup guides for Claude Code, ChatGPT, Claude Web, Grok
-- [Cloudflare Tunnel](docs/cloudflare-tunnel.md) — Expose to internet securely (quick & named tunnels)
-- [Reverse Proxy](docs/reverse-proxy.md) — Nginx, Caddy, Cloudflare Tunnel, Traefik configs
-- [Phase 2: Semantic Search](docs/phase2-semantic-search.md) — Embedding backends and semantic search
-- [Phase 3: Remote Access](docs/phase3-remote-access.md) — SSE/HTTP transport and API key auth
-- [Phase 4: Dispatch](docs/phase4-dispatch.md) — Session restore and task dispatch
+- [Connecting Clients](docs/getting-started/connecting-clients.md) — Setup guides for Claude Code, ChatGPT, Claude Web, Grok
+- [Semantic Search](docs/architecture/semantic-search.md) — Embedding backends and semantic search
+- [Remote Access](docs/architecture/remote-access.md) — SSE/HTTP transport and API key auth
+- [Session Dispatch](docs/architecture/session-dispatch.md) — Session restore and task dispatch
+- [Reverse Proxy](docs/deployment/reverse-proxy.md) — Nginx, Caddy, Traefik configs with SSL
+- [Cloudflare Tunnel](docs/deployment/cloudflare-tunnel.md) — Expose to internet securely (quick & named tunnels)
 
 ## License
 

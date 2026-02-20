@@ -1,8 +1,6 @@
-# AgentiBridge — Phase 2: Semantic Search
+# Semantic Search
 
-## Overview
-
-Phase 2 adds AI-powered semantic search to AgentiBridge, enabling natural language queries across all indexed Claude Code transcripts. Instead of exact keyword matching (Phase 1), users can ask questions like "how does authentication work" and get semantically relevant results.
+AI-powered semantic search for AgentiBridge, enabling natural language queries across all indexed Claude Code transcripts. Instead of exact keyword matching, users can ask questions like "how does authentication work" and get semantically relevant results.
 
 ## Architecture
 
@@ -10,7 +8,7 @@ Phase 2 adds AI-powered semantic search to AgentiBridge, enabling natural langua
 Query: "how does auth work?"
         |
         v
-  embed_query()              <- agentibridge/search.py (Bedrock Titan / Ollama)
+  embed_text()               <- agentibridge/llm_client.py (OpenAI-compatible API)
         |
         v
   cosine_similarity()        <- brute-force over stored vectors (numpy-accelerated)
@@ -59,7 +57,7 @@ Vectors are stored in Redis hashes with a set index:
 
 ### Search Algorithm
 
-1. **Embed query** via `agentibridge.search.embed_query()` (Bedrock Titan or Ollama)
+1. **Embed query** via `agentibridge.llm_client.embed_text()` (OpenAI-compatible API)
 2. **Load all vectors** from Redis via pipeline (batched for performance)
 3. **Cosine similarity** computed in batch (numpy when available, pure Python fallback)
 4. **Deduplicate** by session_id, keeping the highest-scoring chunk per session
@@ -69,7 +67,7 @@ For ~5000 vectors (500 sessions x 10 chunks), search takes <100ms with numpy.
 
 ### Summary Generation
 
-Uses the Anthropic SDK directly (or falls back to /completions API):
+Uses the Anthropic SDK directly (or falls back to `llm_client.chat_completion()`):
 
 1. Loads session entries from store
 2. Builds readable transcript (truncated to 12K chars)
@@ -86,7 +84,7 @@ Returns: JSON with ranked matches [{session_id, score, text_preview, project, ti
 ```
 
 Requires:
-- Embedding backend configured (EMBEDDING_BACKEND env var)
+- LLM API configured (`LLM_API_BASE` + `LLM_EMBED_MODEL` env vars)
 - Redis available
 - Sessions embedded via `embed_session()`
 
@@ -105,20 +103,19 @@ Uses Claude Sonnet to produce 2-3 sentence session summaries.
 # Enable/disable embedding (default: false — opt-in)
 AGENTIBRIDGE_EMBEDDING_ENABLED=false
 
-# Embedding backend (inherited from agentibridge settings)
-EMBEDDING_BACKEND=bedrock    # or "ollama"
+# OpenAI-compatible API for embeddings + chat
+LLM_API_BASE=http://localhost:11434/v1
+LLM_API_KEY=your-api-key
+LLM_EMBED_MODEL=text-embedding-3-small
+LLM_CHAT_MODEL=gpt-4o-mini
 
-# Required for Bedrock:
-AWS_REGION=us-west-2
-EMBED_MODEL_ID=amazon.titan-embed-text-v2:0
-
-# Required for summary generation:
+# Required for summary generation (preferred over LLM_CHAT_MODEL):
 ANTHROPIC_API_KEY=...
 ```
 
 ## Dependencies
 
-- `agentibridge.search` — `embed_query()` function (optional, for embedding backend)
+- `agentibridge.llm_client` — `embed_text()` and `chat_completion()` (OpenAI-compatible API)
 - `numpy` — optional, for batch cosine similarity acceleration
-- `anthropic` — optional, for summary generation (falls back to /completions API)
+- `anthropic` — optional, for summary generation (falls back to `llm_client.chat_completion()`)
 - Redis — required for vector storage (no file fallback for vectors)

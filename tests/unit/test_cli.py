@@ -43,7 +43,7 @@ class TestCmdHelp:
         output = capsys.readouterr().out
         assert "REDIS_URL" in output
         assert "AGENTIBRIDGE_TRANSPORT" in output
-        assert "EMBEDDING_BACKEND" in output
+        assert "LLM_API_BASE" in output
         assert "CLOUDFLARE_TUNNEL_TOKEN" in output
 
 
@@ -90,7 +90,7 @@ class TestCmdConfig:
         output = capsys.readouterr().out
         assert "AGENTIBRIDGE_TRANSPORT" in output
         assert "REDIS_URL" in output
-        assert "EMBEDDING_BACKEND" in output
+        assert "LLM_API_BASE" in output
 
 
 @pytest.mark.unit

@@ -1,8 +1,6 @@
-# AgentiBridge — Phase 3: Remote Access
+# Remote Access (SSE Transport)
 
-## Overview
-
-Phase 3 enables AgentiBridge to be accessed remotely via SSE (Server-Sent Events) over HTTP, allowing external clients like claude.ai, mobile apps, or other API consumers to query session transcripts without local filesystem access.
+AgentiBridge can be accessed remotely via SSE (Server-Sent Events) over HTTP, allowing external clients like claude.ai, mobile apps, or other API consumers to query session transcripts without local filesystem access.
 
 ## Architecture
 

@@ -74,7 +74,8 @@ agentibridge help
 | `agentibridge/transport.py` | SSE/HTTP transport + API key auth |
 | `agentibridge/embeddings.py` | Semantic search (Phase 2) |
 | `agentibridge/dispatch.py` | Session restore + task dispatch (Phase 4) |
-| `agentibridge/completions.py` | Completions API client |
+| `agentibridge/claude_runner.py` | Claude CLI runner (dispatch) |
+| `agentibridge/llm_client.py` | OpenAI-compatible embeddings + chat |
 | `agentibridge/redis_client.py` | Redis helper |
 | `agentibridge/config.py` | Configuration with validation |
 | `agentibridge/cli.py` | CLI helper tool (status/connect/install) |
@@ -96,6 +97,20 @@ AGENTIBRIDGE_API_KEYS=          # comma-separated, empty = no auth
 # Collector
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
+
+# Embeddings + LLM (OpenAI-compatible API)
+LLM_API_BASE=http://localhost:11434/v1
+LLM_API_KEY=
+LLM_EMBED_MODEL=text-embedding-3-small
+LLM_CHAT_MODEL=gpt-4o-mini
+
+# Summary generation (Anthropic SDK preferred, falls back to LLM_CHAT_MODEL)
+ANTHROPIC_API_KEY=
+
+# Dispatch (Claude CLI)
+CLAUDE_BINARY=claude
+CLAUDE_DISPATCH_MODEL=sonnet
+CLAUDE_DISPATCH_TIMEOUT=300
 
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true

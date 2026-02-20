@@ -182,8 +182,14 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("  AGENTIBRIDGE_POLL_INTERVAL      Poll interval in seconds (default: 60)")
     print("  AGENTIBRIDGE_MAX_ENTRIES        Max entries per session (default: 500)")
     print("  AGENTIBRIDGE_PROJECTS_DIR       Claude projects directory")
-    print("  EMBEDDING_BACKEND               ollama or bedrock (optional)")
-    print("  AGENTIBRIDGE_SUMMARY_MODEL      Model for summaries (default: claude-sonnet-4-5-20250929)")
+    print("  LLM_API_BASE                    OpenAI-compatible API base URL")
+    print("  LLM_API_KEY                     API key for LLM endpoint")
+    print("  LLM_EMBED_MODEL                Embedding model name")
+    print("  LLM_CHAT_MODEL                 Chat model for summaries (fallback)")
+    print("  ANTHROPIC_API_KEY               Anthropic key for summaries (preferred)")
+    print("  CLAUDE_BINARY                   Path to Claude CLI (default: claude)")
+    print("  CLAUDE_DISPATCH_MODEL           Dispatch model (default: sonnet)")
+    print("  CLAUDE_DISPATCH_TIMEOUT         Dispatch timeout in seconds (default: 300)")
     print("  CLOUDFLARE_TUNNEL_TOKEN         Token for named Cloudflare Tunnel (optional)")
     print()
     print("USAGE")
@@ -364,8 +370,14 @@ def cmd_config(args: argparse.Namespace) -> None:
         ("AGENTIBRIDGE_MAX_ENTRIES", "500"),
         ("AGENTIBRIDGE_PROJECTS_DIR", str(Path.home() / ".claude" / "projects")),
         ("AGENTIBRIDGE_ENABLED", "true"),
-        ("EMBEDDING_BACKEND", ""),
-        ("AGENTIBRIDGE_SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
+        ("LLM_API_BASE", ""),
+        ("LLM_API_KEY", ""),
+        ("LLM_EMBED_MODEL", ""),
+        ("LLM_CHAT_MODEL", ""),
+        ("ANTHROPIC_API_KEY", ""),
+        ("CLAUDE_BINARY", "claude"),
+        ("CLAUDE_DISPATCH_MODEL", "sonnet"),
+        ("CLAUDE_DISPATCH_TIMEOUT", "300"),
         ("CLAUDE_HOOK_LOG_ENABLED", "true"),
         ("AGENTIBRIDGE_LOG_FILE", ""),
     ]
@@ -398,13 +410,19 @@ AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
 # AGENTIBRIDGE_PROJECTS_DIR=~/.claude/projects
 
-# Semantic search (Phase 2)
-# EMBEDDING_BACKEND=ollama
-# OLLAMA_URL=http://localhost:11434
-# OLLAMA_EMBED_MODEL=nomic-embed-text
+# Semantic search + LLM (OpenAI-compatible API)
+# LLM_API_BASE=http://localhost:11434/v1
+# LLM_API_KEY=
+# LLM_EMBED_MODEL=text-embedding-3-small
+# LLM_CHAT_MODEL=gpt-4o-mini
 
-# Summary generation model
-# AGENTIBRIDGE_SUMMARY_MODEL=claude-sonnet-4-5-20250929
+# Summary generation (Anthropic SDK preferred, falls back to LLM_CHAT_MODEL)
+# ANTHROPIC_API_KEY=
+
+# Dispatch (Claude CLI)
+# CLAUDE_BINARY=claude
+# CLAUDE_DISPATCH_MODEL=sonnet
+# CLAUDE_DISPATCH_TIMEOUT=300
 
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true

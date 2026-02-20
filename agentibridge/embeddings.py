@@ -283,7 +283,7 @@ class TranscriptEmbedder:
 
             client = anthropic.Anthropic()
             response = client.messages.create(
-                model=os.getenv("AGENTIBRIDGE_SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
+                model="claude-sonnet-4-5-20250929",
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
             )

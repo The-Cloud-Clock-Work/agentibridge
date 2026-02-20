@@ -59,7 +59,7 @@ AGENTIBRIDGE_MAX_ENTRIES = _env_int("AGENTIBRIDGE_MAX_ENTRIES", "500", min_val=0
 # AGENTIBRIDGE — SEMANTIC SEARCH (Phase 2)
 # =============================================================================
 
-# Embedding backend for semantic search (bedrock or ollama)
+# Embedding enabled flag for semantic search
 AGENTIBRIDGE_EMBEDDING_ENABLED = _env_bool("AGENTIBRIDGE_EMBEDDING_ENABLED", "false")
 
 # =============================================================================

@@ -62,7 +62,7 @@ docker compose --profile tunnel up -d
 agentibridge tunnel   # shows the public URL
 ```
 
-See [docs/cloudflare-tunnel.md](cloudflare-tunnel.md) for the full guide including named tunnels with persistent hostnames.
+See [Cloudflare Tunnel](cloudflare-tunnel.md) for the full guide including named tunnels with persistent hostnames.
 
 ## Traefik (Docker Compose)
 
