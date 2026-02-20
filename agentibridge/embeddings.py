@@ -9,10 +9,30 @@ Requires:
   - Postgres with pgvector for vector storage (POSTGRES_URL)
 """
 
+import math
 import os
 from typing import Any, Dict, List, Optional
 
 from agentibridge.logging import log
+
+
+def _cosine_similarity_batch(query: List[float], vectors: List[List[float]]) -> List[float]:
+    """Compute cosine similarity between a query vector and a batch of vectors.
+
+    Returns a list of similarity scores in [0, 1] (or [-1, 1] for negative components).
+    """
+    scores = []
+    q_norm = math.sqrt(sum(x * x for x in query))
+    if q_norm == 0:
+        return [0.0] * len(vectors)
+    for vec in vectors:
+        dot = sum(a * b for a, b in zip(query, vec))
+        v_norm = math.sqrt(sum(x * x for x in vec))
+        if v_norm == 0:
+            scores.append(0.0)
+        else:
+            scores.append(dot / (q_norm * v_norm))
+    return scores
 
 
 def _get_embed_fn():
