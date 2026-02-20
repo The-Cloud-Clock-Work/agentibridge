@@ -62,6 +62,12 @@ AGENTIBRIDGE_MAX_ENTRIES = _env_int("AGENTIBRIDGE_MAX_ENTRIES", "500", min_val=0
 # Embedding enabled flag for semantic search
 AGENTIBRIDGE_EMBEDDING_ENABLED = _env_bool("AGENTIBRIDGE_EMBEDDING_ENABLED", "false")
 
+# Postgres connection URL for vector storage (pgvector)
+POSTGRES_URL = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", ""))
+
+# Embedding vector dimensions (must match model: text-embedding-3-small=1536)
+PGVECTOR_DIMENSIONS = _env_int("PGVECTOR_DIMENSIONS", "1536", min_val=1, max_val=4096)
+
 # =============================================================================
 # AGENTIBRIDGE — REMOTE ACCESS (Phase 3)
 # =============================================================================

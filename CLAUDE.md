@@ -77,6 +77,7 @@ agentibridge help
 | `agentibridge/claude_runner.py` | Claude CLI runner (dispatch) |
 | `agentibridge/llm_client.py` | OpenAI-compatible embeddings + chat |
 | `agentibridge/redis_client.py` | Redis helper |
+| `agentibridge/pg_client.py` | Postgres + pgvector connection |
 | `agentibridge/config.py` | Configuration with validation |
 | `agentibridge/cli.py` | CLI helper tool (status/connect/install) |
 | `agentibridge/logging.py` | Structured JSON logging |
@@ -97,6 +98,10 @@ AGENTIBRIDGE_API_KEYS=          # comma-separated, empty = no auth
 # Collector
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
+
+# Postgres + pgvector (vector storage for semantic search)
+POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
+PGVECTOR_DIMENSIONS=1536
 
 # Embeddings + LLM (OpenAI-compatible API)
 LLM_API_BASE=http://localhost:11434/v1

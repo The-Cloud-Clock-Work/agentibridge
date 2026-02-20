@@ -257,6 +257,8 @@ agentibridge uninstall            # Remove systemd service
 | `AGENTIBRIDGE_POLL_INTERVAL` | `60` | Collector poll interval in seconds (min: 5) |
 | `AGENTIBRIDGE_MAX_ENTRIES` | `500` | Max entries per session in Redis (0 = unlimited) |
 | `AGENTIBRIDGE_PROJECTS_DIR` | `~/.claude/projects` | Claude transcript directory |
+| `POSTGRES_URL` | _(none)_ | Postgres connection URL for pgvector (semantic search vectors) |
+| `PGVECTOR_DIMENSIONS` | `1536` | Embedding vector dimensions (must match model) |
 | `ANTHROPIC_API_KEY` | _(none)_ | Anthropic API key for summary generation |
 | `LLM_API_BASE` | _(none)_ | OpenAI-compatible API base URL for embeddings/chat |
 | `LLM_API_KEY` | _(none)_ | API key for LLM endpoint |
@@ -284,6 +286,7 @@ Generate a `.env` template: `agentibridge config --generate-env`
 | `claude_runner.py` | Claude CLI runner (dispatch) |
 | `llm_client.py` | OpenAI-compatible embeddings + chat |
 | `redis_client.py` | Redis helper |
+| `pg_client.py` | Postgres + pgvector connection |
 | `config.py` | Configuration with validation |
 | `cli.py` | CLI helper tool (status, locks, connect, tunnel) |
 | `logging.py` | Structured JSON logging |

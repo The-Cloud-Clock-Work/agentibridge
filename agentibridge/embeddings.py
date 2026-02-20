@@ -1,16 +1,14 @@
 """Transcript embedding pipeline for semantic search.
 
 Chunks transcripts into conversation turns, generates embeddings via
-an OpenAI-compatible API (see llm_client.py), stores vectors in Redis,
-and performs cosine similarity search.
+an OpenAI-compatible API (see llm_client.py), stores vectors in
+Postgres + pgvector, and performs cosine similarity search via HNSW index.
 
 Requires:
   - LLM API configured (LLM_API_BASE, LLM_API_KEY, LLM_EMBED_MODEL)
-  - Redis for vector storage (no file fallback for vectors)
+  - Postgres with pgvector for vector storage (POSTGRES_URL)
 """
 
-import json
-import math
 import os
 from typing import Any, Dict, List, Optional
 
@@ -26,57 +24,30 @@ def _get_embed_fn():
     return None
 
 
-def _cosine_similarity(a: List[float], b: List[float]) -> float:
-    """Cosine similarity between two vectors (pure Python fallback)."""
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
-    if norm_a == 0 or norm_b == 0:
-        log("Zero-norm vector in cosine similarity", {"norm_a": norm_a, "norm_b": norm_b})
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-def _cosine_similarity_batch(query: List[float], vectors: List[List[float]]) -> List[float]:
-    """Batch cosine similarity — uses numpy when available."""
-    try:
-        import numpy as np
-
-        q = np.array(query, dtype=np.float32)
-        m = np.array(vectors, dtype=np.float32)
-        dots = m @ q
-        norms = np.linalg.norm(m, axis=1) * np.linalg.norm(q)
-        norms[norms == 0] = 1.0
-        return (dots / norms).tolist()
-    except ImportError:
-        return [_cosine_similarity(query, v) for v in vectors]
-
-
 class TranscriptEmbedder:
-    """Chunks transcripts, generates embeddings, stores in Redis."""
+    """Chunks transcripts, generates embeddings, stores in Postgres (pgvector)."""
 
     def __init__(self) -> None:
-        self._redis = None
-        self._redis_checked = False
+        self._pg = None
+        self._pg_checked = False
         self._embed_fn = None
         self._embed_checked = False
-        self._prefix = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
 
     # ------------------------------------------------------------------
     # Lazy connections
     # ------------------------------------------------------------------
 
-    def _get_redis(self):
-        if self._redis_checked:
-            return self._redis
-        self._redis_checked = True
+    def _get_pg(self):
+        if self._pg_checked:
+            return self._pg
+        self._pg_checked = True
         try:
-            from agentibridge.redis_client import get_redis
+            from agentibridge.pg_client import get_pg
 
-            self._redis = get_redis()
+            self._pg = get_pg()
         except Exception:
-            self._redis = None
-        return self._redis
+            self._pg = None
+        return self._pg
 
     def _get_embed(self):
         if self._embed_checked:
@@ -85,16 +56,13 @@ class TranscriptEmbedder:
         self._embed_fn = _get_embed_fn()
         return self._embed_fn
 
-    def _rkey(self, suffix: str) -> str:
-        return f"{self._prefix}:sb:vec:{suffix}"
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def is_available(self) -> bool:
         """Check if embedding infrastructure is available."""
-        return self._get_embed() is not None
+        return self._get_embed() is not None and self._get_pg() is not None
 
     def embed_session(self, session_id: str) -> int:
         """Chunk session transcript, embed, store vectors.
@@ -103,11 +71,13 @@ class TranscriptEmbedder:
         """
         embed_fn = self._get_embed()
         if embed_fn is None:
-            raise RuntimeError("Embedding backend not available (configure LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL)")
+            raise RuntimeError(
+                "Embedding backend not available (configure LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL)"
+            )
 
-        r = self._get_redis()
-        if r is None:
-            raise RuntimeError("Redis required for vector storage")
+        pool = self._get_pg()
+        if pool is None:
+            raise RuntimeError("Postgres required for vector storage (configure POSTGRES_URL)")
 
         from agentibridge.store import SessionStore
 
@@ -121,41 +91,47 @@ class TranscriptEmbedder:
         chunks = self._chunk_turns(entries)
         chunk_count = 0
 
-        for idx, chunk in enumerate(chunks):
-            try:
-                vector = embed_fn(chunk["text"][:8000])
+        with pool.connection() as conn:
+            for idx, chunk in enumerate(chunks):
+                try:
+                    vector = embed_fn(chunk["text"][:8000])
 
-                chunk_data = {
-                    "session_id": session_id,
-                    "chunk_idx": str(idx),
-                    "project": meta.project_path if meta else "",
-                    "project_encoded": meta.project_encoded if meta else "",
-                    "timestamp": chunk.get("timestamp", ""),
-                    "text": chunk["text"][:1000],
-                    "vector": json.dumps(vector),
-                }
-
-                key = self._rkey(f"{session_id}:{idx}")
-                r.hset(key, mapping=chunk_data)
-                r.sadd(self._rkey("idx"), key)
-
-                if meta:
-                    r.sadd(self._rkey(f"proj:{meta.project_encoded}"), key)
-
-                chunk_count += 1
-            except Exception as e:
-                log(
-                    "Embedding failed for chunk",
-                    {
-                        "session_id": session_id,
-                        "chunk_idx": idx,
-                        "error": str(e),
-                    },
-                )
-                continue
-
-        # Mark session as embedded
-        r.sadd(self._rkey("embedded_sessions"), session_id)
+                    conn.execute(
+                        """
+                        INSERT INTO transcript_chunks
+                            (session_id, chunk_idx, project, project_encoded,
+                             timestamp, text_preview, embedding)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (session_id, chunk_idx) DO UPDATE SET
+                            project=EXCLUDED.project,
+                            project_encoded=EXCLUDED.project_encoded,
+                            timestamp=EXCLUDED.timestamp,
+                            text_preview=EXCLUDED.text_preview,
+                            embedding=EXCLUDED.embedding,
+                            created_at=now()
+                        """,
+                        (
+                            session_id,
+                            idx,
+                            meta.project_path if meta else "",
+                            meta.project_encoded if meta else "",
+                            chunk.get("timestamp", ""),
+                            chunk["text"][:1000],
+                            str(vector),
+                        ),
+                    )
+                    chunk_count += 1
+                except Exception as e:
+                    log(
+                        "Embedding failed for chunk",
+                        {
+                            "session_id": session_id,
+                            "chunk_idx": idx,
+                            "error": str(e),
+                        },
+                    )
+                    continue
+            conn.commit()
 
         return chunk_count
 
@@ -165,91 +141,75 @@ class TranscriptEmbedder:
         project: Optional[str] = None,
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
-        """Embed query, cosine search over stored vectors, return matches."""
+        """Embed query, search via pgvector cosine distance, return matches."""
         embed_fn = self._get_embed()
         if embed_fn is None:
             raise RuntimeError("Embedding backend not available")
 
-        r = self._get_redis()
-        if r is None:
-            raise RuntimeError("Redis required for semantic search")
+        pool = self._get_pg()
+        if pool is None:
+            raise RuntimeError("Postgres required for semantic search")
 
         query_vector = embed_fn(query)
+        vec_str = str(query_vector)
 
-        # Collect candidate vector keys
-        if project:
-            keys: set = set()
-            cursor = 0
-            pattern = self._rkey(f"proj:*{project}*")
-            while True:
-                cursor, batch = r.scan(cursor, match=pattern, count=100)
-                for proj_key in batch:
-                    keys.update(r.smembers(proj_key))
-                if cursor == 0:
-                    break
-        else:
-            keys = r.smembers(self._rkey("idx"))
+        with pool.connection() as conn:
+            if project:
+                rows = conn.execute(
+                    """
+                    WITH ranked AS (
+                        SELECT session_id, chunk_idx, project, timestamp,
+                               LEFT(text_preview, 300) AS text_preview,
+                               1 - (embedding <=> %s::vector) AS score,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY session_id
+                                   ORDER BY embedding <=> %s::vector
+                               ) AS rn
+                        FROM transcript_chunks
+                        WHERE project ILIKE %s OR project_encoded ILIKE %s
+                    )
+                    SELECT session_id, chunk_idx, project, timestamp,
+                           text_preview, ROUND(score::numeric, 4) AS score
+                    FROM ranked WHERE rn = 1
+                    ORDER BY score DESC LIMIT %s
+                    """,
+                    (vec_str, vec_str, f"%{project}%", f"%{project}%", limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    WITH ranked AS (
+                        SELECT session_id, chunk_idx, project, timestamp,
+                               LEFT(text_preview, 300) AS text_preview,
+                               1 - (embedding <=> %s::vector) AS score,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY session_id
+                                   ORDER BY embedding <=> %s::vector
+                               ) AS rn
+                        FROM transcript_chunks
+                    )
+                    SELECT session_id, chunk_idx, project, timestamp,
+                           text_preview, ROUND(score::numeric, 4) AS score
+                    FROM ranked WHERE rn = 1
+                    ORDER BY score DESC LIMIT %s
+                    """,
+                    (vec_str, vec_str, limit),
+                ).fetchall()
 
-        if not keys:
-            return []
+        results = []
+        for row in rows:
+            results.append(
+                {
+                    "session_id": row[0],
+                    "chunk_idx": row[1],
+                    "project": row[2],
+                    "timestamp": row[3],
+                    "text_preview": row[4],
+                    "score": float(row[5]),
+                }
+            )
 
-        # Load all vectors and metadata in batches via pipeline
-        pipe = r.pipeline()
-        key_list = list(keys)
-        for key in key_list:
-            pipe.hgetall(key)
-        results = pipe.execute()
-
-        # Parse vectors and metadata
-        vectors = []
-        meta_list = []
-        for data in results:
-            if not data:
-                continue
-            try:
-                vec = json.loads(data.get("vector", "[]"))
-                if not vec:
-                    continue
-                vectors.append(vec)
-                meta_list.append(
-                    {
-                        "session_id": data.get("session_id", ""),
-                        "chunk_idx": int(data.get("chunk_idx", 0)),
-                        "project": data.get("project", ""),
-                        "timestamp": data.get("timestamp", ""),
-                        "text_preview": data.get("text", "")[:300],
-                    }
-                )
-            except (json.JSONDecodeError, ValueError):
-                continue
-
-        if not vectors:
-            return []
-
-        # Batch cosine similarity
-        scores = _cosine_similarity_batch(query_vector, vectors)
-
-        # Pair scores with metadata
-        scored = []
-        for i, score in enumerate(scores):
-            item = meta_list[i].copy()
-            item["score"] = round(score, 4)
-            scored.append(item)
-
-        scored.sort(key=lambda x: x["score"], reverse=True)
-
-        # Deduplicate by session_id (keep highest score per session)
-        seen: set = set()
-        deduped = []
-        for item in scored:
-            sid = item["session_id"]
-            if sid not in seen:
-                seen.add(sid)
-                deduped.append(item)
-                if len(deduped) >= limit:
-                    break
-
-        return deduped
+        return results
 
     def generate_summary(self, session_id: str) -> str:
         """Generate session summary via LLM.
@@ -301,11 +261,17 @@ class TranscriptEmbedder:
         except Exception as e:
             return f"Summary generation failed: {e}"
 
-        # Store summary in session metadata
-        r = self._get_redis()
-        if r is not None:
-            meta_key = f"{self._prefix}:sb:session:{session_id}:meta"
-            r.hset(meta_key, "summary", summary)
+        # Store summary in session metadata (Redis)
+        try:
+            from agentibridge.redis_client import get_redis
+
+            r = get_redis()
+            if r is not None:
+                prefix = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
+                meta_key = f"{prefix}:sb:session:{session_id}:meta"
+                r.hset(meta_key, "summary", summary)
+        except Exception:
+            pass
 
         return summary
 

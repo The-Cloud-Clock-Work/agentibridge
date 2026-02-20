@@ -1,17 +1,13 @@
 """Unit tests for agentibridge.embeddings module.
 
-Tests cosine similarity, embedding backend selection, TranscriptEmbedder
-chunk/text building, and availability checks.
+Tests embedding backend selection, TranscriptEmbedder chunk/text building,
+and availability checks (LLM API + Postgres).
 """
-
-import math
 
 import pytest
 
 from agentibridge.parser import SessionEntry
 from agentibridge.embeddings import (
-    _cosine_similarity,
-    _cosine_similarity_batch,
     _get_embed_fn,
     TranscriptEmbedder,
 )
@@ -36,180 +32,6 @@ def _entry(
         tool_names=tool_names or [],
         uuid=uuid,
     )
-
-
-# ===================================================================
-# _cosine_similarity
-# ===================================================================
-
-
-@pytest.mark.unit
-class TestCosineSimilarity:
-    """Tests for the pure-Python _cosine_similarity function."""
-
-    def test_identical_vectors(self):
-        """Identical vectors should have cosine similarity of 1.0."""
-        a = [1.0, 2.0, 3.0]
-        assert _cosine_similarity(a, a) == pytest.approx(1.0)
-
-    def test_identical_unit_vectors(self):
-        """Identical unit vectors should have cosine similarity of 1.0."""
-        a = [1.0, 0.0, 0.0]
-        assert _cosine_similarity(a, a) == pytest.approx(1.0)
-
-    def test_orthogonal_vectors(self):
-        """Orthogonal vectors should have cosine similarity of 0.0."""
-        a = [1.0, 0.0, 0.0]
-        b = [0.0, 1.0, 0.0]
-        assert _cosine_similarity(a, b) == pytest.approx(0.0)
-
-    def test_opposite_vectors(self):
-        """Opposite vectors should have cosine similarity of -1.0."""
-        a = [1.0, 2.0, 3.0]
-        b = [-1.0, -2.0, -3.0]
-        assert _cosine_similarity(a, b) == pytest.approx(-1.0)
-
-    def test_zero_norm_vector_a(self):
-        """Zero-norm vector A should return 0.0."""
-        a = [0.0, 0.0, 0.0]
-        b = [1.0, 2.0, 3.0]
-        assert _cosine_similarity(a, b) == 0.0
-
-    def test_zero_norm_vector_b(self):
-        """Zero-norm vector B should return 0.0."""
-        a = [1.0, 2.0, 3.0]
-        b = [0.0, 0.0, 0.0]
-        assert _cosine_similarity(a, b) == 0.0
-
-    def test_both_zero_norm(self):
-        """Both zero-norm vectors should return 0.0."""
-        a = [0.0, 0.0]
-        b = [0.0, 0.0]
-        assert _cosine_similarity(a, b) == 0.0
-
-    def test_known_angle(self):
-        """45-degree angle vectors should produce cos(45) ~ 0.7071."""
-        a = [1.0, 0.0]
-        b = [1.0, 1.0]
-        expected = 1.0 / math.sqrt(2)
-        assert _cosine_similarity(a, b) == pytest.approx(expected, abs=1e-6)
-
-    def test_parallel_different_magnitude(self):
-        """Parallel vectors with different magnitudes should have similarity 1.0."""
-        a = [1.0, 2.0, 3.0]
-        b = [2.0, 4.0, 6.0]
-        assert _cosine_similarity(a, b) == pytest.approx(1.0)
-
-    def test_single_dimension(self):
-        """Single-dimension vectors."""
-        assert _cosine_similarity([5.0], [3.0]) == pytest.approx(1.0)
-        assert _cosine_similarity([5.0], [-3.0]) == pytest.approx(-1.0)
-
-
-# ===================================================================
-# _cosine_similarity_batch
-# ===================================================================
-
-
-@pytest.mark.unit
-class TestCosineSimilarityBatch:
-    """Tests for _cosine_similarity_batch (numpy path and fallback)."""
-
-    def test_identical_vectors_batch(self):
-        """Batch: identical vectors should produce 1.0."""
-        query = [1.0, 2.0, 3.0]
-        vectors = [[1.0, 2.0, 3.0]]
-        scores = _cosine_similarity_batch(query, vectors)
-        assert len(scores) == 1
-        assert scores[0] == pytest.approx(1.0, abs=1e-5)
-
-    def test_orthogonal_vectors_batch(self):
-        """Batch: orthogonal vectors should produce 0.0."""
-        query = [1.0, 0.0, 0.0]
-        vectors = [[0.0, 1.0, 0.0]]
-        scores = _cosine_similarity_batch(query, vectors)
-        assert len(scores) == 1
-        assert scores[0] == pytest.approx(0.0, abs=1e-5)
-
-    def test_opposite_vectors_batch(self):
-        """Batch: opposite vectors should produce -1.0."""
-        query = [1.0, 2.0, 3.0]
-        vectors = [[-1.0, -2.0, -3.0]]
-        scores = _cosine_similarity_batch(query, vectors)
-        assert len(scores) == 1
-        assert scores[0] == pytest.approx(-1.0, abs=1e-5)
-
-    def test_multiple_vectors(self):
-        """Batch with multiple vectors returns correct order of scores."""
-        query = [1.0, 0.0, 0.0]
-        vectors = [
-            [1.0, 0.0, 0.0],  # identical -> 1.0
-            [0.0, 1.0, 0.0],  # orthogonal -> 0.0
-            [-1.0, 0.0, 0.0],  # opposite -> -1.0
-        ]
-        scores = _cosine_similarity_batch(query, vectors)
-        assert len(scores) == 3
-        assert scores[0] == pytest.approx(1.0, abs=1e-5)
-        assert scores[1] == pytest.approx(0.0, abs=1e-5)
-        assert scores[2] == pytest.approx(-1.0, abs=1e-5)
-
-    def test_zero_norm_in_batch(self):
-        """Batch: zero-norm vector among others is handled (no crash)."""
-        query = [1.0, 2.0, 3.0]
-        vectors = [
-            [0.0, 0.0, 0.0],  # zero-norm
-            [1.0, 2.0, 3.0],  # identical
-        ]
-        scores = _cosine_similarity_batch(query, vectors)
-        assert len(scores) == 2
-        # Zero-norm vector: numpy path replaces 0 norm with 1.0, so dot/1.0;
-        # fallback returns 0.0. Either way it should not crash.
-        assert isinstance(scores[0], float)
-        assert scores[1] == pytest.approx(1.0, abs=1e-5)
-
-    def test_empty_vectors_list_numpy_raises(self):
-        """Batch with empty vectors list raises ValueError via numpy path."""
-        query = [1.0, 2.0, 3.0]
-        # numpy matmul fails on empty 2D array with mismatched dimensions
-        with pytest.raises(ValueError):
-            _cosine_similarity_batch(query, [])
-
-    def test_empty_vectors_list_fallback_returns_empty(self, monkeypatch):
-        """Batch with empty vectors list returns empty via pure-Python fallback."""
-        import builtins
-
-        real_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "numpy":
-                raise ImportError("mocked numpy unavailable")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", mock_import)
-
-        query = [1.0, 2.0, 3.0]
-        scores = _cosine_similarity_batch(query, [])
-        assert scores == []
-
-    def test_fallback_without_numpy(self, monkeypatch):
-        """When numpy is not importable, falls back to pure-Python path."""
-        import builtins
-
-        real_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "numpy":
-                raise ImportError("mocked numpy unavailable")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", mock_import)
-
-        query = [1.0, 0.0]
-        vectors = [[1.0, 0.0], [0.0, 1.0]]
-        scores = _cosine_similarity_batch(query, vectors)
-        assert len(scores) == 2
-        assert scores[0] == pytest.approx(1.0)
-        assert scores[1] == pytest.approx(0.0)
 
 
 # ===================================================================
@@ -267,11 +89,37 @@ class TestTranscriptEmbedderIsAvailable:
         embedder = TranscriptEmbedder()
         assert embedder.is_available() is False
 
-    def test_available_with_llm_api(self, monkeypatch):
-        """is_available returns True when LLM API is configured."""
+    def test_not_available_no_postgres(self, monkeypatch):
+        """is_available returns False when LLM is configured but Postgres is not."""
         monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
         monkeypatch.setenv("LLM_API_KEY", "sk-test")
         monkeypatch.setenv("LLM_EMBED_MODEL", "text-embedding-3-small")
+        monkeypatch.delenv("POSTGRES_URL", raising=False)
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        embedder = TranscriptEmbedder()
+        # pg_client.get_pg() returns None when no URL is set
+        assert embedder.is_available() is False
+
+    def test_available_with_llm_and_pg(self, monkeypatch):
+        """is_available returns True when both LLM API and Postgres are configured."""
+        monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
+        monkeypatch.setenv("LLM_API_KEY", "sk-test")
+        monkeypatch.setenv("LLM_EMBED_MODEL", "text-embedding-3-small")
+
+        # Mock pg_client.get_pg to return a truthy pool object
+        import agentibridge.pg_client as pg_mod
+
+        monkeypatch.setattr(pg_mod, "_pg_checked", False)
+        monkeypatch.setattr(pg_mod, "_pg_pool", None)
+
+        class FakePool:
+            pass
+
+        def fake_get_pg():
+            return FakePool()
+
+        monkeypatch.setattr(pg_mod, "get_pg", fake_get_pg)
+
         embedder = TranscriptEmbedder()
         assert embedder.is_available() is True
 
@@ -280,15 +128,19 @@ class TestTranscriptEmbedderIsAvailable:
         monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
         monkeypatch.setenv("LLM_API_KEY", "sk-test")
         monkeypatch.setenv("LLM_EMBED_MODEL", "text-embedding-3-small")
+        monkeypatch.delenv("POSTGRES_URL", raising=False)
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+
         embedder = TranscriptEmbedder()
 
-        # First call sets the cache
-        assert embedder.is_available() is True
+        # First call sets the cache (Postgres unavailable, so False)
+        assert embedder.is_available() is False
         assert embedder._embed_checked is True
 
-        # Change env var -- cached result should still be True
+        # Change env var -- cached result should still be same embed fn
         monkeypatch.delenv("LLM_API_BASE", raising=False)
-        assert embedder.is_available() is True
+        # embed fn is cached as non-None, but pg is cached as None
+        assert embedder.is_available() is False
 
     def test_not_available_missing_key(self, monkeypatch):
         """is_available returns False when API key is missing."""

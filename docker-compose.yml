@@ -41,6 +41,10 @@ services:
       - AGENTIBRIDGE_POLL_INTERVAL=${AGENTIBRIDGE_POLL_INTERVAL:-60}
       - REDIS_URL=redis://redis:6379/0
       - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-agentibridge}
+      - POSTGRES_URL=postgresql://agentibridge:${POSTGRES_PASSWORD:-agentibridge}@postgres:5432/agentibridge
+      - LLM_API_BASE=${LLM_API_BASE:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_EMBED_MODEL=${LLM_EMBED_MODEL:-}
       - OAUTH_ISSUER_URL=${OAUTH_ISSUER_URL:-}
       - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
       - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
@@ -52,6 +56,8 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8100/health"]
@@ -70,6 +76,25 @@ services:
       - sb-network
     restart: unless-stopped
     # Redis port NOT exposed to host (internal only)
+
+  postgres:
+    container_name: agentibridge-postgres
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_USER=agentibridge
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-agentibridge}
+      - POSTGRES_DB=agentibridge
+    volumes:
+      - sb_postgres_data:/var/lib/postgresql/data
+    networks:
+      - sb-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentibridge"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
 
   # Quick tunnel: docker compose --profile tunnel up -d
   #   → temporary *.trycloudflare.com URL, no account needed
@@ -103,6 +128,7 @@ services:
 
 volumes:
   sb_redis_data:
+  sb_postgres_data:
 
 networks:
   sb-network:

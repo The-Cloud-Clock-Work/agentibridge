@@ -11,10 +11,11 @@ Query: "how does auth work?"
   embed_text()               <- agentibridge/llm_client.py (OpenAI-compatible API)
         |
         v
-  cosine_similarity()        <- brute-force over stored vectors (numpy-accelerated)
+  pgvector <=> operator      <- HNSW index on transcript_chunks table
+  (cosine distance)
         |
         v
-  deduplicate by session     <- one result per session (highest score)
+  deduplicate by session     <- ROW_NUMBER() OVER (PARTITION BY session_id)
         |
         v
   ranked results             <- [{session_id, score, text_preview, project}]
@@ -28,9 +29,9 @@ Core class for the embedding pipeline:
 
 | Method | Description |
 |--------|-------------|
-| `is_available()` | Check if embedding backend is configured |
-| `embed_session(session_id)` | Chunk transcript into turns, embed each, store vectors |
-| `search_semantic(query, project, limit)` | Embed query, cosine search, return ranked matches |
+| `is_available()` | Check if embedding backend and Postgres are configured |
+| `embed_session(session_id)` | Chunk transcript into turns, embed each, store vectors in Postgres |
+| `search_semantic(query, project, limit)` | Embed query, pgvector cosine search, return ranked matches |
 | `generate_summary(session_id)` | Generate AI summary via Claude API |
 
 ### Chunking Strategy
@@ -44,26 +45,44 @@ Chunk 1: "User: Now add tests\nAssistant: Writing pytest cases...\nTools used: W
 
 Each chunk is embedded independently and stored with metadata (session_id, project, timestamp).
 
-### Vector Storage (Redis)
+### Vector Storage (Postgres + pgvector)
 
-Vectors are stored in Redis hashes with a set index:
+Vectors are stored in a `transcript_chunks` table with an HNSW index:
 
-```
-{prefix}:sb:vec:{session_id}:{chunk_idx}  -> Hash {session_id, chunk_idx, project, timestamp, text, vector}
-{prefix}:sb:vec:idx                        -> Set of all vector keys
-{prefix}:sb:vec:proj:{project_encoded}     -> Set of vector keys per project
-{prefix}:sb:vec:embedded_sessions          -> Set of session IDs that have been embedded
+```sql
+CREATE TABLE transcript_chunks (
+    id              SERIAL PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    chunk_idx       INTEGER NOT NULL,
+    project         TEXT NOT NULL DEFAULT '',
+    project_encoded TEXT NOT NULL DEFAULT '',
+    timestamp       TEXT NOT NULL DEFAULT '',
+    text_preview    TEXT NOT NULL DEFAULT '',
+    embedding       vector(1536),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, chunk_idx)
+);
+
+-- HNSW index for fast cosine similarity search
+CREATE INDEX idx_tc_embedding_hnsw ON transcript_chunks
+    USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 ```
 
 ### Search Algorithm
 
-1. **Embed query** via `agentibridge.llm_client.embed_text()` (OpenAI-compatible API)
-2. **Load all vectors** from Redis via pipeline (batched for performance)
-3. **Cosine similarity** computed in batch (numpy when available, pure Python fallback)
-4. **Deduplicate** by session_id, keeping the highest-scoring chunk per session
-5. **Return** top-K results sorted by score
+Single SQL query with pgvector cosine distance operator (`<=>`), deduplication via window function:
 
-For ~5000 vectors (500 sessions x 10 chunks), search takes <100ms with numpy.
+```sql
+WITH ranked AS (
+    SELECT session_id, chunk_idx, project, timestamp,
+           LEFT(text_preview, 300) AS text_preview,
+           1 - (embedding <=> query_vector::vector) AS score,
+           ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY embedding <=> query_vector::vector) AS rn
+    FROM transcript_chunks
+)
+SELECT ... FROM ranked WHERE rn = 1
+ORDER BY score DESC LIMIT N
+```
 
 ### Summary Generation
 
@@ -72,7 +91,7 @@ Uses the Anthropic SDK directly (or falls back to `llm_client.chat_completion()`
 1. Loads session entries from store
 2. Builds readable transcript (truncated to 12K chars)
 3. Sends to Claude Sonnet with summarization prompt
-4. Stores result in session metadata for caching
+4. Stores result in Redis session metadata for caching
 
 ## MCP Tools Added
 
@@ -85,7 +104,7 @@ Returns: JSON with ranked matches [{session_id, score, text_preview, project, ti
 
 Requires:
 - LLM API configured (`LLM_API_BASE` + `LLM_EMBED_MODEL` env vars)
-- Redis available
+- Postgres with pgvector (`POSTGRES_URL`)
 - Sessions embedded via `embed_session()`
 
 ### `generate_summary`
@@ -100,6 +119,10 @@ Uses Claude Sonnet to produce 2-3 sentence session summaries.
 ## Configuration
 
 ```bash
+# Postgres + pgvector (required for vector storage)
+POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
+PGVECTOR_DIMENSIONS=1536
+
 # Enable/disable embedding (default: false — opt-in)
 AGENTIBRIDGE_EMBEDDING_ENABLED=false
 
@@ -116,6 +139,6 @@ ANTHROPIC_API_KEY=...
 ## Dependencies
 
 - `agentibridge.llm_client` — `embed_text()` and `chat_completion()` (OpenAI-compatible API)
-- `numpy` — optional, for batch cosine similarity acceleration
+- `psycopg` + `psycopg-pool` — Postgres connection pool (required for vector storage)
+- `pgvector` — Postgres extension for vector similarity search (installed in Postgres, not Python)
 - `anthropic` — optional, for summary generation (falls back to `llm_client.chat_completion()`)
-- Redis — required for vector storage (no file fallback for vectors)

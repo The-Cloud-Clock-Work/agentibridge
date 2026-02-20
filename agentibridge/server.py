@@ -419,7 +419,7 @@ def search_semantic(
 ) -> str:
     """Semantic search across session transcripts using embeddings.
 
-    Requires LLM API configured (LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL) and Redis.
+    Requires LLM API configured (LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL) and Postgres (pgvector).
     Sessions must be embedded first via embed_session or auto-embedding.
 
     Args:
@@ -436,7 +436,7 @@ def search_semantic(
             return json.dumps(
                 {
                     "success": False,
-                    "error": "Embedding backend not available. Configure LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL.",
+                    "error": "Embedding backend not available. Configure LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL and POSTGRES_URL.",
                 }
             )
 

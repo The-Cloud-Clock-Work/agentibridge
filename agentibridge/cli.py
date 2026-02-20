@@ -92,6 +92,24 @@ def cmd_status(args: argparse.Namespace) -> None:
     except Exception as e:
         print(f"  status: error ({e})")
 
+    # Check Postgres
+    print("\n[Postgres]")
+    try:
+        from agentibridge.pg_client import get_pg
+
+        pool = get_pg()
+        if pool is not None:
+            with pool.connection() as conn:
+                row = conn.execute("SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks").fetchone()
+                print("  status: connected")
+                print(f"  chunks indexed: {row[0]}")
+                print(f"  sessions with embeddings: {row[1]}")
+        else:
+            url = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", "(not set)"))
+            print(f"  status: unavailable (POSTGRES_URL={url})")
+    except Exception as e:
+        print(f"  status: error ({e})")
+
     # Check Cloudflare Tunnel
     print("\n[Tunnel]")
     try:
@@ -182,6 +200,8 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("  AGENTIBRIDGE_POLL_INTERVAL      Poll interval in seconds (default: 60)")
     print("  AGENTIBRIDGE_MAX_ENTRIES        Max entries per session (default: 500)")
     print("  AGENTIBRIDGE_PROJECTS_DIR       Claude projects directory")
+    print("  POSTGRES_URL                    Postgres connection URL (pgvector)")
+    print("  PGVECTOR_DIMENSIONS             Embedding vector dimensions (default: 1536)")
     print("  LLM_API_BASE                    OpenAI-compatible API base URL")
     print("  LLM_API_KEY                     API key for LLM endpoint")
     print("  LLM_EMBED_MODEL                Embedding model name")
@@ -370,6 +390,8 @@ def cmd_config(args: argparse.Namespace) -> None:
         ("AGENTIBRIDGE_MAX_ENTRIES", "500"),
         ("AGENTIBRIDGE_PROJECTS_DIR", str(Path.home() / ".claude" / "projects")),
         ("AGENTIBRIDGE_ENABLED", "true"),
+        ("POSTGRES_URL", ""),
+        ("PGVECTOR_DIMENSIONS", "1536"),
         ("LLM_API_BASE", ""),
         ("LLM_API_KEY", ""),
         ("LLM_EMBED_MODEL", ""),
@@ -409,6 +431,10 @@ AGENTIBRIDGE_PORT=8100
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
 # AGENTIBRIDGE_PROJECTS_DIR=~/.claude/projects
+
+# Postgres + pgvector (required for semantic search vector storage)
+# POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
+# PGVECTOR_DIMENSIONS=1536
 
 # Semantic search + LLM (OpenAI-compatible API)
 # LLM_API_BASE=http://localhost:11434/v1

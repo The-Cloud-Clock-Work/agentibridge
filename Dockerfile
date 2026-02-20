@@ -25,7 +25,9 @@ RUN pip install --no-cache-dir \
     "redis>=7.0" \
     "uvicorn[standard]>=0.30" \
     "httpx>=0.25" \
-    "anthropic>=0.40"
+    "anthropic>=0.40" \
+    "psycopg[binary]>=3.1" \
+    "psycopg-pool>=3.1"
 
 # Copy agentibridge package
 COPY --chown=appuser:appuser agentibridge/ ./agentibridge/
