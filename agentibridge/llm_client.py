@@ -8,10 +8,12 @@ Env vars:
     LLM_API_KEY     — API key
     LLM_EMBED_MODEL — embedding model (e.g. text-embedding-3-small)
     LLM_CHAT_MODEL  — chat model for summaries (e.g. anthropic/claude-sonnet-4-5)
+    CF_ACCESS_CLIENT_ID     — Cloudflare Access service-token client ID (optional)
+    CF_ACCESS_CLIENT_SECRET — Cloudflare Access service-token client secret (optional)
 """
 
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import httpx
 
@@ -26,6 +28,20 @@ def _api_base() -> str:
 
 def _api_key() -> str:
     return os.environ.get("LLM_API_KEY", "")
+
+
+def _request_headers() -> Dict[str, str]:
+    """Build common request headers, including CF Access if configured."""
+    headers: Dict[str, str] = {
+        "Authorization": f"Bearer {_api_key()}",
+        "Content-Type": "application/json",
+    }
+    cf_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
+    cf_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+    if cf_id and cf_secret:
+        headers["CF-Access-Client-Id"] = cf_id
+        headers["CF-Access-Client-Secret"] = cf_secret
+    return headers
 
 
 def _embed_model() -> str:
@@ -77,10 +93,7 @@ def embed_text(text: str, model: Optional[str] = None) -> List[float]:
 
     resp = httpx.post(
         f"{base.rstrip('/')}/embeddings",
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-        },
+        headers=_request_headers(),
         json={"model": model, "input": text},
         timeout=30.0,
     )
@@ -118,10 +131,7 @@ def chat_completion(prompt: str, model: Optional[str] = None) -> str:
 
     resp = httpx.post(
         f"{base.rstrip('/')}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-        },
+        headers=_request_headers(),
         json={
             "model": model,
             "messages": [{"role": "user", "content": prompt}],

@@ -77,7 +77,7 @@ def restore_session_context(session_id: str, last_n: int = 20) -> str:
     return "\n".join(lines)
 
 
-def dispatch_task(
+async def dispatch_task(
     task_description: str,
     project: str = "",
     session_id: str = "",
@@ -101,7 +101,7 @@ def dispatch_task(
     Returns:
         Dict with dispatch result, including success status and output
     """
-    from agentibridge.claude_runner import run_claude_sync
+    from agentibridge.claude_runner import run_claude
 
     # Map command presets to model names
     model_map = {
@@ -141,8 +141,8 @@ def dispatch_task(
 
     full_prompt = "".join(prompt_parts)
 
-    # Dispatch via Claude CLI
-    result = run_claude_sync(prompt=full_prompt, model=model)
+    # Dispatch via Claude CLI (async — avoids event loop conflict in MCP)
+    result = await run_claude(prompt=full_prompt, model=model)
 
     return {
         "dispatched": True,

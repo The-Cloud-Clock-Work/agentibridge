@@ -1,7 +1,8 @@
 """Tests for agentibridge.server module — all 10 MCP tools."""
 
+import asyncio
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -341,7 +342,7 @@ class TestDispatchTask:
         srv._store = MagicMock()
         srv._collector = _mock_collector()
 
-        with patch("agentibridge.dispatch.dispatch_task") as mock_dispatch:
+        with patch("agentibridge.dispatch.dispatch_task", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {
                 "dispatched": True,
                 "completed": True,
@@ -354,6 +355,6 @@ class TestDispatchTask:
                 "prompt_length": 100,
             }
 
-            result = json.loads(srv.dispatch_task(task_description="Fix bug"))
+            result = json.loads(asyncio.run(srv.dispatch_task(task_description="Fix bug")))
             assert result["success"] is True
             assert result["dispatched"] is True

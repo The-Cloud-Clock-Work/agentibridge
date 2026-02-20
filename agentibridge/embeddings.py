@@ -238,6 +238,7 @@ class TranscriptEmbedder:
         )
 
         # Try Anthropic SDK directly
+        summary = None
         try:
             import anthropic
 
@@ -249,17 +250,33 @@ class TranscriptEmbedder:
             )
             summary = response.content[0].text
         except ImportError:
-            # Fallback: OpenAI-compatible API via llm_client
+            pass  # SDK not installed, try next
+        except Exception:
+            pass  # SDK failed (no API key, etc.), try next
+
+        # Fallback 2: OpenAI-compatible API via llm_client
+        if summary is None:
             try:
                 from agentibridge import llm_client
 
-                if not llm_client.is_configured():
-                    return "Summary generation unavailable: set ANTHROPIC_API_KEY or LLM_API_BASE + LLM_API_KEY"
-                summary = llm_client.chat_completion(prompt=prompt)
-            except Exception as e:
-                return f"Summary generation unavailable: {e}"
-        except Exception as e:
-            return f"Summary generation failed: {e}"
+                if llm_client.is_configured():
+                    summary = llm_client.chat_completion(prompt=prompt)
+            except Exception:
+                pass  # LLM API failed, try next
+
+        # Fallback 3: Claude CLI (if binary is available)
+        if summary is None:
+            try:
+                from agentibridge.claude_runner import run_claude_sync
+
+                result = run_claude_sync(prompt, model="haiku")
+                if result.success and result.result:
+                    summary = result.result
+            except Exception:
+                pass
+
+        if summary is None:
+            return "Summary generation unavailable: configure ANTHROPIC_API_KEY, LLM_API_BASE, or mount claude CLI binary"
 
         # Store summary in session metadata (Redis)
         try:

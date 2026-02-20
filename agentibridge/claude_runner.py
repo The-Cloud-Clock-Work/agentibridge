@@ -171,11 +171,23 @@ async def run_claude(
 def run_claude_sync(prompt: str, **kwargs) -> ClaudeResult:
     """Synchronous wrapper around :func:`run_claude`.
 
-    Creates a new event loop so it can be called from non-async MCP tool
-    functions without worrying about an already-running loop.
+    If called from within a running event loop (e.g. MCP server context),
+    runs the coroutine in a separate thread to avoid the
+    "Cannot run the event loop while another loop is running" error.
+    Prefer calling :func:`run_claude` directly with ``await`` when possible.
     """
-    loop = asyncio.new_event_loop()
+    import concurrent.futures
+
     try:
-        return loop.run_until_complete(run_claude(prompt, **kwargs))
-    finally:
-        loop.close()
+        asyncio.get_running_loop()
+        # Already inside an event loop — run in a thread with its own loop
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, run_claude(prompt, **kwargs))
+            return future.result()
+    except RuntimeError:
+        # No running loop — safe to create one
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(run_claude(prompt, **kwargs))
+        finally:
+            loop.close()

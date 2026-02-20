@@ -534,7 +534,7 @@ def restore_session(
 
 
 @mcp.tool()
-def dispatch_task(
+async def dispatch_task(
     task_description: str,
     project: str = "",
     session_id: str = "",
@@ -559,7 +559,7 @@ def dispatch_task(
     try:
         from agentibridge.dispatch import dispatch_task as _dispatch
 
-        result = _dispatch(
+        result = await _dispatch(
             task_description=task_description,
             project=project,
             session_id=session_id,
