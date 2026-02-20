@@ -44,9 +44,7 @@ class TestEmbedText:
         monkeypatch.setenv("LLM_EMBED_MODEL", "text-embedding-3-small")
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "data": [{"embedding": [0.1, 0.2, 0.3]}]
-        }
+        mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
         mock_resp.raise_for_status = MagicMock()
 
         with patch("httpx.post", return_value=mock_resp) as mock_post:
@@ -87,9 +85,7 @@ class TestChatCompletion:
         monkeypatch.setenv("LLM_CHAT_MODEL", "gpt-4")
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Hello there!"}}]
-        }
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "Hello there!"}}]}
         mock_resp.raise_for_status = MagicMock()
 
         with patch("httpx.post", return_value=mock_resp) as mock_post:
@@ -118,9 +114,7 @@ class TestChatCompletion:
         monkeypatch.setenv("LLM_API_KEY", "sk-test")
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "ok"}}]
-        }
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
         mock_resp.raise_for_status = MagicMock()
 
         with patch("httpx.post", return_value=mock_resp) as mock_post:

@@ -94,7 +94,9 @@ class TestDispatchTask:
             error=None,
         )
 
-        with patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result) as mock_run:
+        with patch(
+            "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
+        ) as mock_run:
             result = asyncio.run(dispatch_task("Fix the bug"))
 
             assert result["dispatched"] is True
@@ -112,7 +114,9 @@ class TestDispatchTask:
             duration_ms=100,
         )
 
-        with patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result) as mock_run:
+        with patch(
+            "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
+        ) as mock_run:
             result = asyncio.run(dispatch_task("Fix bug", project="myapp"))
 
             assert result["dispatched"] is True
@@ -136,7 +140,9 @@ class TestDispatchTask:
 
         with (
             patch("agentibridge.store.SessionStore", return_value=mock_store),
-            patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result) as mock_run,
+            patch(
+                "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_run,
         ):
             result = asyncio.run(dispatch_task("Fix bug", session_id="s1"))
 
@@ -157,7 +163,9 @@ class TestDispatchTask:
 
         with (
             patch("agentibridge.store.SessionStore", return_value=mock_store),
-            patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result) as mock_run,
+            patch(
+                "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_run,
         ):
             result = asyncio.run(dispatch_task("Fix bug", session_id="bad-id"))
 
@@ -183,10 +191,14 @@ class TestDispatchTask:
     def test_command_model_mapping(self):
         mock_result = ClaudeResult(success=True, result="done", exit_code=0)
 
-        with patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result) as mock_run:
+        with patch(
+            "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
+        ) as mock_run:
             asyncio.run(dispatch_task("Task", command="ultrathink"))
             assert mock_run.call_args[1]["model"] == "opus"
 
-        with patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result) as mock_run:
+        with patch(
+            "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
+        ) as mock_run:
             asyncio.run(dispatch_task("Task", command="thinkhard"))
             assert mock_run.call_args[1]["model"] == "sonnet"

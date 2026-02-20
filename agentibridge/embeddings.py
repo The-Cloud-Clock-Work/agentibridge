@@ -276,7 +276,9 @@ class TranscriptEmbedder:
                 pass
 
         if summary is None:
-            return "Summary generation unavailable: configure ANTHROPIC_API_KEY, LLM_API_BASE, or mount claude CLI binary"
+            return (
+                "Summary generation unavailable: configure ANTHROPIC_API_KEY, LLM_API_BASE, or mount claude CLI binary"
+            )
 
         # Store summary in session metadata (Redis)
         try:

@@ -22,6 +22,7 @@ import httpx
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 def _api_base() -> str:
     return os.environ.get("LLM_API_BASE", "")
 
@@ -56,6 +57,7 @@ def _chat_model() -> str:
 # Availability check
 # ---------------------------------------------------------------------------
 
+
 def is_configured() -> bool:
     """Return True if LLM_API_BASE and LLM_API_KEY are set."""
     return bool(_api_base()) and bool(_api_key())
@@ -69,6 +71,7 @@ def is_embed_configured() -> bool:
 # ---------------------------------------------------------------------------
 # Embeddings
 # ---------------------------------------------------------------------------
+
 
 def embed_text(text: str, model: Optional[str] = None) -> List[float]:
     """Generate an embedding vector via POST {base_url}/embeddings.
@@ -105,6 +108,7 @@ def embed_text(text: str, model: Optional[str] = None) -> List[float]:
 # ---------------------------------------------------------------------------
 # Chat completions
 # ---------------------------------------------------------------------------
+
 
 def chat_completion(prompt: str, model: Optional[str] = None) -> str:
     """Get a chat completion via POST {base_url}/chat/completions.

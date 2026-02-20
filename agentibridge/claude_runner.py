@@ -1,8 +1,12 @@
-"""Run Claude CLI directly via subprocess.
+"""Run Claude CLI directly via subprocess, or proxy via HTTP bridge.
 
 Replaces the old completions.py module that called an external agenticore
 /completions API.  Now AgentiBridge is fully standalone — it shells out to
 the ``claude`` CLI binary which must be on PATH (or set via CLAUDE_BINARY).
+
+When ``CLAUDE_DISPATCH_URL`` is set, requests are proxied to a host-side
+dispatch bridge (see :mod:`agentibridge.dispatch_bridge`) instead of
+spawning ``claude`` locally. This is used when running inside Docker.
 
 Usage:
     from agentibridge.claude_runner import run_claude_sync
@@ -15,6 +19,8 @@ Env vars:
     CLAUDE_BINARY          — path to claude CLI (default: "claude")
     CLAUDE_DISPATCH_MODEL  — model for dispatch (default: "sonnet")
     CLAUDE_DISPATCH_TIMEOUT — timeout in seconds (default: 300)
+    CLAUDE_DISPATCH_URL    — bridge URL (empty = local mode)
+    DISPATCH_SECRET        — shared secret for bridge auth
 """
 
 import asyncio
@@ -30,6 +36,7 @@ from agentibridge.logging import log
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 def _claude_binary() -> str:
     return os.environ.get("CLAUDE_BINARY", "claude")
 
@@ -42,9 +49,18 @@ def _default_timeout() -> int:
     return int(os.environ.get("CLAUDE_DISPATCH_TIMEOUT", "300"))
 
 
+def _dispatch_url() -> str:
+    return os.environ.get("CLAUDE_DISPATCH_URL", "")
+
+
+def _dispatch_secret() -> str:
+    return os.environ.get("DISPATCH_SECRET", "")
+
+
 # ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ClaudeResult:
@@ -65,6 +81,7 @@ class ClaudeResult:
 # ---------------------------------------------------------------------------
 # Output parser
 # ---------------------------------------------------------------------------
+
 
 def parse_claude_output(raw: str) -> Dict[str, Any]:
     """Parse JSON output from ``claude --output-format json``.
@@ -88,8 +105,89 @@ def parse_claude_output(raw: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# HTTP transport (container → host bridge)
+# ---------------------------------------------------------------------------
+
+
+async def _run_claude_http(
+    dispatch_url: str,
+    prompt: str,
+    model: str,
+    timeout: int,
+    output_format: str,
+) -> ClaudeResult:
+    """Proxy a dispatch request to the host-side bridge via HTTP.
+
+    Args:
+        dispatch_url: Base URL of the dispatch bridge (e.g. http://host.docker.internal:8101).
+        prompt: The prompt/task text.
+        model: Model name.
+        timeout: Timeout in seconds for the Claude CLI execution.
+        output_format: CLI output format.
+
+    Returns:
+        ClaudeResult with parsed output.
+    """
+    import httpx
+
+    secret = _dispatch_secret()
+    url = f"{dispatch_url.rstrip('/')}/dispatch"
+    # Give the bridge time to timeout first, then add buffer for HTTP overhead
+    http_timeout = timeout + 30
+
+    log("claude_runner: HTTP dispatch", {"url": url, "model": model, "prompt_len": len(prompt)})
+
+    try:
+        async with httpx.AsyncClient(timeout=http_timeout) as client:
+            resp = await client.post(
+                url,
+                json={
+                    "prompt": prompt,
+                    "model": model,
+                    "timeout": timeout,
+                    "output_format": output_format,
+                },
+                headers={"X-Dispatch-Secret": secret},
+            )
+
+        if resp.status_code == 401:
+            return ClaudeResult(success=False, error="Dispatch bridge auth failed (401)")
+
+        if resp.status_code != 200:
+            return ClaudeResult(
+                success=False,
+                error=f"Dispatch bridge returned HTTP {resp.status_code}: {resp.text[:500]}",
+            )
+
+        data = resp.json()
+        return ClaudeResult(
+            success=data.get("success", False),
+            result=data.get("result"),
+            session_id=data.get("session_id"),
+            exit_code=data.get("exit_code"),
+            duration_ms=data.get("duration_ms"),
+            timed_out=data.get("timed_out", False),
+            error=data.get("error"),
+        )
+
+    except httpx.ConnectError as e:
+        msg = f"Cannot connect to dispatch bridge at {dispatch_url}: {e}"
+        log("claude_runner: bridge connect error", {"url": dispatch_url, "error": str(e)})
+        return ClaudeResult(success=False, error=msg)
+
+    except httpx.TimeoutException:
+        log("claude_runner: bridge timeout", {"url": dispatch_url, "timeout": http_timeout})
+        return ClaudeResult(success=False, timed_out=True, error=f"Dispatch bridge timed out after {http_timeout}s")
+
+    except Exception as e:
+        log("claude_runner: bridge unexpected error", {"error": str(e)})
+        return ClaudeResult(success=False, error=f"Dispatch bridge error: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Async runner
 # ---------------------------------------------------------------------------
+
 
 async def run_claude(
     prompt: str,
@@ -99,6 +197,9 @@ async def run_claude(
     output_format: str = "json",
 ) -> ClaudeResult:
     """Run the ``claude`` CLI and return the parsed result.
+
+    If ``CLAUDE_DISPATCH_URL`` is set, proxies the request to the host-side
+    dispatch bridge via HTTP. Otherwise, runs the CLI as a local subprocess.
 
     Args:
         prompt: The prompt/task text.
@@ -110,10 +211,16 @@ async def run_claude(
     Returns:
         ClaudeResult with parsed output.
     """
-    binary = _claude_binary()
     model = model or _default_model()
     timeout = timeout or _default_timeout()
 
+    # Route to HTTP bridge if configured
+    dispatch_url = _dispatch_url()
+    if dispatch_url:
+        return await _run_claude_http(dispatch_url, prompt, model, timeout, output_format)
+
+    # Local subprocess mode
+    binary = _claude_binary()
     cmd = [binary, "--model", model, "--output-format", output_format, "-p", prompt]
 
     log("claude_runner: starting", {"model": model, "prompt_len": len(prompt)})
@@ -167,6 +274,7 @@ async def run_claude(
 # ---------------------------------------------------------------------------
 # Sync wrapper
 # ---------------------------------------------------------------------------
+
 
 def run_claude_sync(prompt: str, **kwargs) -> ClaudeResult:
     """Synchronous wrapper around :func:`run_claude`.
