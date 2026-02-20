@@ -64,14 +64,19 @@ def _build_oauth_config():
         client_secret=client_secret,
     )
 
-    # Disable dynamic registration when pre-configured credentials are set
-    registration_enabled = not (client_id and client_secret)
+    # Always enable registration — claude.ai requires it to work.
+    # The provider returns pre-configured creds when locked.
+    allowed_scopes_raw = os.getenv("OAUTH_ALLOWED_SCOPES", "").strip()
+    allowed_scopes_list = [s.strip() for s in allowed_scopes_raw.split() if s.strip()] if allowed_scopes_raw else None
 
     resource_url = os.getenv("OAUTH_RESOURCE_URL") or (issuer.rstrip("/") + "/mcp")
     settings = AuthSettings(
         issuer_url=issuer,
         resource_server_url=resource_url,
-        client_registration_options=ClientRegistrationOptions(enabled=registration_enabled),
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=allowed_scopes_list,
+        ),
         revocation_options=RevocationOptions(enabled=True),
     )
     return provider, settings

@@ -169,6 +169,16 @@ class OAuthCompatAuthMiddleware:
                 if name_lower == b"authorization":
                     has_auth_header = True
 
+            log(
+                "oauth-middleware",
+                {
+                    "path": path,
+                    "has_bearer": has_auth_header,
+                    "has_api_key": bool(api_key),
+                    "method": scope.get("method", "?"),
+                },
+            )
+
             if api_key and not has_auth_header:
                 # Convert API key to Bearer token so FastMCP's auth can validate it
                 new_headers = [h for h in headers if h[0].lower() != b"x-api-key"]
@@ -285,9 +295,19 @@ class CORSMiddleware:
             await send({"type": "http.response.body", "body": b""})
             return
 
+        path = scope.get("path", "")
+        method = scope.get("method", "?")
+
+        if path != "/health":
+            log("http-request", {"method": method, "path": path})
+
         # Wrap send to inject CORS headers on responses
+        captured_status = None
+
         async def cors_send(message):
+            nonlocal captured_status
             if message["type"] == "http.response.start":
+                captured_status = message.get("status")
                 headers = list(message.get("headers", []))
                 headers.append([b"access-control-allow-origin", b"*"])
                 headers.append([b"access-control-expose-headers", b"*"])
@@ -295,6 +315,9 @@ class CORSMiddleware:
             await send(message)
 
         await self.app(scope, receive, cors_send)
+
+        if path != "/health":
+            log("http-response", {"method": method, "path": path, "status": captured_status})
 
 
 # =============================================================================

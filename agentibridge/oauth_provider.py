@@ -19,7 +19,6 @@ from mcp.server.auth.provider import (
     AuthorizeError,
     OAuthAuthorizationServerProvider,
     RefreshToken,
-    RegistrationError,
     construct_redirect_uri,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
@@ -48,9 +47,9 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
     Auto-approves authorization requests (no consent page needed for a
     private bridge).
 
-    When client_id/client_secret are pre-configured, only that client is
-    accepted and dynamic registration is rejected. When not set, dynamic
-    registration is open (for development/testing only).
+    When client_id/client_secret are pre-configured, dynamic registration
+    returns the pre-configured credentials (claude.ai requires working
+    registration). When not set, dynamic registration is open.
     """
 
     def __init__(
@@ -91,14 +90,50 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
             log("OAuth pre-configured client loaded", {"client_id": client_id})
 
     async def get_client(self, client_id: str) -> Optional[OAuthClientInformationFull]:
-        return self._clients.get(client_id)
+        client = self._clients.get(client_id)
+        log("OAuth get_client", {"client_id": client_id, "found": client is not None})
+        return client
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
+        log(
+            "OAuth register_client",
+            {
+                "locked": self._locked,
+                "client_name": client_info.client_name,
+                "redirect_uris": [str(u) for u in (client_info.redirect_uris or [])],
+            },
+        )
         if self._locked:
-            raise RegistrationError(
-                error="invalid_client_metadata",
-                error_description="Dynamic registration is disabled. Use the pre-configured client credentials.",
+            # Return the pre-configured client credentials instead of rejecting.
+            # Claude.ai requires dynamic registration to work — it uses the
+            # returned client_id/secret for the rest of the OAuth flow.
+            # We modify client_info in-place so the SDK's RegistrationHandler
+            # returns our pre-configured credentials to the caller.
+            pre = next(iter(self._clients.values()))
+            client_info.client_id = pre.client_id
+            client_info.client_secret = pre.client_secret
+            client_info.client_id_issued_at = pre.client_id_issued_at
+
+            # Merge redirect_uris: keep pre-configured + add any new ones
+            existing_uris = {str(u) for u in (pre.redirect_uris or [])}
+            merged = list(pre.redirect_uris or [])
+            for uri in client_info.redirect_uris or []:
+                if str(uri) not in existing_uris:
+                    merged.append(uri)
+            client_info.redirect_uris = merged
+
+            # Update stored client with merged redirect_uris
+            pre.redirect_uris = merged
+            self._clients[pre.client_id] = pre
+
+            log(
+                "OAuth register_client (locked: returning pre-configured)",
+                {
+                    "client_id": pre.client_id,
+                    "redirect_uris": [str(u) for u in merged],
+                },
             )
+            return
 
         client_id = secrets.token_urlsafe(16)
         client_info.client_id = client_id
@@ -111,6 +146,16 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
         client: OAuthClientInformationFull,
         params: AuthorizationParams,
     ) -> str:
+        log(
+            "OAuth authorize",
+            {
+                "client_id": client.client_id,
+                "scopes": params.scopes,
+                "redirect_uri": str(params.redirect_uri),
+                "resource": str(params.resource) if params.resource else None,
+                "state": params.state[:16] + "..." if params.state and len(params.state) > 16 else params.state,
+            },
+        )
         if not client.client_id:
             raise AuthorizeError(error="invalid_request", error_description="Client has no client_id")
 
@@ -129,7 +174,7 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
         )
         self._auth_codes[code] = auth_code
 
-        log("OAuth authorize", {"client_id": client.client_id, "code": code[:8] + "..."})
+        log("OAuth authorize code issued", {"client_id": client.client_id, "code": code[:8] + "..."})
 
         return construct_redirect_uri(
             str(params.redirect_uri),
@@ -181,7 +226,15 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
 
         self._token_pairs[access_token_str] = refresh_token_str
 
-        log("OAuth code exchanged", {"client_id": authorization_code.client_id})
+        log(
+            "OAuth code exchanged",
+            {
+                "client_id": authorization_code.client_id,
+                "scopes": authorization_code.scopes,
+                "access_token": access_token_str[:8] + "...",
+                "resource": str(authorization_code.resource) if authorization_code.resource else None,
+            },
+        )
 
         return OAuthToken(
             access_token=access_token_str,
@@ -248,12 +301,25 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
         )
 
     async def load_access_token(self, token: str) -> Optional[AccessToken]:
+        token_prefix = token[:8] + "..." if len(token) > 8 else token
+
         # Check OAuth tokens first
         at = self._access_tokens.get(token)
         if at is not None:
             if at.expires_at is not None and time.time() > at.expires_at:
                 self._access_tokens.pop(token, None)
+                log("OAuth load_access_token", {"token": token_prefix, "result": "expired"})
                 return None
+            log(
+                "OAuth load_access_token",
+                {
+                    "token": token_prefix,
+                    "result": "valid",
+                    "client_id": at.client_id,
+                    "scopes": at.scopes,
+                    "resource": str(at.resource) if at.resource else None,
+                },
+            )
             return at
 
         # Fallback: treat the token as an API key
@@ -261,12 +327,14 @@ class BridgeOAuthProvider(OAuthAuthorizationServerProvider):
         if raw.strip():
             api_keys = [k.strip() for k in raw.split(",") if k.strip()]
             if token in api_keys:
+                log("OAuth load_access_token", {"token": token_prefix, "result": "api-key-match"})
                 return AccessToken(
                     token=token,
                     client_id="api-key-client",
                     scopes=[],
                 )
 
+        log("OAuth load_access_token", {"token": token_prefix, "result": "not-found"})
         return None
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:

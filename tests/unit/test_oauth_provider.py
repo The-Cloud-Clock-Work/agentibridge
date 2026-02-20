@@ -14,7 +14,6 @@ from agentibridge.oauth_provider import (
 from mcp.server.auth.provider import (
     AuthorizationParams,
     AuthorizeError,
-    RegistrationError,
 )
 from mcp.shared.auth import OAuthClientInformationFull
 
@@ -708,8 +707,8 @@ class TestPreConfiguredCredentials:
         assert await provider.get_client("other-client") is None
 
     @pytest.mark.asyncio
-    async def test_dynamic_registration_rejected_when_locked(self):
-        """Dynamic registration raises RegistrationError when locked."""
+    async def test_dynamic_registration_returns_preconfigured_when_locked(self):
+        """Dynamic registration returns pre-configured credentials when locked."""
         provider = BridgeOAuthProvider(
             issuer_url=_ISSUER,
             client_id="my-client",
@@ -717,10 +716,14 @@ class TestPreConfiguredCredentials:
         )
         new_client = _make_client_info()
 
-        with pytest.raises(RegistrationError) as exc_info:
-            await provider.register_client(new_client)
+        await provider.register_client(new_client)
 
-        assert "disabled" in str(exc_info.value.error_description).lower()
+        assert new_client.client_id == "my-client"
+        assert new_client.client_secret == "my-secret"
+
+        # Verify stored client is retrievable
+        stored = await provider.get_client("my-client")
+        assert stored is not None
 
     @pytest.mark.asyncio
     async def test_dynamic_registration_works_when_unlocked(self):
