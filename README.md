@@ -4,25 +4,48 @@ Standalone MCP server that indexes Claude Code CLI transcripts and exposes them 
 
 ## TL;DR — Fastest Start
 
+### Local only (same machine)
+
 ```bash
 git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
 cd agentic-bridge
 docker compose up --build -d
 curl http://localhost:8100/health
-# {"status": "ok", "service": "session-bridge"}
 ```
 
-Add to your `~/.mcp.json` and start using the 10 MCP tools:
+Add to `~/.mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "session-bridge": {
-      "url": "http://localhost:8100/sse"
-    }
+    "session-bridge": { "url": "http://localhost:8100/sse" }
   }
 }
 ```
+
+### With a public domain (access from anywhere)
+
+If you want a persistent URL like `https://mcp.yourdomain.com`, set up the Cloudflare Tunnel **first**, then start the bridge:
+
+```bash
+git clone https://github.com/The-Cloud-Clock-Work/agentic-bridge.git
+cd agentic-bridge
+./automation/cloudfared.sh          # 1. sets up tunnel + DNS (interactive)
+docker compose up --build -d        # 2. starts the bridge on :8100
+curl https://mcp.yourdomain.com/health
+```
+
+Add to `~/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "session-bridge": { "url": "https://mcp.yourdomain.com/mcp" }
+  }
+}
+```
+
+The domain is **not** configured in the bridge itself — it lives in the Cloudflare Tunnel config (`~/.cloudflared/config.yml`), which the setup script writes for you. The bridge just listens on `localhost:8100` and the tunnel routes your domain to it.
 
 Done. Your Claude Code sessions are now searchable.
 
@@ -94,9 +117,13 @@ agentic-bridge install --native    # Native Python
 
 ## Expose via Cloudflare Tunnel
 
-Access your bridge from anywhere — no port forwarding needed.
+Access your bridge from anywhere — no port forwarding, no public IP needed. Cloudflare handles TLS and routing.
+
+> **Where does the domain live?** The bridge has no domain config — it only knows about `localhost:8100`. Your domain is configured entirely in Cloudflare's tunnel config (`~/.cloudflared/config.yml`), which maps `mcp.yourdomain.com` → `localhost:8100`. The setup script writes this for you.
 
 ### Quick tunnel (no Cloudflare account)
+
+Temporary `*.trycloudflare.com` URL that changes on every restart. Good for testing.
 
 ```bash
 docker compose --profile tunnel up -d
@@ -105,7 +132,11 @@ agentic-bridge tunnel   # prints the public URL
 
 ### Named tunnel (persistent hostname)
 
-For a stable URL like `https://mcp.yourdomain.com` that survives restarts, use the setup script. You need a **Cloudflare account** with at least one domain added to it.
+For a stable URL like `https://mcp.yourdomain.com` that survives restarts.
+
+**Prerequisites:** A [Cloudflare account](https://dash.cloudflare.com/sign-up) with at least one domain added.
+
+**Run the setup script BEFORE `docker compose up`:**
 
 ```bash
 chmod +x automation/cloudfared.sh
@@ -114,21 +145,35 @@ chmod +x automation/cloudfared.sh
 
 The script walks you through 10 steps interactively:
 
-| Step | What it does | What you do |
-|------|-------------|-------------|
+| Step | What it does | What you provide |
+|------|-------------|-----------------|
 | 1 | Installs `cloudflared` binary (Linux/macOS) | Nothing — skips if already installed |
 | 2 | Authenticates with Cloudflare | Opens your browser to log in (one-time) |
-| 3 | Creates a named tunnel | Enter a tunnel name (default: `session-bridge`) |
-| 4 | Checks if tunnel already exists | Nothing — skips if it exists |
-| 5-6 | Sets up your hostname | Enter your **subdomain** (e.g. `mcp`) and **domain** (e.g. `yourdomain.com`) |
-| 7 | Creates DNS CNAME route | Automatic — points `mcp.yourdomain.com` → tunnel |
+| 3 | Prompts for tunnel name | A name, or press Enter for `session-bridge` |
+| 4 | Creates the tunnel | Nothing — skips if it already exists |
+| 5 | Prompts for subdomain | **Required** — e.g. `mcp` |
+| 6 | Prompts for domain | **Required** — e.g. `yourdomain.com` |
+| 7 | Creates DNS CNAME route | Automatic — `mcp.yourdomain.com` → tunnel |
 | 8 | Writes `~/.cloudflared/config.yml` | Nothing — backs up existing config if different |
 | 9 | Optionally installs systemd service | Answer y/N |
-| 10 | Health check | Verifies the tunnel is reachable |
+| 10 | Health check | Validates the tunnel is reachable |
+
+The generated config looks like this:
+
+```yaml
+# ~/.cloudflared/config.yml (written by the script)
+tunnel: <tunnel-uuid>
+credentials-file: ~/.cloudflared/<tunnel-uuid>.json
+
+ingress:
+  - hostname: mcp.yourdomain.com
+    service: http://localhost:8100    # ← points at your bridge
+  - service: http_status:404
+```
 
 The script is **idempotent** — safe to re-run. If everything is already set up, every step shows "already exists / skipping".
 
-After the script finishes, start the bridge and verify:
+**After the script finishes**, start the bridge:
 
 ```bash
 docker compose up --build -d
@@ -136,7 +181,7 @@ curl https://mcp.yourdomain.com/health
 # {"status": "ok", "service": "session-bridge"}
 ```
 
-**Alternative (Docker-only):** If you already created a tunnel in the Cloudflare Zero Trust dashboard, pass the token directly:
+**Alternative (Docker-only):** If you already created a tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/), pass the token directly:
 
 ```bash
 CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d
