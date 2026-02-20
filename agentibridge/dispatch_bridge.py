@@ -27,6 +27,7 @@ from agentibridge.logging import log
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 def _bridge_secret() -> str:
     return os.environ.get("DISPATCH_BRIDGE_SECRET", "")
 
@@ -47,6 +48,7 @@ def _max_timeout() -> int:
 # ASGI application (pure Starlette-style, no FastAPI needed)
 # ---------------------------------------------------------------------------
 
+
 async def _read_body(receive) -> bytes:
     """Read full request body from ASGI receive callable."""
     body = b""
@@ -61,14 +63,16 @@ async def _read_body(receive) -> bytes:
 async def _send_json(send, status: int, data: dict) -> None:
     """Send a JSON response via ASGI send callable."""
     payload = json.dumps(data).encode()
-    await send({
-        "type": "http.response.start",
-        "status": status,
-        "headers": [
-            [b"content-type", b"application/json"],
-            [b"content-length", str(len(payload)).encode()],
-        ],
-    })
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(payload)).encode()],
+            ],
+        }
+    )
     await send({"type": "http.response.body", "body": payload})
 
 
@@ -116,7 +120,7 @@ async def _handle_dispatch(scope, receive, send):
     body = await _read_body(receive)
     try:
         data = json.loads(body)
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         await _send_json(send, 400, {"error": "Invalid JSON body"})
         return
 
@@ -134,11 +138,14 @@ async def _handle_dispatch(scope, receive, send):
     if timeout > max_t:
         timeout = max_t
 
-    log("dispatch_bridge: dispatching", {
-        "model": model,
-        "prompt_len": len(prompt),
-        "timeout": timeout,
-    })
+    log(
+        "dispatch_bridge: dispatching",
+        {
+            "model": model,
+            "prompt_len": len(prompt),
+            "timeout": timeout,
+        },
+    )
 
     # Run Claude CLI
     result: ClaudeResult = await run_claude(
@@ -155,12 +162,16 @@ async def _handle_dispatch(scope, receive, send):
 # Entrypoint
 # ---------------------------------------------------------------------------
 
+
 def main():
     """Start the dispatch bridge server."""
     secret = _bridge_secret()
     if not secret:
         print("ERROR: DISPATCH_BRIDGE_SECRET env var is required.", file=sys.stderr)
-        print("Set it before starting: DISPATCH_BRIDGE_SECRET=mysecret python -m agentibridge.dispatch_bridge", file=sys.stderr)
+        print(
+            "Set it before starting: DISPATCH_BRIDGE_SECRET=mysecret python -m agentibridge.dispatch_bridge",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     host = _bridge_host()
@@ -170,6 +181,7 @@ def main():
     print(f"Secret configured: {'*' * len(secret)}")
 
     import uvicorn
+
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

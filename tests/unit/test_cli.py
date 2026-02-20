@@ -54,7 +54,13 @@ class TestCmdConnect:
         args.host = None
         args.port = None
         args.api_key = None
-        cmd_connect(args)
+        import os
+
+        env = os.environ.copy()
+        env.pop("AGENTIBRIDGE_HOST", None)
+        env.pop("AGENTIBRIDGE_PORT", None)
+        with patch.dict("os.environ", env, clear=True):
+            cmd_connect(args)
         output = capsys.readouterr().out
         assert "Claude Code CLI" in output
         assert "ChatGPT" in output

@@ -69,7 +69,7 @@ class TestRunClaude:
             return mock_proc
 
         with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
-            result = asyncio.get_event_loop().run_until_complete(run_claude("test prompt", model="sonnet"))
+            result = asyncio.run(run_claude("test prompt", model="sonnet"))
 
         assert result.success is True
         assert result.result == "All done"
@@ -85,7 +85,7 @@ class TestRunClaude:
             return mock_proc
 
         with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
-            result = asyncio.get_event_loop().run_until_complete(run_claude("test prompt"))
+            result = asyncio.run(run_claude("test prompt"))
 
         assert result.success is False
         assert result.exit_code == 1
@@ -99,14 +99,14 @@ class TestRunClaude:
             return mock_proc
 
         with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
-            result = asyncio.get_event_loop().run_until_complete(run_claude("test prompt", timeout=1))
+            result = asyncio.run(run_claude("test prompt", timeout=1))
 
         assert result.success is False
         assert result.timed_out is True
 
     def test_binary_not_found(self):
         with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError()):
-            result = asyncio.get_event_loop().run_until_complete(run_claude("test prompt"))
+            result = asyncio.run(run_claude("test prompt"))
 
         assert result.success is False
         assert "not found" in result.error
@@ -128,7 +128,7 @@ class TestRunClaude:
             patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
             patch.dict("os.environ", {"CLAUDE_BINARY": "/usr/bin/claude"}),
         ):
-            asyncio.get_event_loop().run_until_complete(run_claude("hello world", model="opus", output_format="json"))
+            asyncio.run(run_claude("hello world", model="opus", output_format="json"))
 
         cmd_args = calls[0][0]
         assert cmd_args[0] == "/usr/bin/claude"
@@ -150,7 +150,7 @@ class TestRunClaude:
             return mock_proc
 
         with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
-            result = asyncio.get_event_loop().run_until_complete(run_claude("test prompt"))
+            result = asyncio.run(run_claude("test prompt"))
 
         assert result.success is False
         assert result.error == "Bad input"

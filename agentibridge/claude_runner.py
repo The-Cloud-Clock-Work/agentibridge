@@ -98,7 +98,7 @@ def parse_claude_output(raw: str) -> Dict[str, Any]:
     """
     try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         return {"result": raw, "parse_error": True}
 
     return data

@@ -42,9 +42,7 @@ class TestRunClaudeHttp:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = asyncio.run(
-                _run_claude_http("http://localhost:8101", "test prompt", "sonnet", 300, "json")
-            )
+            result = asyncio.run(_run_claude_http("http://localhost:8101", "test prompt", "sonnet", 300, "json"))
 
         assert result.success is True
         assert result.result == "All done"
@@ -63,9 +61,7 @@ class TestRunClaudeHttp:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = asyncio.run(
-                _run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json")
-            )
+            result = asyncio.run(_run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json"))
 
         assert result.success is False
         assert "401" in result.error
@@ -82,9 +78,7 @@ class TestRunClaudeHttp:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = asyncio.run(
-                _run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json")
-            )
+            result = asyncio.run(_run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json"))
 
         assert result.success is False
         assert "500" in result.error
@@ -99,9 +93,7 @@ class TestRunClaudeHttp:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = asyncio.run(
-                _run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json")
-            )
+            result = asyncio.run(_run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json"))
 
         assert result.success is False
         assert "Cannot connect" in result.error
@@ -116,9 +108,7 @@ class TestRunClaudeHttp:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = asyncio.run(
-                _run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json")
-            )
+            result = asyncio.run(_run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json"))
 
         assert result.success is False
         assert result.timed_out is True
@@ -138,9 +128,7 @@ class TestRunClaudeHttp:
             patch("httpx.AsyncClient", return_value=mock_client),
             patch.dict("os.environ", {"DISPATCH_SECRET": "my-secret-123"}),
         ):
-            asyncio.run(
-                _run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json")
-            )
+            asyncio.run(_run_claude_http("http://localhost:8101", "test", "sonnet", 300, "json"))
 
         call_kwargs = mock_client.post.call_args[1]
         assert call_kwargs["headers"]["X-Dispatch-Secret"] == "my-secret-123"
@@ -157,9 +145,7 @@ class TestRunClaudeHttp:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            asyncio.run(
-                _run_claude_http("http://localhost:8101/", "test", "sonnet", 300, "json")
-            )
+            asyncio.run(_run_claude_http("http://localhost:8101/", "test", "sonnet", 300, "json"))
 
         call_args = mock_client.post.call_args
         assert call_args[0][0] == "http://localhost:8101/dispatch"
@@ -270,9 +256,13 @@ class TestDispatchBridgeApp:
 
     def test_dispatch_wrong_secret(self):
         """Request with wrong secret returns 401."""
-        scope = self._make_scope("POST", "/dispatch", [
-            (b"x-dispatch-secret", b"wrong-secret"),
-        ])
+        scope = self._make_scope(
+            "POST",
+            "/dispatch",
+            [
+                (b"x-dispatch-secret", b"wrong-secret"),
+            ],
+        )
 
         with patch.dict("os.environ", {"DISPATCH_BRIDGE_SECRET": "real-secret"}):
             responses = asyncio.run(self._call_app(scope, json.dumps({"prompt": "hi"}).encode()))
@@ -282,9 +272,13 @@ class TestDispatchBridgeApp:
 
     def test_dispatch_missing_prompt(self):
         """Request without prompt returns 400."""
-        scope = self._make_scope("POST", "/dispatch", [
-            (b"x-dispatch-secret", b"real-secret"),
-        ])
+        scope = self._make_scope(
+            "POST",
+            "/dispatch",
+            [
+                (b"x-dispatch-secret", b"real-secret"),
+            ],
+        )
 
         with patch.dict("os.environ", {"DISPATCH_BRIDGE_SECRET": "real-secret"}):
             responses = asyncio.run(self._call_app(scope, json.dumps({"model": "sonnet"}).encode()))
@@ -295,9 +289,13 @@ class TestDispatchBridgeApp:
 
     def test_dispatch_invalid_json(self):
         """Request with invalid JSON body returns 400."""
-        scope = self._make_scope("POST", "/dispatch", [
-            (b"x-dispatch-secret", b"real-secret"),
-        ])
+        scope = self._make_scope(
+            "POST",
+            "/dispatch",
+            [
+                (b"x-dispatch-secret", b"real-secret"),
+            ],
+        )
 
         with patch.dict("os.environ", {"DISPATCH_BRIDGE_SECRET": "real-secret"}):
             responses = asyncio.run(self._call_app(scope, b"not json"))
@@ -308,9 +306,13 @@ class TestDispatchBridgeApp:
 
     def test_dispatch_success(self):
         """Successful dispatch returns ClaudeResult JSON."""
-        scope = self._make_scope("POST", "/dispatch", [
-            (b"x-dispatch-secret", b"real-secret"),
-        ])
+        scope = self._make_scope(
+            "POST",
+            "/dispatch",
+            [
+                (b"x-dispatch-secret", b"real-secret"),
+            ],
+        )
         payload = json.dumps({"prompt": "Hello", "model": "sonnet", "timeout": 60}).encode()
 
         mock_result = ClaudeResult(
@@ -334,9 +336,13 @@ class TestDispatchBridgeApp:
 
     def test_dispatch_timeout_capped(self):
         """Timeout is capped at CLAUDE_DISPATCH_TIMEOUT."""
-        scope = self._make_scope("POST", "/dispatch", [
-            (b"x-dispatch-secret", b"real-secret"),
-        ])
+        scope = self._make_scope(
+            "POST",
+            "/dispatch",
+            [
+                (b"x-dispatch-secret", b"real-secret"),
+            ],
+        )
         # Request a timeout of 9999, which should be capped to 600
         payload = json.dumps({"prompt": "Hello", "timeout": 9999}).encode()
 
@@ -344,7 +350,9 @@ class TestDispatchBridgeApp:
 
         with (
             patch.dict("os.environ", {"DISPATCH_BRIDGE_SECRET": "real-secret", "CLAUDE_DISPATCH_TIMEOUT": "600"}),
-            patch("agentibridge.dispatch_bridge.run_claude", new_callable=AsyncMock, return_value=mock_result) as mock_run,
+            patch(
+                "agentibridge.dispatch_bridge.run_claude", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_run,
         ):
             asyncio.run(self._call_app(scope, payload))
 
