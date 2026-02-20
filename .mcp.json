@@ -2,7 +2,7 @@
   "mcpServers": {
     "agentibridge": {
       "type": "http",
-      "url": "https://engagement-thinks-disco-type.trycloudflare.com/mcp",
+      "url": "http://localhost:8100/mcp",
       "headers": {
         "X-API-Key": "{AGENTIBRIDGE_API_KEYS}"
       }
