@@ -1,18 +1,13 @@
 [Unit]
-Description=AgentiBridge MCP Server (Docker)
+Description=AgentiBridge MCP Server (Docker Compose)
 Requires=docker.service
 After=docker.service
 
 [Service]
 Type=simple
-ExecStartPre=-/usr/bin/docker stop agentibridge
-ExecStartPre=-/usr/bin/docker rm agentibridge
-ExecStart=/usr/bin/docker run --rm --name agentibridge \
-    -p 8100:8100 \
-    -v %h/.claude/projects:/home/appuser/.claude/projects:ro \
-    --env-file %h/.config/agentibridge/env \
-    ghcr.io/the-cloud-clock-work/agentibridge:allinone-latest
-ExecStop=/usr/bin/docker stop agentibridge
+WorkingDirectory=%h/agentibridge
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
 Restart=on-failure
 RestartSec=10
 

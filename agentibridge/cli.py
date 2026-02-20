@@ -219,9 +219,6 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("  Remote (SSE):    AGENTIBRIDGE_TRANSPORT=sse python -m agentibridge")
     print("  Docker:          docker compose up --build -d")
     print("  Tunnel:          docker compose --profile tunnel up -d")
-    print(
-        "  All-in-one:      docker run -d -p 8100:8100 -v ~/.claude/projects:/home/appuser/.claude/projects:ro agentibridge:allinone"
-    )
     print()
     print("Run 'agentibridge connect' for client connection strings.")
 

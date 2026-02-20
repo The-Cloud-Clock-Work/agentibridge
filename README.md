@@ -85,18 +85,7 @@ docker compose up --build -d
 
 Separate containers for app and Redis. The `docker-compose.yml` mounts `~/.claude/projects` read-only and starts agentibridge on port `8100`.
 
-### Option 2: All-in-One Docker
-
-```bash
-docker run -d -p 8100:8100 \
-  -v ~/.claude/projects:/home/appuser/.claude/projects:ro \
-  --name agentibridge \
-  ghcr.io/the-cloud-clock-work/agentibridge:allinone-latest
-```
-
-Single container with embedded Redis. No external dependencies.
-
-### Option 3: pip install (local/development)
+### Option 2: pip install (local/development)
 
 ```bash
 pip install -e .
@@ -106,7 +95,7 @@ python -m agentibridge          # stdio transport (local MCP)
 AGENTIBRIDGE_TRANSPORT=sse python -m agentibridge
 ```
 
-### Option 4: systemd service (auto-start on boot)
+### Option 3: systemd service (auto-start on boot)
 
 ```bash
 pip install -e .
@@ -354,7 +343,7 @@ These also run on a daily schedule via GitHub Actions (`e2e-smoke.yml`).
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
 | `test.yml` | Push/PR | Unit tests (Python 3.11 + 3.12 matrix), lint (ruff) |
-| `build.yml` | Push to main | Builds Docker images → GHCR (standard + all-in-one) |
+| `build.yml` | Push to main | Builds Docker image → GHCR |
 | `e2e-smoke.yml` | Daily + manual | Runs 6 MCP tool smoke tests via Claude CLI against live tunnel |
 | `claude.yml` | Issue/PR comments | Claude Code integration for automated code review |
 
