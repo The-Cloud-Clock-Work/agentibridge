@@ -33,24 +33,7 @@ services:
     volumes:
       # Mount host Claude CLI transcripts (read-only)
       - ${CLAUDE_PROJECTS_DIR:-~/.claude/projects}:/home/appuser/.claude/projects:ro
-    environment:
-      - AGENTIBRIDGE_TRANSPORT=sse
-      - AGENTIBRIDGE_HOST=0.0.0.0
-      - AGENTIBRIDGE_PORT=8100
-      - AGENTIBRIDGE_API_KEYS=${AGENTIBRIDGE_API_KEYS:-}
-      - AGENTIBRIDGE_POLL_INTERVAL=${AGENTIBRIDGE_POLL_INTERVAL:-60}
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-agentibridge}
-      - POSTGRES_URL=postgresql://agentibridge:${POSTGRES_PASSWORD:-agentibridge}@postgres:5432/agentibridge
-      - LLM_API_BASE=${LLM_API_BASE:-}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_EMBED_MODEL=${LLM_EMBED_MODEL:-}
-      - OAUTH_ISSUER_URL=${OAUTH_ISSUER_URL:-}
-      - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
-      - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
-      - OAUTH_RESOURCE_URL=${OAUTH_RESOURCE_URL:-}
-      - OAUTH_ALLOWED_REDIRECT_URIS=${OAUTH_ALLOWED_REDIRECT_URIS:-}
-      - OAUTH_ALLOWED_SCOPES=${OAUTH_ALLOWED_SCOPES:-}
+    env_file: .env
     networks:
       - sb-network
     depends_on:
@@ -80,10 +63,7 @@ services:
   postgres:
     container_name: agentibridge-postgres
     image: pgvector/pgvector:pg16
-    environment:
-      - POSTGRES_USER=agentibridge
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-agentibridge}
-      - POSTGRES_DB=agentibridge
+    env_file: .env
     volumes:
       - sb_postgres_data:/var/lib/postgresql/data
     networks:
