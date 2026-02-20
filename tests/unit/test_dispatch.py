@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentibridge.claude_runner import ClaudeResult
 from agentibridge.dispatch import restore_session_context, dispatch_task
 from tests.conftest import make_entry, make_meta
 
@@ -83,42 +84,38 @@ class TestRestoreSessionContext:
 @pytest.mark.unit
 class TestDispatchTask:
     def test_basic_dispatch(self):
-        with patch("agentibridge.completions.CompletionsClient.get_client") as mock_get:
-            mock_client = MagicMock()
-            mock_client.call.return_value = MagicMock(
-                success=True,
-                exit_code=0,
-                duration_ms=500,
-                timed_out=False,
-                parsed_output={"result": "done"},
-                error=None,
-            )
-            mock_get.return_value = mock_client
+        mock_result = ClaudeResult(
+            success=True,
+            result="done",
+            exit_code=0,
+            duration_ms=500,
+            timed_out=False,
+            error=None,
+        )
 
+        with patch("agentibridge.claude_runner.run_claude_sync", return_value=mock_result) as mock_run:
             result = dispatch_task("Fix the bug")
 
             assert result["dispatched"] is True
             assert result["completed"] is True
             assert result["error"] is None
+            mock_run.assert_called_once()
+            # Default command maps to "sonnet"
+            assert mock_run.call_args[1]["model"] == "sonnet"
 
     def test_with_project(self):
-        with patch("agentibridge.completions.CompletionsClient.get_client") as mock_get:
-            mock_client = MagicMock()
-            mock_client.call.return_value = MagicMock(
-                success=True,
-                exit_code=0,
-                duration_ms=100,
-                timed_out=False,
-                parsed_output=None,
-                error=None,
-            )
-            mock_get.return_value = mock_client
+        mock_result = ClaudeResult(
+            success=True,
+            result="done",
+            exit_code=0,
+            duration_ms=100,
+        )
 
+        with patch("agentibridge.claude_runner.run_claude_sync", return_value=mock_result) as mock_run:
             result = dispatch_task("Fix bug", project="myapp")
 
             assert result["dispatched"] is True
-            call_args = mock_client.call.call_args
-            prompt = call_args[1]["prompt"]
+            prompt = mock_run.call_args[1]["prompt"]
             assert "Project: myapp" in prompt
 
     def test_with_session_context(self):
@@ -129,67 +126,66 @@ class TestDispatchTask:
             make_entry("user", content="Previous work"),
         ]
 
+        mock_result = ClaudeResult(
+            success=True,
+            result="done",
+            exit_code=0,
+            duration_ms=100,
+        )
+
         with (
             patch("agentibridge.store.SessionStore", return_value=mock_store),
-            patch("agentibridge.completions.CompletionsClient.get_client") as mock_get,
+            patch("agentibridge.claude_runner.run_claude_sync", return_value=mock_result) as mock_run,
         ):
-            mock_client = MagicMock()
-            mock_client.call.return_value = MagicMock(
-                success=True,
-                exit_code=0,
-                duration_ms=100,
-                timed_out=False,
-                parsed_output=None,
-                error=None,
-            )
-            mock_get.return_value = mock_client
-
             result = dispatch_task("Fix bug", session_id="s1")
 
             assert result["context_session"] == "s1"
-            prompt = mock_client.call.call_args[1]["prompt"]
+            prompt = mock_run.call_args[1]["prompt"]
             assert "RESTORED SESSION CONTEXT" in prompt
 
     def test_context_restore_failure_graceful(self):
         mock_store = MagicMock()
         mock_store.get_session_meta.return_value = None
 
+        mock_result = ClaudeResult(
+            success=True,
+            result="done",
+            exit_code=0,
+            duration_ms=100,
+        )
+
         with (
             patch("agentibridge.store.SessionStore", return_value=mock_store),
-            patch("agentibridge.completions.CompletionsClient.get_client") as mock_get,
+            patch("agentibridge.claude_runner.run_claude_sync", return_value=mock_result) as mock_run,
         ):
-            mock_client = MagicMock()
-            mock_client.call.return_value = MagicMock(
-                success=True,
-                exit_code=0,
-                duration_ms=100,
-                timed_out=False,
-                parsed_output=None,
-                error=None,
-            )
-            mock_get.return_value = mock_client
-
             result = dispatch_task("Fix bug", session_id="bad-id")
 
             # Should still dispatch, just with error note in prompt
             assert result["dispatched"] is True
-            prompt = mock_client.call.call_args[1]["prompt"]
+            prompt = mock_run.call_args[1]["prompt"]
             assert "Failed to restore" in prompt
 
     def test_api_failure(self):
-        with patch("agentibridge.completions.CompletionsClient.get_client") as mock_get:
-            mock_client = MagicMock()
-            mock_client.call.return_value = MagicMock(
-                success=False,
-                exit_code=1,
-                duration_ms=100,
-                timed_out=False,
-                parsed_output=None,
-                error="API error",
-            )
-            mock_get.return_value = mock_client
+        mock_result = ClaudeResult(
+            success=False,
+            exit_code=1,
+            duration_ms=100,
+            error="CLI error",
+        )
 
+        with patch("agentibridge.claude_runner.run_claude_sync", return_value=mock_result):
             result = dispatch_task("Fix bug")
 
             assert result["completed"] is False
-            assert result["error"] == "API error"
+            assert result["error"] == "CLI error"
+
+    def test_command_model_mapping(self):
+        mock_result = ClaudeResult(success=True, result="done", exit_code=0)
+
+        with patch("agentibridge.claude_runner.run_claude_sync", return_value=mock_result) as mock_run:
+            dispatch_task("Task", command="ultrathink")
+            assert mock_run.call_args[1]["model"] == "opus"
+
+        with patch("agentibridge.claude_runner.run_claude_sync", return_value=mock_result) as mock_run:
+            dispatch_task("Task", command="thinkhard")
+            assert mock_run.call_args[1]["model"] == "sonnet"

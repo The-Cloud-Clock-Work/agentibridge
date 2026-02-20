@@ -219,53 +219,35 @@ class TestCosineSimilarityBatch:
 
 @pytest.mark.unit
 class TestGetEmbedFn:
-    """Tests for _get_embed_fn embedding backend selection."""
+    """Tests for _get_embed_fn LLM API backend selection."""
 
-    def test_no_backend_returns_none(self, monkeypatch):
-        """When EMBEDDING_BACKEND is not set, returns None."""
-        monkeypatch.delenv("EMBEDDING_BACKEND", raising=False)
+    def test_no_config_returns_none(self, monkeypatch):
+        """When LLM_API_BASE is not set, returns None."""
+        monkeypatch.delenv("LLM_API_BASE", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
         assert _get_embed_fn() is None
 
-    def test_empty_backend_returns_none(self, monkeypatch):
-        """When EMBEDDING_BACKEND is empty string, returns None."""
-        monkeypatch.setenv("EMBEDDING_BACKEND", "")
+    def test_missing_key_returns_none(self, monkeypatch):
+        """When LLM_API_KEY is not set, returns None."""
+        monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
         assert _get_embed_fn() is None
 
-    def test_ollama_backend(self, monkeypatch):
-        """When EMBEDDING_BACKEND=ollama, returns _embed_ollama."""
-        from agentibridge.embeddings import _embed_ollama
+    def test_configured_returns_embed_text(self, monkeypatch):
+        """When LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL are set, returns embed_text."""
+        from agentibridge.llm_client import embed_text
 
-        monkeypatch.setenv("EMBEDDING_BACKEND", "ollama")
+        monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
+        monkeypatch.setenv("LLM_API_KEY", "sk-test")
+        monkeypatch.setenv("LLM_EMBED_MODEL", "text-embedding-3-small")
         fn = _get_embed_fn()
-        assert fn is _embed_ollama
+        assert fn is embed_text
 
-    def test_ollama_backend_case_insensitive(self, monkeypatch):
-        """EMBEDDING_BACKEND is case-insensitive."""
-        from agentibridge.embeddings import _embed_ollama
-
-        monkeypatch.setenv("EMBEDDING_BACKEND", "OLLAMA")
-        fn = _get_embed_fn()
-        assert fn is _embed_ollama
-
-    def test_bedrock_backend(self, monkeypatch):
-        """When EMBEDDING_BACKEND=bedrock, returns _embed_bedrock."""
-        from agentibridge.embeddings import _embed_bedrock
-
-        monkeypatch.setenv("EMBEDDING_BACKEND", "bedrock")
-        fn = _get_embed_fn()
-        assert fn is _embed_bedrock
-
-    def test_bedrock_backend_case_insensitive(self, monkeypatch):
-        """EMBEDDING_BACKEND=Bedrock is recognized."""
-        from agentibridge.embeddings import _embed_bedrock
-
-        monkeypatch.setenv("EMBEDDING_BACKEND", "Bedrock")
-        fn = _get_embed_fn()
-        assert fn is _embed_bedrock
-
-    def test_unknown_backend_returns_none(self, monkeypatch):
-        """An unrecognized backend name returns None."""
-        monkeypatch.setenv("EMBEDDING_BACKEND", "openai")
+    def test_missing_embed_model_returns_none(self, monkeypatch):
+        """When LLM_EMBED_MODEL is empty, returns None."""
+        monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
+        monkeypatch.setenv("LLM_API_KEY", "sk-test")
+        monkeypatch.setenv("LLM_EMBED_MODEL", "")
         assert _get_embed_fn() is None
 
 
@@ -278,27 +260,26 @@ class TestGetEmbedFn:
 class TestTranscriptEmbedderIsAvailable:
     """Tests for TranscriptEmbedder.is_available."""
 
-    def test_not_available_no_backend(self, monkeypatch):
-        """is_available returns False when no embedding backend is configured."""
-        monkeypatch.delenv("EMBEDDING_BACKEND", raising=False)
+    def test_not_available_no_config(self, monkeypatch):
+        """is_available returns False when no LLM API is configured."""
+        monkeypatch.delenv("LLM_API_BASE", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
         embedder = TranscriptEmbedder()
         assert embedder.is_available() is False
 
-    def test_available_with_ollama(self, monkeypatch):
-        """is_available returns True when ollama backend is configured."""
-        monkeypatch.setenv("EMBEDDING_BACKEND", "ollama")
-        embedder = TranscriptEmbedder()
-        assert embedder.is_available() is True
-
-    def test_available_with_bedrock(self, monkeypatch):
-        """is_available returns True when bedrock backend is configured."""
-        monkeypatch.setenv("EMBEDDING_BACKEND", "bedrock")
+    def test_available_with_llm_api(self, monkeypatch):
+        """is_available returns True when LLM API is configured."""
+        monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
+        monkeypatch.setenv("LLM_API_KEY", "sk-test")
+        monkeypatch.setenv("LLM_EMBED_MODEL", "text-embedding-3-small")
         embedder = TranscriptEmbedder()
         assert embedder.is_available() is True
 
     def test_caches_embed_fn(self, monkeypatch):
         """is_available caches the embed function lookup."""
-        monkeypatch.setenv("EMBEDDING_BACKEND", "ollama")
+        monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
+        monkeypatch.setenv("LLM_API_KEY", "sk-test")
+        monkeypatch.setenv("LLM_EMBED_MODEL", "text-embedding-3-small")
         embedder = TranscriptEmbedder()
 
         # First call sets the cache
@@ -306,12 +287,13 @@ class TestTranscriptEmbedderIsAvailable:
         assert embedder._embed_checked is True
 
         # Change env var -- cached result should still be True
-        monkeypatch.delenv("EMBEDDING_BACKEND", raising=False)
+        monkeypatch.delenv("LLM_API_BASE", raising=False)
         assert embedder.is_available() is True
 
-    def test_not_available_with_unknown_backend(self, monkeypatch):
-        """is_available returns False for an unrecognized backend."""
-        monkeypatch.setenv("EMBEDDING_BACKEND", "unsupported")
+    def test_not_available_missing_key(self, monkeypatch):
+        """is_available returns False when API key is missing."""
+        monkeypatch.setenv("LLM_API_BASE", "https://api.example.com/v1")
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
         embedder = TranscriptEmbedder()
         assert embedder.is_available() is False
 

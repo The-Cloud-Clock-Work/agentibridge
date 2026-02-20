@@ -2,9 +2,7 @@
 
 Enables:
 1. Extracting context from past sessions for injection into new conversations
-2. Dispatching tasks to agents with optional session context
-
-Uses agentibridge.completions for agent dispatch via /completions API.
+2. Dispatching tasks to agents via the Claude CLI (no external API needed)
 """
 
 from typing import Any, Dict
@@ -86,11 +84,11 @@ def dispatch_task(
     command: str = "default",
     context_turns: int = 10,
 ) -> Dict[str, Any]:
-    """Dispatch a task to the agent, optionally injecting session context.
+    """Dispatch a task to the Claude CLI, optionally injecting session context.
 
     1. If session_id is provided, extracts context from that session
     2. Builds prompt combining task description + session context
-    3. Calls agent via /completions API
+    3. Runs Claude CLI via subprocess
     4. Returns result
 
     Args:
@@ -103,7 +101,15 @@ def dispatch_task(
     Returns:
         Dict with dispatch result, including success status and output
     """
-    from agentibridge.completions import call_completions
+    from agentibridge.claude_runner import run_claude_sync
+
+    # Map command presets to model names
+    model_map = {
+        "default": "sonnet",
+        "thinkhard": "sonnet",
+        "ultrathink": "opus",
+    }
+    model = model_map.get(command, "sonnet")
 
     # Build prompt
     prompt_parts = []
@@ -135,13 +141,8 @@ def dispatch_task(
 
     full_prompt = "".join(prompt_parts)
 
-    # Dispatch via completions API
-    result = call_completions(
-        prompt=full_prompt,
-        command=command,
-        wait=True,
-        stateless=True,
-    )
+    # Dispatch via Claude CLI
+    result = run_claude_sync(prompt=full_prompt, model=model)
 
     return {
         "dispatched": True,
@@ -149,7 +150,7 @@ def dispatch_task(
         "exit_code": result.exit_code,
         "duration_ms": result.duration_ms,
         "timed_out": result.timed_out,
-        "output": result.parsed_output,
+        "output": result.result,
         "error": result.error,
         "context_session": session_id or None,
         "prompt_length": len(full_prompt),

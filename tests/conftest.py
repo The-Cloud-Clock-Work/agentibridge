@@ -179,9 +179,8 @@ def mock_redis():
 
 @pytest.fixture
 def reset_singletons():
-    """Reset module-level singletons used by server.py and completions.py."""
+    """Reset module-level singletons used by server.py."""
     import agentibridge.server as srv
-    import agentibridge.completions as comp
 
     # Save
     old_store = srv._store
@@ -191,7 +190,6 @@ def reset_singletons():
     srv._store = None
     srv._collector = None
     srv._embedder = None
-    comp.CompletionsClient.reset()
 
     yield
 

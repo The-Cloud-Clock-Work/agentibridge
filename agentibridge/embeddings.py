@@ -1,11 +1,11 @@
 """Transcript embedding pipeline for semantic search.
 
 Chunks transcripts into conversation turns, generates embeddings via
-agentibridge.search infrastructure, stores vectors in Redis, and performs
-cosine similarity search.
+an OpenAI-compatible API (see llm_client.py), stores vectors in Redis,
+and performs cosine similarity search.
 
 Requires:
-  - Embedding backend configured (EMBEDDING_BACKEND=bedrock or ollama)
+  - LLM API configured (LLM_API_BASE, LLM_API_KEY, LLM_EMBED_MODEL)
   - Redis for vector storage (no file fallback for vectors)
 """
 
@@ -18,44 +18,12 @@ from agentibridge.logging import log
 
 
 def _get_embed_fn():
-    """Return an embed_query function based on EMBEDDING_BACKEND env var.
+    """Return an embed function if LLM API is configured for embeddings."""
+    from agentibridge import llm_client
 
-    Supported backends:
-      - "ollama"  — POST to Ollama /api/embeddings (local, default model nomic-embed-text)
-      - "bedrock" — AWS Bedrock via boto3 (model amazon.titan-embed-text-v1)
-    """
-    backend = os.getenv("EMBEDDING_BACKEND", "").lower()
-    if backend == "ollama":
-        return _embed_ollama
-    if backend == "bedrock":
-        return _embed_bedrock
+    if llm_client.is_embed_configured():
+        return llm_client.embed_text
     return None
-
-
-def _embed_ollama(text: str) -> List[float]:
-    """Generate embeddings via Ollama REST API."""
-    import httpx
-
-    url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-    resp = httpx.post(
-        f"{url}/api/embeddings",
-        json={"model": model, "prompt": text},
-        timeout=30.0,
-    )
-    resp.raise_for_status()
-    return resp.json()["embedding"]
-
-
-def _embed_bedrock(text: str) -> List[float]:
-    """Generate embeddings via AWS Bedrock."""
-    import boto3
-
-    client = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
-    model_id = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v1")
-    body = json.dumps({"inputText": text})
-    resp = client.invoke_model(modelId=model_id, body=body, contentType="application/json")
-    return json.loads(resp["body"].read())["embedding"]
 
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
@@ -135,7 +103,7 @@ class TranscriptEmbedder:
         """
         embed_fn = self._get_embed()
         if embed_fn is None:
-            raise RuntimeError("Embedding backend not available (configure EMBEDDING_BACKEND)")
+            raise RuntimeError("Embedding backend not available (configure LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL)")
 
         r = self._get_redis()
         if r is None:
@@ -284,7 +252,12 @@ class TranscriptEmbedder:
         return deduped
 
     def generate_summary(self, session_id: str) -> str:
-        """Generate session summary via Claude API (Anthropic SDK)."""
+        """Generate session summary via LLM.
+
+        Priority:
+        1. Anthropic SDK (if ANTHROPIC_API_KEY is set)
+        2. OpenAI-compatible API via llm_client (if LLM_API_BASE is set)
+        """
         from agentibridge.store import SessionStore
 
         store = SessionStore()
@@ -316,15 +289,13 @@ class TranscriptEmbedder:
             )
             summary = response.content[0].text
         except ImportError:
-            # Fallback: completions API
+            # Fallback: OpenAI-compatible API via llm_client
             try:
-                from agentibridge.completions import call_completions
+                from agentibridge import llm_client
 
-                result = call_completions(prompt=prompt, command="default", stateless=True)
-                if result.success and result.parsed_output:
-                    summary = result.parsed_output.get("result", "Summary generation failed")
-                else:
-                    return f"Summary generation failed: {result.error or 'unknown error'}"
+                if not llm_client.is_configured():
+                    return "Summary generation unavailable: set ANTHROPIC_API_KEY or LLM_API_BASE + LLM_API_KEY"
+                summary = llm_client.chat_completion(prompt=prompt)
             except Exception as e:
                 return f"Summary generation unavailable: {e}"
         except Exception as e:

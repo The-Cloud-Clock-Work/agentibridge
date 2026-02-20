@@ -419,7 +419,7 @@ def search_semantic(
 ) -> str:
     """Semantic search across session transcripts using embeddings.
 
-    Requires embedding backend (EMBEDDING_BACKEND) and Redis to be configured.
+    Requires LLM API configured (LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL) and Redis.
     Sessions must be embedded first via embed_session or auto-embedding.
 
     Args:
@@ -436,7 +436,7 @@ def search_semantic(
             return json.dumps(
                 {
                     "success": False,
-                    "error": "Embedding backend not available. Configure EMBEDDING_BACKEND.",
+                    "error": "Embedding backend not available. Configure LLM_API_BASE + LLM_API_KEY + LLM_EMBED_MODEL.",
                 }
             )
 
@@ -544,7 +544,7 @@ def dispatch_task(
     """Dispatch a task to the agent, optionally with context from a past session.
 
     If session_id is provided, extracts relevant context from that session
-    and injects it into the task prompt. Calls the agent via /completions API.
+    and injects it into the task prompt. Calls the agent via Claude CLI.
 
     Args:
         task_description: What the agent should do
