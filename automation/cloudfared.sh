@@ -107,22 +107,47 @@ ok "Using tunnel name: ${TUNNEL_NAME}"
 # ═════════════════════════════════════════════════════════════
 hdr "4/10  Create tunnel"
 
-TUNNEL_ID=$(cloudflared tunnel list -o json 2>/dev/null \
-    | jq -r --arg n "$TUNNEL_NAME" '.[] | select(.name==$n and .deleted_at==null) | .id' \
-    | head -1)
+_tunnel_id_by_name() {
+    # Extract tunnel ID by name from cloudflared JSON output.
+    # Try strict filter first (exclude deleted), fall back to name-only match.
+    local name="$1"
+    local id
+
+    id=$(cloudflared tunnel list -o json 2>/dev/null \
+        | jq -r --arg n "$name" \
+            '[.[] | select(.name==$n)] | [.[] | select(.deleted_at == null or .deleted_at == "")] | .[0].id // empty' \
+        2>/dev/null)
+
+    # Fallback: skip deleted_at filter entirely (some versions omit it)
+    if [[ -z "$id" || "$id" == "null" ]]; then
+        id=$(cloudflared tunnel list -o json 2>/dev/null \
+            | jq -r --arg n "$name" '[.[] | select(.name==$n)] | .[0].id // empty' \
+            2>/dev/null)
+    fi
+
+    [[ "$id" != "null" ]] && echo "$id"
+}
+
+TUNNEL_ID=$(_tunnel_id_by_name "$TUNNEL_NAME")
 
 if [[ -n "$TUNNEL_ID" ]]; then
     ok "Tunnel '${TUNNEL_NAME}' already exists (ID: ${TUNNEL_ID})"
 else
     info "Creating tunnel '${TUNNEL_NAME}'…"
-    cloudflared tunnel create "$TUNNEL_NAME"
+    CREATE_OUTPUT=$(cloudflared tunnel create "$TUNNEL_NAME" 2>&1)
+    echo "$CREATE_OUTPUT"
 
-    TUNNEL_ID=$(cloudflared tunnel list -o json 2>/dev/null \
-        | jq -r --arg n "$TUNNEL_NAME" '.[] | select(.name==$n and .deleted_at==null) | .id' \
-        | head -1)
+    # Try to read from tunnel list first
+    TUNNEL_ID=$(_tunnel_id_by_name "$TUNNEL_NAME")
+
+    # Fallback: parse "Created tunnel <name> with id <uuid>" from create output
+    if [[ -z "$TUNNEL_ID" ]]; then
+        TUNNEL_ID=$(echo "$CREATE_OUTPUT" | grep -oP 'with id \K[0-9a-f-]+' | head -1)
+    fi
 
     if [[ -z "$TUNNEL_ID" ]]; then
         err "Failed to read tunnel ID after creation"
+        err "Debug: run 'cloudflared tunnel list -o json | jq .' to inspect"
         exit 1
     fi
     ok "Tunnel created (ID: ${TUNNEL_ID})"
@@ -217,6 +242,9 @@ else
         SYSTEMD_ACTIVE=true
     fi
 
+    # Resolve full path — sudo uses a restricted PATH that may not include cloudflared
+    CLOUDFLARED_BIN=$(command -v cloudflared)
+
     if $SYSTEMD_ACTIVE; then
         ok "cloudflared systemd service already enabled"
         info "Restarting to pick up any config changes…"
@@ -227,7 +255,8 @@ else
         INSTALL_SERVICE="${INSTALL_SERVICE:-N}"
         if [[ "$INSTALL_SERVICE" =~ ^[Yy]$ ]]; then
             info "Installing systemd service…"
-            sudo cloudflared service install
+            # sudo runs as root, so ~ resolves to /root — pass explicit config path
+            sudo "$CLOUDFLARED_BIN" --config "$CONFIG_FILE" service install
             sudo systemctl enable --now cloudflared
             ok "Systemd service installed and started"
         else
