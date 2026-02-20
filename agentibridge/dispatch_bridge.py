@@ -120,7 +120,7 @@ async def _handle_dispatch(scope, receive, send):
     body = await _read_body(receive)
     try:
         data = json.loads(body)
-    except json.JSONDecodeError, TypeError:
+    except (json.JSONDecodeError, TypeError):
         await _send_json(send, 400, {"error": "Invalid JSON body"})
         return
 

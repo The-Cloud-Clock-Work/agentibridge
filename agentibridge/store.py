@@ -193,7 +193,7 @@ class SessionStore:
                 from datetime import datetime
 
                 score = datetime.fromisoformat(meta.last_update.replace("Z", "+00:00")).timestamp()
-            except ValueError, AttributeError:
+            except (ValueError, AttributeError):
                 score = 0.0
 
         pipe.zadd(_rkey("idx:all"), {meta.session_id: score})
@@ -234,7 +234,7 @@ class SessionStore:
             try:
                 data = json.loads(item)
                 entries.append(SessionEntry.from_dict(data))
-            except json.JSONDecodeError, TypeError:
+            except (json.JSONDecodeError, TypeError):
                 continue
         return entries
 
@@ -423,7 +423,7 @@ class SessionStore:
         if pos_file.exists():
             try:
                 return int(pos_file.read_text().strip())
-            except ValueError, OSError:
+            except (ValueError, OSError):
                 pass
         return 0
 
