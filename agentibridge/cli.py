@@ -11,7 +11,8 @@ Usage:
     agentibridge help       — Available MCP tools and configuration reference
     agentibridge connect    — Connection strings for Claude Code, ChatGPT, etc.
     agentibridge config     — Current config dump / generate .env template
-    agentibridge tunnel     — Cloudflare Tunnel status and URL
+    agentibridge bridge     — Manage dispatch bridge (start/stop/logs)
+    agentibridge tunnel     — Cloudflare Tunnel status and URL (tunnel setup for wizard)
     agentibridge locks      — Show Redis keys, file locks, and bridge resource state
     agentibridge install    — Install as systemd user service
     agentibridge uninstall  — Remove systemd service
@@ -21,10 +22,12 @@ Usage:
 import argparse
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -78,6 +81,30 @@ def cmd_status(args: argparse.Namespace) -> None:
             print("  docker:  not running")
     except Exception:
         print("  docker:  not checked (docker unavailable)")
+
+    # Per-container health checks
+    print("\n[Docker Stack]")
+    for container in ["agentibridge", "agentibridge-redis", "agentibridge-postgres"]:
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "inspect",
+                    "--format",
+                    "{{if .State.Health}}{{.State.Health.Status}}{{else}}no healthcheck{{end}}",
+                    container,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                health = result.stdout.strip()
+                print(f"  {container}: {health}")
+            else:
+                print(f"  {container}: not found")
+        except Exception:
+            print(f"  {container}: not checked")
 
     # Check Redis
     print("\n[Redis]")
@@ -285,7 +312,8 @@ def _extract_tunnel_url(log_output: str) -> str | None:
     return match.group(0) if match else None
 
 
-def cmd_tunnel(args: argparse.Namespace) -> None:
+def _cmd_tunnel_status() -> None:
+    """Show Cloudflare Tunnel container status and URL."""
     # Check docker availability
     if not shutil.which("docker"):
         print("Docker is not installed or not in PATH.")
@@ -312,6 +340,9 @@ def cmd_tunnel(args: argparse.Namespace) -> None:
         print()
         print("Start a named tunnel (persistent hostname):")
         print("  CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel up -d")
+        print()
+        print("Set up a named tunnel interactively:")
+        print("  agentibridge tunnel setup")
         return
 
     status = result.stdout.strip()
@@ -373,6 +404,164 @@ def cmd_tunnel(args: argparse.Namespace) -> None:
     # Unknown state
     print("Tunnel is running but could not determine mode.")
     print("Check logs: docker logs agentibridge-tunnel")
+
+
+def _cmd_tunnel_setup() -> None:
+    """Interactive 10-step wizard to install and configure a named cloudflared tunnel."""
+    # Step 1 — Install cloudflared
+    if not shutil.which("cloudflared"):
+        print("Step 1: Installing cloudflared...")
+        system = platform.system()
+        machine = platform.machine()
+        if system == "Linux":
+            arch_map = {"x86_64": "amd64", "aarch64": "arm64", "armv7l": "arm"}
+            arch = arch_map.get(machine)
+            if not arch:
+                print(f"ERROR: Unsupported architecture {machine}")
+                sys.exit(1)
+            url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{arch}"
+            dest = "/usr/local/bin/cloudflared"
+            subprocess.run(["sudo", "curl", "-fsSL", url, "-o", dest], check=True)
+            subprocess.run(["sudo", "chmod", "+x", dest], check=True)
+        elif system == "Darwin":
+            subprocess.run(["brew", "install", "cloudflared"], check=True)
+        else:
+            print(f"ERROR: Unsupported OS {system}")
+            sys.exit(1)
+        print("  cloudflared installed.")
+    else:
+        print("Step 1: cloudflared already installed.")
+
+    # Step 2 — Authenticate
+    print("Step 2: Checking cloudflared authentication...")
+    result = subprocess.run(["cloudflared", "tunnel", "list"], capture_output=True)
+    if result.returncode != 0:
+        print("  Launching browser login...")
+        subprocess.run(["cloudflared", "tunnel", "login"], check=True)
+
+    # Step 3 — Prompt tunnel name
+    name = input("Step 3: Tunnel name [agentibridge]: ").strip() or "agentibridge"
+
+    # Step 4 — Create tunnel (idempotent)
+    print(f"Step 4: Looking up or creating tunnel '{name}'...")
+    raw = subprocess.run(
+        ["cloudflared", "tunnel", "list", "-o", "json"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    tunnels = json.loads(raw or "[]")
+    tunnel_id = next(
+        (t["id"] for t in tunnels if t["name"] == name and not t.get("deleted_at")),
+        None,
+    )
+    if not tunnel_id:
+        out = subprocess.run(
+            ["cloudflared", "tunnel", "create", name],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        # Re-query list for ID
+        raw = subprocess.run(
+            ["cloudflared", "tunnel", "list", "-o", "json"],
+            capture_output=True,
+            text=True,
+        ).stdout
+        tunnels = json.loads(raw or "[]")
+        tunnel_id = next((t["id"] for t in tunnels if t["name"] == name), None)
+        if not tunnel_id:
+            m = re.search(r"with id ([0-9a-f-]+)", out)
+            tunnel_id = m.group(1) if m else None
+        if not tunnel_id:
+            print("ERROR: Could not determine tunnel ID")
+            sys.exit(1)
+    print(f"  Tunnel ID: {tunnel_id}")
+
+    # Steps 5+6 — Prompt subdomain + domain
+    subdomain = input("Step 5: Subdomain (e.g. mcp): ").strip()
+    domain = input("Step 6: Domain (e.g. example.com): ").strip()
+    hostname = f"{subdomain}.{domain}"
+
+    # Step 7 — DNS route
+    print(f"Step 7: Setting DNS route for {hostname}...")
+    subprocess.run(
+        ["cloudflared", "tunnel", "route", "dns", name, hostname],
+        check=False,  # idempotent — may already exist
+    )
+
+    # Step 8 — Write config.yml
+    print("Step 8: Writing ~/.cloudflared/config.yml...")
+    config_dir = Path.home() / ".cloudflared"
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / "config.yml"
+    creds_file = config_dir / f"{tunnel_id}.json"
+    port = os.getenv("AGENTIBRIDGE_PORT", "8100")
+    desired = (
+        f"tunnel: {tunnel_id}\n"
+        f"credentials-file: {creds_file}\n\n"
+        f"ingress:\n"
+        f"  - hostname: {hostname}\n"
+        f"    service: http://localhost:{port}\n"
+        f"  - service: http_status:404\n"
+    )
+    if config_file.exists() and config_file.read_text() != desired:
+        backup = config_file.with_suffix(f".yml.bak.{int(time.time())}")
+        shutil.copy2(config_file, backup)
+        print(f"  Backed up existing config to {backup}")
+    config_file.write_text(desired)
+    print(f"  Written: {config_file}")
+
+    # Step 9 — Optional systemd service (Linux only)
+    if platform.system() == "Linux":
+        print("Step 9: Systemd service setup...")
+        already = subprocess.run(
+            ["systemctl", "is-enabled", "cloudflared"],
+            capture_output=True,
+        ).returncode == 0
+        cf_bin = shutil.which("cloudflared")
+        if already:
+            subprocess.run(["sudo", "systemctl", "restart", "cloudflared"])
+            print("  Restarted existing cloudflared service.")
+        else:
+            answer = input("  Install cloudflared as systemd service? [y/N]: ").strip().lower()
+            if answer == "y":
+                subprocess.run(
+                    ["sudo", cf_bin, "--config", str(config_file), "service", "install"],
+                    check=True,
+                )
+                subprocess.run(
+                    ["sudo", "systemctl", "enable", "--now", "cloudflared"],
+                    check=True,
+                )
+                print("  cloudflared service enabled and started.")
+            else:
+                print(f"  Run manually: cloudflared tunnel run {name}")
+    else:
+        print(f"Step 9: Run manually: cloudflared tunnel run {name}")
+
+    # Step 10 — Health check
+    print("Step 10: Verifying tunnel health check...")
+    time.sleep(2)
+    result = subprocess.run(
+        ["curl", "-sf", "--max-time", "10", f"https://{hostname}/health"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        print(f"  Health check passed: {result.stdout.strip()}")
+    else:
+        print(f"  Health check pending — verify with: curl https://{hostname}/health")
+
+    print()
+    print(f"Setup complete! Your tunnel: https://{hostname}")
+
+
+def cmd_tunnel(args: argparse.Namespace) -> None:
+    action = getattr(args, "action", "status")
+    if action == "setup":
+        _cmd_tunnel_setup()
+    else:
+        _cmd_tunnel_status()
 
 
 def cmd_config(args: argparse.Namespace) -> None:
@@ -708,6 +897,28 @@ def cmd_locks(args: argparse.Namespace) -> None:
 
 _STACK_DIR = Path.home() / ".config" / "agentibridge"
 
+_REQUIRED_ENV_VARS = [
+    "REDIS_URL",
+    "POSTGRES_URL",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+    "AGENTIBRIDGE_TRANSPORT",
+    "AGENTIBRIDGE_PORT",
+]
+
+
+def _validate_env(env_file: Path) -> None:
+    """Exit with error if any required variable is missing from .env."""
+    text = env_file.read_text()
+    missing = [v for v in _REQUIRED_ENV_VARS if not re.search(rf"^\s*{v}=", text, re.MULTILINE)]
+    if missing:
+        print("ERROR: .env is missing required variables:")
+        for v in missing:
+            print(f"  • {v}")
+        print(f"\nReference: {env_file.parent / '.env.example'}")
+        sys.exit(1)
+
 
 def _ensure_stack_dir() -> Path:
     """Prepare ~/.config/agentibridge/ for docker compose operations.
@@ -728,7 +939,24 @@ def _ensure_stack_dir() -> Path:
         print(f"Created {env_dest} — edit it before running again")
         sys.exit(1)
 
+    _validate_env(env_dest)
     return _STACK_DIR
+
+
+def _detect_stack_state(stack_dir: Path) -> str:
+    """Returns 'running', 'partial', or 'stopped'."""
+    result = subprocess.run(
+        _compose_cmd(stack_dir) + ["ps", "--format", "{{.State}}"],
+        capture_output=True,
+        text=True,
+    )
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        return "stopped"
+    running = sum(1 for line in lines if "running" in line or line == "Up")
+    if running == 0:
+        return "stopped"
+    return "running" if running == len(lines) else "partial"
 
 
 def _compose_cmd(stack_dir: Path) -> list[str]:
@@ -750,6 +978,13 @@ def cmd_run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     stack_dir = _ensure_stack_dir()
+
+    state = _detect_stack_state(stack_dir)
+    if state == "running":
+        print("Stack is already running — pulling latest and restarting...")
+    elif state == "partial":
+        print("Stack is partially running — starting missing services...")
+
     cmd = _compose_cmd(stack_dir)
 
     if args.rebuild:
@@ -801,6 +1036,85 @@ def cmd_logs(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Bridge command
+# ---------------------------------------------------------------------------
+
+
+def _read_env_value(key: str, env_file: Path) -> str | None:
+    """Parse a single value from a .env file (skips comments)."""
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        if k.strip() == key:
+            return v.strip()
+    return None
+
+
+def cmd_bridge(args: argparse.Namespace) -> None:
+    """Manage the dispatch bridge (host-side Claude CLI proxy)."""
+    action = args.action
+    log_file = Path("/tmp/dispatch_bridge.log")
+
+    if action == "start":
+        env_file = _STACK_DIR / ".env"
+        if not env_file.exists():
+            print(f"ERROR: {env_file} not found. Run 'agentibridge run' first.")
+            sys.exit(1)
+        secret = _read_env_value("DISPATCH_SECRET", env_file)
+        if not secret:
+            print("ERROR: DISPATCH_SECRET not set in .env")
+            sys.exit(1)
+        port = _read_env_value("DISPATCH_BRIDGE_PORT", env_file) or "8101"
+
+        # Check already running
+        check = subprocess.run(
+            ["pgrep", "-f", "agentibridge.dispatch_bridge"],
+            capture_output=True,
+        )
+        if check.returncode == 0:
+            print(f"Dispatch bridge already running (PID {check.stdout.strip().decode()})")
+            return
+
+        env = {**os.environ, "DISPATCH_BRIDGE_SECRET": secret, "DISPATCH_BRIDGE_PORT": port}
+        with open(log_file, "w") as lf:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "agentibridge.dispatch_bridge"],
+                env=env,
+                stdout=lf,
+                stderr=lf,
+                start_new_session=True,
+            )
+        time.sleep(1)
+        if proc.poll() is None:
+            print(f"Dispatch bridge started (PID {proc.pid}, port {port})")
+            print(f"Logs: {log_file}")
+        else:
+            print(f"ERROR: Dispatch bridge failed to start — check {log_file}")
+            sys.exit(1)
+
+    elif action == "stop":
+        result = subprocess.run(
+            ["pgrep", "-f", "agentibridge.dispatch_bridge"],
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip():
+            print("No dispatch bridge process found.")
+            return
+        pids = result.stdout.strip().split()
+        subprocess.run(["kill"] + pids)
+        print(f"Dispatch bridge stopped (PID {' '.join(pids)})")
+
+    elif action == "logs":
+        if not log_file.exists():
+            print(f"No log file found at {log_file}")
+            sys.exit(1)
+        subprocess.run(["tail", "-f", str(log_file)])
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -842,8 +1156,19 @@ def main() -> None:
     connect_parser.add_argument("--port", default=None, help="Server port (default: 8100)")
     connect_parser.add_argument("--api-key", default=None, help="API key to include in examples")
 
+    # bridge
+    bridge_parser = subparsers.add_parser(
+        "bridge", help="Manage dispatch bridge (host-side Claude CLI proxy)"
+    )
+    bridge_parser.add_argument("action", choices=["start", "stop", "logs"])
+
     # tunnel
-    subparsers.add_parser("tunnel", help="Show Cloudflare Tunnel status and URL")
+    tunnel_parser = subparsers.add_parser(
+        "tunnel", help="Cloudflare Tunnel status and named tunnel setup"
+    )
+    tunnel_parser.add_argument(
+        "action", nargs="?", default="status", choices=["status", "setup"]
+    )
 
     # config
     config_parser = subparsers.add_parser("config", help="Show current config or generate .env template")
@@ -877,6 +1202,7 @@ def main() -> None:
         "help": cmd_help,
         "connect": cmd_connect,
         "tunnel": cmd_tunnel,
+        "bridge": cmd_bridge,
         "config": cmd_config,
         "install": cmd_install,
         "uninstall": cmd_uninstall,
