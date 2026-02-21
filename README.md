@@ -140,7 +140,7 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `AGENTIBRIDGE_TRANSPORT` | `stdio` | Set to `sse` for remote clients |
-| `AGENTIBRIDGE_HOST` | `0.0.0.0` | Bind address |
+| `AGENTIBRIDGE_HOST` | `127.0.0.1` | Bind address |
 | `AGENTIBRIDGE_PORT` | `8100` | Listen port |
 | `AGENTIBRIDGE_API_KEYS` | *(empty)* | Comma-separated API keys; empty = no auth |
 
