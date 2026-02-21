@@ -68,7 +68,10 @@ class TestRunClaude:
         async def fake_exec(*args, **kwargs):
             return mock_proc
 
-        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}),
+        ):
             result = asyncio.run(run_claude("test prompt", model="sonnet"))
 
         assert result.success is True
@@ -84,7 +87,10 @@ class TestRunClaude:
         async def fake_exec(*args, **kwargs):
             return mock_proc
 
-        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}),
+        ):
             result = asyncio.run(run_claude("test prompt"))
 
         assert result.success is False
@@ -98,14 +104,20 @@ class TestRunClaude:
         async def fake_exec(*args, **kwargs):
             return mock_proc
 
-        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}),
+        ):
             result = asyncio.run(run_claude("test prompt", timeout=1))
 
         assert result.success is False
         assert result.timed_out is True
 
     def test_binary_not_found(self):
-        with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError()):
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError()),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}),
+        ):
             result = asyncio.run(run_claude("test prompt"))
 
         assert result.success is False
@@ -126,7 +138,7 @@ class TestRunClaude:
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
-            patch.dict("os.environ", {"CLAUDE_BINARY": "/usr/bin/claude"}),
+            patch.dict("os.environ", {"CLAUDE_BINARY": "/usr/bin/claude", "CLAUDE_DISPATCH_URL": ""}),
         ):
             asyncio.run(run_claude("hello world", model="opus", output_format="json"))
 
@@ -149,7 +161,10 @@ class TestRunClaude:
         async def fake_exec(*args, **kwargs):
             return mock_proc
 
-        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}),
+        ):
             result = asyncio.run(run_claude("test prompt"))
 
         assert result.success is False
@@ -168,7 +183,10 @@ class TestRunClaudeSync:
         async def fake_exec(*args, **kwargs):
             return mock_proc
 
-        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}),
+        ):
             result = run_claude_sync("test", model="sonnet")
 
         assert result.success is True
