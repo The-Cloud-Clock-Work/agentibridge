@@ -72,8 +72,10 @@ agentibridge help
 | `agentibridge/store.py` | SessionStore (Redis + filesystem fallback) |
 | `agentibridge/collector.py` | Background polling daemon |
 | `agentibridge/transport.py` | SSE/HTTP transport + API key auth |
+| `agentibridge/oauth_provider.py` | OAuth 2.1 authorization server (opt-in) |
 | `agentibridge/embeddings.py` | Semantic search (Phase 2) |
 | `agentibridge/dispatch.py` | Background job dispatch, session restore (Phase 4) |
+| `agentibridge/dispatch_bridge.py` | Host-side HTTP bridge for Docker dispatch |
 | `agentibridge/claude_runner.py` | Claude CLI runner (dispatch) |
 | `agentibridge/llm_client.py` | OpenAI-compatible embeddings + chat |
 | `agentibridge/redis_client.py` | Redis helper |
@@ -99,6 +101,9 @@ AGENTIBRIDGE_API_KEYS=          # comma-separated, empty = no auth
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
 
+# Semantic search (Phase 2)
+AGENTIBRIDGE_EMBEDDING_ENABLED=false  # set to "true" to enable (requires POSTGRES_URL + LLM config)
+
 # Postgres + pgvector (vector storage for semantic search)
 POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
 PGVECTOR_DIMENSIONS=1536
@@ -116,6 +121,13 @@ ANTHROPIC_API_KEY=
 CLAUDE_BINARY=claude
 CLAUDE_DISPATCH_MODEL=sonnet
 CLAUDE_DISPATCH_TIMEOUT=300
+
+# Dispatch bridge (Docker mode — host-side proxy for Claude CLI)
+DISPATCH_SECRET=                # shared secret for bridge auth
+DISPATCH_BRIDGE_PORT=8101       # port the dispatch bridge listens on
+
+# Cloudflare Tunnel (optional — use docker compose --profile tunnel)
+CLOUDFLARE_TUNNEL_TOKEN=        # set for named tunnel; leave empty for quick tunnel
 
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true

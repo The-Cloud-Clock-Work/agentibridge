@@ -6,7 +6,7 @@ Thank you for your interest in contributing to AgentiBridge! This guide will hel
 
 ### Prerequisites
 
-- Python 3.11 or 3.12
+- Python 3.14
 - Docker and Docker Compose (for integration tests)
 - Redis (optional, for local development)
 - PostgreSQL with pgvector (optional, for semantic search development)
@@ -161,6 +161,7 @@ Our GitHub Actions workflows automatically run on pull requests:
 | `docker-publish.yml` | Tag push (`v*`) or manual | Publishes Docker image → Docker Hub |
 | `publish-pypi.yml` | Tag push (`v*`) or manual | Builds wheel + sdist → PyPI |
 | `release.yml` | Manual only | Bumps version in pyproject.toml, commits, tags, pushes |
+| `docs-audit.yml` | Manual only | Audits docs against source code, creates PR with fixes (Claude CLI) |
 | `e2e-smoke.yml` | Daily + manual | Runs 6 MCP tool smoke tests via Claude CLI against live tunnel |
 | `claude.yml` | Issue/PR comments | Claude Code integration for automated code review |
 
