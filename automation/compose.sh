@@ -207,6 +207,7 @@ add_option() {
 
 case "$STATE" in
     running)
+        add_option "stop-all"  "Stop everything (stack + bridge)"
         add_option "down"      "Stop the stack"
         add_option "restart"   "Restart the stack"
         add_option "rebuild"   "Rebuild & restart (docker compose up --build)"
@@ -214,6 +215,8 @@ case "$STATE" in
         add_option "status"    "Show detailed status"
         ;;
     partial)
+        add_option "start-all" "Start everything (stack + bridge)"
+        add_option "stop-all"  "Stop everything (stack + bridge)"
         add_option "up"        "Start all services"
         add_option "down"      "Stop everything"
         add_option "rebuild"   "Rebuild & restart (docker compose up --build)"
@@ -221,6 +224,7 @@ case "$STATE" in
         add_option "status"    "Show detailed status"
         ;;
     stopped)
+        add_option "start-all" "Start everything (stack + bridge)"
         add_option "up"        "Start the stack"
         add_option "rebuild"   "Build & start (docker compose up --build)"
         ;;
@@ -260,6 +264,23 @@ hdr "Executing: $ACTION"
 COMPOSE_CMD="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE"
 
 case "$ACTION" in
+    start-all)
+        info "Starting stack..."
+        $COMPOSE_CMD up -d
+        printf "\n"
+        ok "Stack started"
+        show_status
+        printf "\n"
+        start_bridge
+        ;;
+    stop-all)
+        stop_bridge
+        printf "\n"
+        info "Stopping stack..."
+        $COMPOSE_CMD down
+        printf "\n"
+        ok "Stack stopped"
+        ;;
     up)
         info "Starting stack..."
         $COMPOSE_CMD up -d
