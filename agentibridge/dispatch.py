@@ -195,22 +195,25 @@ async def dispatch_task(
     # Generate job ID and write initial state
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    _write_job(job_id, {
-        "job_id": job_id,
-        "status": "running",
-        "started_at": now,
-        "task": task_description,
-        "project": project,
-        "context_session": session_id or None,
-        "resumed_session": resume_session_id or None,
-        "prompt_length": len(full_prompt),
-        "output": None,
-        "error": None,
-        "exit_code": None,
-        "duration_ms": None,
-        "completed_at": None,
-        "claude_session_id": None,
-    })
+    _write_job(
+        job_id,
+        {
+            "job_id": job_id,
+            "status": "running",
+            "started_at": now,
+            "task": task_description,
+            "project": project,
+            "context_session": session_id or None,
+            "resumed_session": resume_session_id or None,
+            "prompt_length": len(full_prompt),
+            "output": None,
+            "error": None,
+            "exit_code": None,
+            "duration_ms": None,
+            "completed_at": None,
+            "claude_session_id": None,
+        },
+    )
 
     log("dispatch_task: started background job", {"job_id": job_id, "prompt_len": len(full_prompt)})
 
@@ -222,36 +225,42 @@ async def dispatch_task(
                 resume_session_id=resume_session_id or None,
             )
             completed_at = datetime.now(timezone.utc).isoformat()
-            _write_job(job_id, {
-                "job_id": job_id,
-                "status": "completed" if result.success else "failed",
-                "started_at": now,
-                "completed_at": completed_at,
-                "task": task_description,
-                "project": project,
-                "context_session": session_id or None,
-                "resumed_session": resume_session_id or None,
-                "prompt_length": len(full_prompt),
-                "output": result.result,
-                "error": result.error,
-                "exit_code": result.exit_code,
-                "duration_ms": result.duration_ms,
-                "timed_out": result.timed_out,
-                "claude_session_id": result.session_id,
-            })
+            _write_job(
+                job_id,
+                {
+                    "job_id": job_id,
+                    "status": "completed" if result.success else "failed",
+                    "started_at": now,
+                    "completed_at": completed_at,
+                    "task": task_description,
+                    "project": project,
+                    "context_session": session_id or None,
+                    "resumed_session": resume_session_id or None,
+                    "prompt_length": len(full_prompt),
+                    "output": result.result,
+                    "error": result.error,
+                    "exit_code": result.exit_code,
+                    "duration_ms": result.duration_ms,
+                    "timed_out": result.timed_out,
+                    "claude_session_id": result.session_id,
+                },
+            )
             log("dispatch_task: job finished", {"job_id": job_id, "success": result.success})
         except Exception as e:
             completed_at = datetime.now(timezone.utc).isoformat()
-            _write_job(job_id, {
-                "job_id": job_id,
-                "status": "failed",
-                "started_at": now,
-                "completed_at": completed_at,
-                "task": task_description,
-                "project": project,
-                "error": str(e),
-                "output": None,
-            })
+            _write_job(
+                job_id,
+                {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "started_at": now,
+                    "completed_at": completed_at,
+                    "task": task_description,
+                    "project": project,
+                    "error": str(e),
+                    "output": None,
+                },
+            )
             log("dispatch_task: job error", {"job_id": job_id, "error": str(e)})
 
     task = asyncio.create_task(_run_background())

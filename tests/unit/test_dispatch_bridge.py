@@ -382,9 +382,7 @@ class TestResumeSession:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            asyncio.run(
-                _run_claude_http("http://localhost:8101", "ping", "sonnet", 300, "json", "abc123")
-            )
+            asyncio.run(_run_claude_http("http://localhost:8101", "ping", "sonnet", 300, "json", "abc123"))
 
         call_kwargs = mock_client.post.call_args[1]
         assert call_kwargs["json"]["resume_session_id"] == "abc123"
@@ -460,11 +458,13 @@ class TestResumeSession:
             "path": "/dispatch",
             "headers": [(b"x-dispatch-secret", b"real-secret")],
         }
-        payload = json.dumps({
-            "prompt": "ping",
-            "model": "sonnet",
-            "resume_session_id": "sess-abc",
-        }).encode()
+        payload = json.dumps(
+            {
+                "prompt": "ping",
+                "model": "sonnet",
+                "resume_session_id": "sess-abc",
+            }
+        ).encode()
 
         mock_result = ClaudeResult(success=True, result="pong", session_id="sess-abc", exit_code=0)
 

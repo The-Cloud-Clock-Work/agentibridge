@@ -225,10 +225,29 @@ async def run_claude(
     # Local subprocess mode
     binary = _claude_binary()
     if resume_session_id:
-        cmd = [binary, "--dangerously-skip-permissions", "--model", model, "--output-format", output_format,
-               "--resume", resume_session_id, "--print", prompt]
+        cmd = [
+            binary,
+            "--dangerously-skip-permissions",
+            "--model",
+            model,
+            "--output-format",
+            output_format,
+            "--resume",
+            resume_session_id,
+            "--print",
+            prompt,
+        ]
     else:
-        cmd = [binary, "--dangerously-skip-permissions", "--model", model, "--output-format", output_format, "-p", prompt]
+        cmd = [
+            binary,
+            "--dangerously-skip-permissions",
+            "--model",
+            model,
+            "--output-format",
+            output_format,
+            "-p",
+            prompt,
+        ]
 
     log("claude_runner: starting", {"model": model, "prompt_len": len(prompt)})
 

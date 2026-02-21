@@ -514,10 +514,13 @@ def _cmd_tunnel_setup() -> None:
     # Step 9 — Optional systemd service (Linux only)
     if platform.system() == "Linux":
         print("Step 9: Systemd service setup...")
-        already = subprocess.run(
-            ["systemctl", "is-enabled", "cloudflared"],
-            capture_output=True,
-        ).returncode == 0
+        already = (
+            subprocess.run(
+                ["systemctl", "is-enabled", "cloudflared"],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
         cf_bin = shutil.which("cloudflared")
         if already:
             subprocess.run(["sudo", "systemctl", "restart", "cloudflared"])
@@ -1138,7 +1141,9 @@ def main() -> None:
 
     # logs
     logs_parser = subparsers.add_parser("logs", help="View Docker stack logs")
-    logs_parser.add_argument("--tail", type=int, default=100, metavar="N", help="Number of lines to show (default: 100)")
+    logs_parser.add_argument(
+        "--tail", type=int, default=100, metavar="N", help="Number of lines to show (default: 100)"
+    )
     logs_parser.add_argument("--follow", "-f", action="store_true", help="Follow log output")
 
     # version
@@ -1157,18 +1162,12 @@ def main() -> None:
     connect_parser.add_argument("--api-key", default=None, help="API key to include in examples")
 
     # bridge
-    bridge_parser = subparsers.add_parser(
-        "bridge", help="Manage dispatch bridge (host-side Claude CLI proxy)"
-    )
+    bridge_parser = subparsers.add_parser("bridge", help="Manage dispatch bridge (host-side Claude CLI proxy)")
     bridge_parser.add_argument("action", choices=["start", "stop", "logs"])
 
     # tunnel
-    tunnel_parser = subparsers.add_parser(
-        "tunnel", help="Cloudflare Tunnel status and named tunnel setup"
-    )
-    tunnel_parser.add_argument(
-        "action", nargs="?", default="status", choices=["status", "setup"]
-    )
+    tunnel_parser = subparsers.add_parser("tunnel", help="Cloudflare Tunnel status and named tunnel setup")
+    tunnel_parser.add_argument("action", nargs="?", default="status", choices=["status", "setup"])
 
     # config
     config_parser = subparsers.add_parser("config", help="Show current config or generate .env template")

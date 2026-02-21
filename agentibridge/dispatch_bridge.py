@@ -281,9 +281,16 @@ async def app(scope, receive, send):
         if timeout > max_t:
             timeout = max_t
 
-        log("dispatch_bridge: dispatching", {"model": model, "prompt_len": len(prompt), "timeout": timeout, "resume_session_id": resume_session_id})
+        log(
+            "dispatch_bridge: dispatching",
+            {"model": model, "prompt_len": len(prompt), "timeout": timeout, "resume_session_id": resume_session_id},
+        )
         result: ClaudeResult = await run_claude(
-            prompt=prompt, model=model, timeout=timeout, output_format=output_format, resume_session_id=resume_session_id
+            prompt=prompt,
+            model=model,
+            timeout=timeout,
+            output_format=output_format,
+            resume_session_id=resume_session_id,
         )
         await _send_json(send, 200, result.to_dict())
         return

@@ -195,6 +195,7 @@ class TestDispatchTask:
                 assert "job_id" in result
                 # Check job file was written with failure
                 from agentibridge.dispatch import get_job_status
+
                 job = get_job_status(result["job_id"])
                 assert job is not None
                 assert job["status"] == "failed"
