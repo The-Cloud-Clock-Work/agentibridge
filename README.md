@@ -4,10 +4,22 @@ AgentiBridge gives your AI assistants persistent memory of your Claude Code sess
 
 ```mermaid
 flowchart LR
-    A[Claude Code sessions] --> B[Collector]
-    B --> C[SessionStore]
-    C --> D[MCP Tools]
-    D --> E[Any AI Client]
+    A([Claude Code sessions]) -->|index| B[Collector]
+    B -->|store| C[(SessionStore)]
+    C -->|query| D{{MCP Tools}}
+    D -->|respond| E([Any AI Client])
+
+    classDef sessions fill:#6366f1,stroke:#4338ca,color:#fff
+    classDef collector fill:#f59e0b,stroke:#d97706,color:#fff
+    classDef store fill:#10b981,stroke:#059669,color:#fff
+    classDef tools fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    classDef client fill:#06b6d4,stroke:#0284c7,color:#fff
+
+    class A sessions
+    class B collector
+    class C store
+    class D tools
+    class E client
 ```
 
 ---

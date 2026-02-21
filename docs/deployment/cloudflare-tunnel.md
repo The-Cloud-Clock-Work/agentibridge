@@ -3,10 +3,10 @@
 Expose AgentiBridge to the internet securely using Cloudflare Tunnel. No port forwarding, firewall changes, or public IP required.
 
 ```
-┌──────────┐     ┌─────────────────┐     ┌────────────┐     ┌────────────────┐
-│  Remote  │────▶│  Cloudflare     │────▶│ cloudflared │────▶│ agentibridge │
+┌──────────┐     ┌─────────────────┐     ┌─────────────┐     ┌────────────────┐
+│  Remote  │────▶│  Cloudflare     │────▶│ cloudflared │────▶│ agentibridge   │
 │  Client  │ TLS │  Edge Network   │     │ (container) │     │ :8100          │
-└──────────┘     └─────────────────┘     └────────────┘     └────────────────┘
+└──────────┘     └─────────────────┘     └─────────────┘     └────────────────┘
 ```
 
 ## Quick Tunnel (Zero Config)
@@ -41,7 +41,7 @@ The URL looks like `https://random-words.trycloudflare.com`. It changes each tim
 
 ## Named Tunnel (Persistent Hostname)
 
-For a stable hostname that survives restarts.
+For a stable hostname that survives restarts. Uses the `tunnel-named` profile (a separate container from the quick-tunnel profile).
 
 ### 1. Create a Cloudflare Tunnel
 
@@ -65,7 +65,7 @@ In the tunnel configuration, add a **Public Hostname**:
 ### 3. Start with token
 
 ```bash
-CLOUDFLARE_TUNNEL_TOKEN=eyJh... docker compose --profile tunnel up -d
+CLOUDFLARE_TUNNEL_TOKEN=eyJh... docker compose --profile tunnel-named up -d
 ```
 
 Or add to `.env`:
@@ -77,8 +77,10 @@ CLOUDFLARE_TUNNEL_TOKEN=eyJh...
 Then:
 
 ```bash
-docker compose --profile tunnel up -d
+docker compose --profile tunnel-named up -d
 ```
+
+> **Note:** The named tunnel uses a different Docker profile (`tunnel-named`) than the quick tunnel (`tunnel`). Do not mix them.
 
 ### 4. Verify
 
@@ -174,6 +176,84 @@ Set these in your repo settings (Settings > Secrets and variables > Actions):
 
 The `e2e-smoke.yml` workflow uses these to generate `.mcp.json` and run smoke tests against your tunnel.
 
+---
+
+## Allowing claude.ai and MCP Clients Through Cloudflare
+
+When **claude.ai** (or any automated MCP client) connects to your AgentiBridge server through Cloudflare, Cloudflare's bot protection features may block the connection. These features treat automated clients as bots and return HTTP 403 or 1020 errors, which appear as MCP connection failures in claude.ai.
+
+### Symptoms
+
+- Claude.ai reports "could not connect to MCP server" even though `curl` works from your machine
+- HTTP 403 / Cloudflare error 1020 in tunnel logs
+- SSE connection established then immediately dropped
+
+### Fix 1 — Disable Bot Fight Mode (simplest)
+
+Bot Fight Mode is the most common culprit. Disable it for the hostname used by your MCP server:
+
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/) → your domain → **Security > Bots**
+2. Set **Bot Fight Mode** to **Off** (or switch to **Super Bot Fight Mode** with granular rules)
+
+If you use **Super Bot Fight Mode**, configure it to allow "Verified bots" and add a custom rule to allow the MCP connection path:
+
+1. Go to **Security > WAF > Custom Rules**
+2. Create a rule:
+   - **Field:** URI Path — **Operator:** starts with — **Value:** `/sse` (or `/mcp`)
+   - **Action:** Skip → Skip all remaining custom rules
+   - **Also skip:** Bot Fight Mode managed rules
+
+### Fix 2 — WAF Bypass Rule (recommended for production)
+
+Create a WAF custom rule that skips Cloudflare's managed ruleset for MCP traffic:
+
+1. Go to **Security > WAF > Custom Rules** → **Create rule**
+2. Configure:
+   ```
+   (http.request.uri.path eq "/sse" or http.request.uri.path eq "/mcp")
+   ```
+3. Action: **Skip** → check **Skip all remaining custom rules** and **Skip managed rules**
+
+This preserves protection for your other routes while letting MCP long-lived connections through.
+
+### Fix 3 — Cloudflare Access Service Token (for LLM backend behind Access)
+
+If your **LLM API** (e.g., LiteLLM, OpenRouter proxy, or an internal model server) is itself protected by Cloudflare Access, AgentiBridge needs service-token credentials to make outbound requests to it.
+
+Set these in your `.env`:
+
+```bash
+# Cloudflare Access service-token for the LLM backend
+CF_ACCESS_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.access
+CF_ACCESS_CLIENT_SECRET=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+```
+
+**Where to get these values:**
+1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/) → **Access > Service Auth > Service Tokens**
+2. Click **Create Service Token**
+3. Copy the **Client ID** → `CF_ACCESS_CLIENT_ID`
+4. Copy the **Client Secret** → `CF_ACCESS_CLIENT_SECRET`
+5. In your Access policy protecting the LLM backend, add a rule: **Service Token** is the token you created
+
+> **Note:** These variables control *outbound* requests AgentiBridge makes to its LLM backend — not inbound connections from clients. They are unrelated to `CLOUDFLARE_TUNNEL_TOKEN`.
+
+**Example `.env` with both tunnel and LLM Access:**
+
+```bash
+# Named tunnel for inbound MCP connections
+CLOUDFLARE_TUNNEL_TOKEN=eyJh...
+
+# Service token for outbound calls to LiteLLM behind Cloudflare Access
+CF_ACCESS_CLIENT_ID=abc123.access
+CF_ACCESS_CLIENT_SECRET=supersecretvalue
+
+# LLM backend URL (behind Cloudflare Access)
+LLM_API_BASE=https://llm.internal.example.com/v1
+LLM_API_KEY=your-litellm-api-key
+```
+
+---
+
 ## Security Checklist
 
 1. **Set API keys** — Always set `AGENTIBRIDGE_API_KEYS` when exposing to the internet:
@@ -181,11 +261,15 @@ The `e2e-smoke.yml` workflow uses these to generate `.mcp.json` and run smoke te
    AGENTIBRIDGE_API_KEYS=my-secret-key-1,my-secret-key-2
    ```
 
-2. **Use Cloudflare Access (optional)** — Add an Access policy in the Zero Trust dashboard for additional authentication (SSO, email OTP, etc.)
+2. **Allow MCP bots** — Disable Bot Fight Mode or add a WAF bypass for `/sse` and `/mcp` paths (see above) so that claude.ai and other MCP clients can connect.
 
-3. **TLS is automatic** — Cloudflare handles TLS termination at the edge. The connection between cloudflared and agentibridge stays internal to the Docker network.
+3. **Use Cloudflare Access (optional)** — Add an Access policy in the Zero Trust dashboard for additional authentication (SSO, email OTP, etc.)
 
-4. **No ports exposed** — The tunnel does not require any inbound ports. All connections are outbound from cloudflared to Cloudflare's edge.
+4. **TLS is automatic** — Cloudflare handles TLS termination at the edge. The connection between cloudflared and agentibridge stays internal to the Docker network.
+
+5. **No ports exposed** — The tunnel does not require any inbound ports. All connections are outbound from cloudflared to Cloudflare's edge.
+
+---
 
 ## Troubleshooting
 
@@ -203,12 +287,17 @@ Or check raw logs:
 docker logs agentibridge-tunnel 2>&1 | grep trycloudflare
 ```
 
+### claude.ai says "could not connect" (HTTP 403 / 1020)
+
+Cloudflare is blocking the connection. See [Allowing claude.ai and MCP Clients Through Cloudflare](#allowing-claudeai-and-mcp-clients-through-cloudflare) above.
+
 ### SSE connection drops
 
 Cloudflare Tunnel handles long-lived connections well by default. If you experience drops:
 
 - Ensure you're using `https://` (not `http://`) for the tunnel URL
 - For named tunnels, set `noTLSVerify: true` in the tunnel config if the origin uses self-signed certs (not needed with the default Docker setup)
+- Check that Bot Fight Mode is not terminating the long-lived SSE connection
 
 ### Container won't start
 
@@ -222,20 +311,37 @@ docker inspect -f '{{.State.Health.Status}}' agentibridge
 docker logs agentibridge-tunnel
 ```
 
+### LLM requests failing with 403 when LLM backend is behind Cloudflare Access
+
+Set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in your `.env`. See [Fix 3](#fix-3--cloudflare-access-service-token-for-llm-backend-behind-access) above.
+
 ### Stopping the tunnel
 
 ```bash
-# Stop just the tunnel
+# Stop quick tunnel
 docker compose --profile tunnel stop cloudflared
+
+# Stop named tunnel
+docker compose --profile tunnel-named stop cloudflared-named
 
 # Stop everything
 docker compose --profile tunnel down
+docker compose --profile tunnel-named down
 ```
+
+---
 
 ## How It Works
 
-The `docker-compose.yml` includes a `cloudflared` service behind the `tunnel` profile. This means `docker compose up` works normally without it — you only activate the tunnel when you explicitly use `--profile tunnel`.
+The `docker-compose.yml` includes two cloudflared services, each behind its own profile:
 
-The container detects its mode automatically:
-- **`CLOUDFLARE_TUNNEL_TOKEN` set**: Runs as a named tunnel with your persistent hostname
-- **`CLOUDFLARE_TUNNEL_TOKEN` unset**: Runs as a quick tunnel with a temporary URL
+| Profile | Service | When to use |
+|---------|---------|-------------|
+| `tunnel` | `cloudflared` | Quick tunnel — temporary `*.trycloudflare.com` URL, no Cloudflare account |
+| `tunnel-named` | `cloudflared-named` | Named tunnel — persistent hostname via Cloudflare Zero Trust |
+
+`docker compose up` works normally without either — you only activate a tunnel when you explicitly use `--profile`.
+
+The named-tunnel container detects its token automatically:
+- **`CLOUDFLARE_TUNNEL_TOKEN` set**: Authenticates and routes traffic to your configured hostname
+- **`CLOUDFLARE_TUNNEL_TOKEN` unset**: The `tunnel-named` profile will fail to start — use `--profile tunnel` instead for quick tunnels
