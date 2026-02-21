@@ -15,9 +15,8 @@
 ### Option 1: Local Only (Same Machine)
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentibridge.git
-cd agentibridge
-docker compose up --build -d
+pip install agentibridge
+agentibridge run
 curl http://localhost:8100/health
 ```
 
@@ -38,10 +37,9 @@ Done. Your Claude Code sessions are now searchable.
 If you want a persistent URL like `https://mcp.yourdomain.com`, set up the Cloudflare Tunnel **first**, then start the bridge:
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentibridge.git
-cd agentibridge
-./automation/cloudfared.sh          # 1. sets up tunnel + DNS (interactive)
-docker compose up --build -d        # 2. starts the bridge on :8100
+pip install agentibridge
+agentibridge tunnel setup           # 1. interactive wizard: install cloudflared, auth, DNS
+agentibridge run                    # 2. starts the bridge on :8100
 curl https://mcp.yourdomain.com/health
 ```
 
@@ -55,7 +53,7 @@ Add to `~/.mcp.json`:
 }
 ```
 
-The domain is **not** configured in the bridge itself — it lives in the Cloudflare Tunnel config (`~/.cloudflared/config.yml`), which the setup script writes for you. The bridge just listens on `localhost:8100` and the tunnel routes your domain to it.
+The domain is **not** configured in the bridge itself — it lives in the Cloudflare Tunnel config (`~/.cloudflared/config.yml`), which the setup wizard writes for you. The bridge just listens on `localhost:8100` and the tunnel routes your domain to it.
 
 See [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup) for detailed configuration.
 
@@ -83,35 +81,46 @@ See [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup) for detailed configurati
 
 ### CLI Commands
 
-**Status & Info:**
+**Docker Stack:**
 ```bash
-agentibridge status               # Check service health, Redis, session count
-agentibridge version              # Print version
-agentibridge config               # View current configuration
+agentibridge run                  # Start the stack (detects state, shows status)
+agentibridge run --rebuild        # Force pull + rebuild before starting
+agentibridge stop                 # Stop the stack
+agentibridge restart              # Restart the stack
+agentibridge logs                 # View logs (last 100 lines)
+agentibridge logs --follow        # Stream logs live
 ```
 
-**Setup & Management:**
+**Status & Info:**
+```bash
+agentibridge status               # Service health, per-container health checks, Redis, sessions
+agentibridge version              # Print version
+agentibridge config               # View current configuration
+agentibridge config --generate-env  # Generate .env template
+```
+
+**Dispatch Bridge (host-side Claude CLI proxy):**
+```bash
+agentibridge bridge start         # Start dispatch bridge in background
+agentibridge bridge stop          # Stop dispatch bridge
+agentibridge bridge logs          # Tail dispatch bridge log
+```
+
+**Cloudflare Tunnel:**
+```bash
+agentibridge tunnel               # Show tunnel status and URL
+agentibridge tunnel setup         # Interactive wizard: install, auth, DNS, config, systemd
+```
+
+**Client & Service Setup:**
 ```bash
 agentibridge connect              # Get connection configs for all clients
-agentibridge tunnel               # Check Cloudflare tunnel status
 agentibridge install --docker     # Set up systemd service (Docker)
 agentibridge install --native     # Set up systemd service (native Python)
 agentibridge locks                # View/clear Redis locks
 ```
 
-**Examples:**
-```bash
-# Check if everything is running
-agentibridge status
-
-# Get MCP connection string for Claude Code
-agentibridge connect
-
-# Generate .env template
-agentibridge config --generate-env
-```
-
-See `agentibridge help` for full command reference.
+See `agentibridge help` for the full tool and configuration reference.
 
 ### Architecture
 
@@ -139,15 +148,14 @@ See `agentibridge help` for full command reference.
 
 ## Installation Options
 
-### Docker Compose (Recommended)
+### Docker Stack via CLI (Recommended)
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentibridge.git
-cd agentibridge
-docker compose up --build -d
+pip install agentibridge
+agentibridge run
 ```
 
-Separate containers for app and Redis. The `docker-compose.yml` mounts `~/.claude/projects` read-only and starts agentibridge on port `8100`.
+`agentibridge run` copies the bundled `docker-compose.yml` and `.env` template to `~/.config/agentibridge/` on first run, validates required env vars, detects current stack state, then runs `docker compose up -d`. Separate containers for app, Redis, and Postgres.
 
 ### pip Install (Local/Development)
 
@@ -242,8 +250,9 @@ AgentiBridge can be exposed via Cloudflare Tunnel for remote access with zero co
 Temporary `*.trycloudflare.com` URL that changes on restart. Good for testing.
 
 ```bash
-docker compose --profile tunnel up -d
-agentibridge tunnel   # Prints temporary public URL
+agentibridge run
+docker compose --profile tunnel up -d   # adds the cloudflared sidecar
+agentibridge tunnel                     # prints the temporary public URL
 ```
 
 ### Named Tunnel (Persistent URL)
@@ -252,31 +261,36 @@ For a stable URL like `https://mcp.yourdomain.com` that survives restarts.
 
 **Prerequisites:** A [Cloudflare account](https://dash.cloudflare.com/sign-up) with at least one domain added.
 
-**Run the setup script:**
+**Run the interactive wizard:**
 
 ```bash
-chmod +x automation/cloudfared.sh
-./automation/cloudfared.sh
+agentibridge tunnel setup
 ```
 
-The script walks you through 10 interactive steps:
-1. Installs `cloudflared` binary (Linux/macOS)
+The wizard walks you through 10 steps:
+1. Installs `cloudflared` binary (Linux amd64/arm64/arm, macOS via Homebrew)
 2. Authenticates with Cloudflare (opens browser)
 3. Prompts for tunnel name (default: `agentibridge`)
-4. Creates the tunnel (if not exists)
+4. Creates the tunnel (idempotent — skips if it already exists)
 5. Prompts for subdomain (e.g., `mcp`)
 6. Prompts for domain (e.g., `yourdomain.com`)
 7. Creates DNS CNAME route automatically
-8. Writes `~/.cloudflared/config.yml`
-9. Optionally installs systemd service
-10. Runs health check
+8. Writes `~/.cloudflared/config.yml` (backs up any existing file)
+9. Optionally installs and enables a systemd service (Linux)
+10. Runs a health check against your public hostname
 
-**After the script finishes**, start the bridge:
+**After the wizard finishes**, start the bridge:
 
 ```bash
-docker compose up --build -d
+agentibridge run
 curl https://mcp.yourdomain.com/health
 # {"status": "ok", "service": "agentibridge"}
+```
+
+**Check tunnel status at any time:**
+
+```bash
+agentibridge tunnel           # shows container status + URL
 ```
 
 **Alternative (Docker-only):** If you already created a tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/), pass the token directly:

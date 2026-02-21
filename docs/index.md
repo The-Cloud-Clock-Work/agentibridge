@@ -16,3 +16,8 @@ AgentiBridge is a standalone MCP server that indexes Claude Code CLI transcripts
 
 - [Reverse Proxy](deployment/reverse-proxy.md) — Nginx, Caddy, and Traefik configurations with SSL
 - [Cloudflare Tunnel](deployment/cloudflare-tunnel.md) — Secure internet exposure without port forwarding
+
+## Reference
+
+- [CLI Commands](reference/cli-commands.md) — All `agentibridge` commands with options and examples
+- [Configuration](reference/configuration.md) — All environment variables with defaults
