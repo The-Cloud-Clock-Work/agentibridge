@@ -26,11 +26,13 @@ Then add AgentiBridge to `~/.mcp.json`:
 {
   "mcpServers": {
     "agentibridge": {
-      "url": "http://localhost:8100/sse"
+      "url": "http://localhost:8100/mcp"
     }
   }
 }
 ```
+
+> If you set `AGENTIBRIDGE_API_KEYS`, add `"headers": {"X-API-Key": "your-key"}` to the block above.
 
 That's it. Your Claude Code sessions are now searchable from any MCP-compatible client.
 
@@ -150,10 +152,23 @@ See [Configuration Reference](docs/reference/configuration.md) for the full list
 Add to `~/.mcp.json`:
 
 ```json
+// No API key configured (default)
 {
   "mcpServers": {
     "agentibridge": {
-      "url": "http://localhost:8100/sse"
+      "url": "http://localhost:8100/mcp"
+    }
+  }
+}
+```
+
+```json
+// With API key (if AGENTIBRIDGE_API_KEYS is set)
+{
+  "mcpServers": {
+    "agentibridge": {
+      "url": "http://localhost:8100/mcp",
+      "headers": { "X-API-Key": "your-key" }
     }
   }
 }
@@ -173,19 +188,28 @@ Claude.ai requires a **public HTTPS URL** to reach your MCP server. The easiest 
 agentibridge tunnel setup
 ```
 
-**2. Add to `~/.mcp.json` using your public URL:**
+**2. Choose an auth method:**
+
+**Path A — API key** (simpler; works for all clients):
 
 ```json
 {
   "mcpServers": {
     "agentibridge": {
-      "url": "https://mcp.yourdomain.com/mcp"
+      "url": "https://mcp.yourdomain.com/mcp",
+      "headers": { "X-API-Key": "your-key" }
     }
   }
 }
 ```
 
-OAuth is supported if Claude.ai requires it. See [Remote Access & Auth](docs/architecture/remote-access.md).
+Set `AGENTIBRIDGE_API_KEYS=your-key` in your `.env` to enable key validation.
+
+**Path B — OAuth** (Claude.ai handles the flow automatically):
+
+No manual JSON needed. Claude.ai discovers the OAuth endpoint via `/.well-known/oauth-authorization-server` and completes the PKCE flow on its own. Set `OAUTH_ISSUER_URL` to enable it.
+
+See [Remote Access & Auth](docs/architecture/remote-access.md) for the full env var reference.
 
 ---
 
