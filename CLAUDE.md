@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 10 MCP tools. It was extracted from the [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) project to run independently.
+**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 11 MCP tools. It was extracted from the [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) project to run independently.
 
 ## Build & Development
 
@@ -121,7 +121,7 @@ CLAUDE_DISPATCH_TIMEOUT=300
 CLAUDE_HOOK_LOG_ENABLED=true
 ```
 
-## MCP Tools (10 total)
+## MCP Tools (11 total)
 
 ### Phase 1 — Foundation
 - `list_sessions` — List sessions across all projects

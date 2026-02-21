@@ -6,20 +6,22 @@ This document provides a deep dive into AgentiBridge's internal modules and impl
 
 | Module | Purpose | Key Functions/Classes |
 |--------|---------|----------------------|
-| `server.py` | FastMCP server with 10 tools | `init_server()`, tool handlers |
-| `parser.py` | Pure-function JSONL transcript parser | `parse_transcript()`, `parse_entry()` |
-| `store.py` | SessionStore (Redis + filesystem fallback) | `SessionStore`, `get_session()`, `list_sessions()` |
-| `collector.py` | Background polling daemon | `Collector`, `collect_once()` |
-| `transport.py` | SSE/HTTP transport + API key auth | `SSETransport`, auth middleware |
-| `embeddings.py` | Semantic search (Phase 2) | `EmbeddingStore`, `search_vectors()` |
-| `dispatch.py` | Session restore + task dispatch (Phase 4) | `restore_session()`, `dispatch_task()` |
-| `claude_runner.py` | Claude CLI runner (dispatch) | `ClaudeRunner`, `run_task()` |
-| `llm_client.py` | OpenAI-compatible embeddings + chat | `LLMClient`, `embed()`, `chat()` |
-| `redis_client.py` | Redis helper | `get_redis()`, connection pooling |
-| `pg_client.py` | Postgres + pgvector connection | `get_pg_pool()`, vector operations |
-| `config.py` | Configuration with validation | `Config`, `load_config()` |
-| `cli.py` | CLI helper tool | `status`, `connect`, `tunnel`, `locks` |
-| `logging.py` | Structured JSON logging | `get_logger()`, request context |
+| `server.py` | FastMCP server with 11 tools | tool handlers, `main()` |
+| `parser.py` | Pure-function JSONL transcript parser | `parse_transcript_entries()`, `scan_projects_dir()` |
+| `store.py` | SessionStore (Redis + filesystem fallback) | `SessionStore`, `get_session_meta()`, `list_sessions()` |
+| `collector.py` | Background polling daemon | `SessionCollector`, `collect_once()` |
+| `transport.py` | SSE/HTTP transport + API key auth + OAuth | `run_sse_server()`, auth middleware |
+| `oauth_provider.py` | OAuth 2.1 authorization server (opt-in) | `BridgeOAuthProvider` |
+| `embeddings.py` | Semantic search (Phase 2) | `TranscriptEmbedder`, `search_semantic()` |
+| `dispatch.py` | Session restore + task dispatch (Phase 4) | `restore_session_context()`, `dispatch_task()` |
+| `dispatch_bridge.py` | Host-side HTTP bridge for Docker dispatch | `GET /health`, `POST /dispatch` |
+| `claude_runner.py` | Claude CLI subprocess wrapper | `run_claude()`, `ClaudeResult` |
+| `llm_client.py` | OpenAI-compatible embeddings + chat | `embed_text()`, `chat_completion()` |
+| `redis_client.py` | Redis helper | `get_redis()`, `redis_key()` |
+| `pg_client.py` | Postgres + pgvector connection | `get_pg()`, auto-schema creation |
+| `config.py` | Centralized env-var configuration | module-level constants |
+| `cli.py` | CLI helper tool | `run`, `stop`, `status`, `tunnel`, `bridge`, `locks` |
+| `logging.py` | Structured JSON logging | `log()` |
 
 ## Redis + File Fallback Pattern
 
@@ -52,11 +54,11 @@ return read_from_jsonl_file(path)
 ### Redis Key Schema
 
 ```
-agentibridge:sb:sessions                 # Set of all session IDs
-agentibridge:sb:session:{id}             # Hash of session metadata
-agentibridge:sb:transcript:{id}          # List of transcript entries (truncated)
-agentibridge:sb:lock:collect:{project}   # Collection lock (prevents concurrent indexing)
-agentibridge:sb:stats:{id}               # Session statistics (tool counts, etc.)
+agentibridge:sb:idx:all                  # Sorted set of all session IDs (score = last_update)
+agentibridge:sb:idx:project:{encoded}    # Sorted set of session IDs per project
+agentibridge:sb:session:{id}:meta        # Hash of session metadata fields
+agentibridge:sb:session:{id}:entries     # List of JSON-serialized entries (capped at MAX_ENTRIES)
+agentibridge:sb:pos:{filepath_hash}      # Byte offset for incremental transcript reading
 ```
 
 ### When Redis is Used
@@ -116,18 +118,21 @@ Each line in the JSONL file is a JSON object with a `type` field:
 
 ### Parsing Logic
 
-The `parser.py` module provides pure functions:
+The `parser.py` module provides pure functions for incremental parsing:
 
 ```python
-def parse_transcript(lines: list[str]) -> dict:
-    """Parse full transcript from JSONL lines."""
-    entries = [parse_entry(line) for line in lines]
-    return {
-        "entries": [e for e in entries if e["type"] in INDEXED_TYPES],
-        "tool_calls": extract_tool_calls(entries),
-        "stats": compute_stats(entries)
-    }
+# Scan all projects under ~/.claude/projects/
+sessions = scan_projects_dir(projects_dir)
+
+# Parse new entries starting from a byte offset (incremental)
+entries, new_offset = parse_transcript_entries(transcript_path, offset=last_offset)
+
+# Extract session metadata (git branch, cwd, counts, etc.)
+meta = parse_transcript_meta(transcript_path)
 ```
+
+Indexed entry types: `user`, `assistant`, `summary`, `system`.
+Skipped types: `progress`, `queue-operation`, `file-history-snapshot`.
 
 ## Collector Daemon
 
@@ -167,22 +172,20 @@ if redis.set(lock_key, "1", nx=True, ex=300):  # 5-minute lock
         redis.delete(lock_key)
 ```
 
-Without Redis, uses file-based locks:
-
-```
-~/.claude/projects/-home-user-dev-project/.agentibridge.lock
-```
+Without Redis, collection skips the lock and proceeds directly (no concurrent protection).
 
 ### Incremental Updates
 
-Tracks last-processed position per session:
+Tracks last-processed byte offset per transcript file:
 
 ```python
-position_key = f"{KEY_PREFIX}:sb:position:{session_id}"
-last_line = redis.get(position_key) or 0
-new_lines = read_jsonl_from_line(transcript_path, last_line)
-redis.set(position_key, last_line + len(new_lines))
+position_key = f"{KEY_PREFIX}:sb:pos:{hash(filepath)}"
+last_offset = int(redis.get(position_key) or 0)
+entries, new_offset = parse_transcript_entries(filepath, offset=last_offset)
+redis.set(position_key, new_offset)
 ```
+
+Without Redis, positions are stored under `~/.cache/agentibridge/positions/`.
 
 ## Transport Layer (Phase 3)
 
@@ -190,24 +193,27 @@ redis.set(position_key, last_line + len(new_lines))
 
 For local MCP clients (Claude Code CLI):
 
-```python
+```
 # Reads from stdin, writes to stdout
 # Used when AGENTIBRIDGE_TRANSPORT=stdio
 stdin -> MCP request -> process -> MCP response -> stdout
 ```
 
-### SSE Transport
+### HTTP/SSE Transport
 
 For remote MCP clients (ChatGPT, Claude Web, etc.):
 
-```python
-# HTTP server on AGENTIBRIDGE_PORT
-GET  /health          -> {"status": "ok"}
-GET  /sse             -> Server-Sent Events stream
-POST /mcp             -> MCP request/response
+```
+GET  /health                             -> {"status": "ok"}  (public)
+POST /mcp                                -> Streamable HTTP (preferred)
+GET  /sse                                -> Server-Sent Events (legacy)
+GET  /.well-known/oauth-authorization-server -> OAuth metadata (if OAuth enabled)
+POST /token, /authorize, /register, /revoke  -> OAuth 2.1 endpoints (if OAuth enabled)
 ```
 
-**Authentication**: Optional API key via `X-API-Key` header or `api_key` query param.
+**Authentication options:**
+- API key: `X-API-Key: your-key` header or `?api_key=your-key` query param
+- OAuth 2.1: Bearer token via `Authorization: Bearer <token>` (enabled by `OAUTH_ISSUER_URL`)
 
 ## Embedding Pipeline (Phase 2)
 
@@ -228,28 +234,33 @@ POST /mcp             -> MCP request/response
 ### Schema
 
 ```sql
-CREATE TABLE IF NOT EXISTS session_chunks (
-    id SERIAL PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    chunk_index INT NOT NULL,
-    content TEXT NOT NULL,
-    embedding vector(1536),
-    created_at TIMESTAMP DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS transcript_chunks (
+    id              SERIAL PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    chunk_idx       INTEGER NOT NULL,
+    project         TEXT NOT NULL DEFAULT '',
+    project_encoded TEXT NOT NULL DEFAULT '',
+    timestamp       TEXT NOT NULL DEFAULT '',
+    text_preview    TEXT NOT NULL DEFAULT '',
+    embedding       vector(1536),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, chunk_idx)
 );
 
-CREATE INDEX idx_session_chunks_embedding ON session_chunks
-USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX idx_tc_embedding_hnsw ON transcript_chunks
+USING hnsw (embedding vector_cosine_ops)
+WITH (m = 16, ef_construction = 64);
 ```
 
 ### Search Query
 
 ```python
 def search_semantic(query: str, limit: int = 10) -> list[dict]:
-    query_vector = llm_client.embed(query)
+    query_vector = llm_client.embed_text(query)
     results = pg.execute("""
-        SELECT session_id, content,
+        SELECT session_id, text_preview,
                1 - (embedding <=> %s::vector) AS similarity
-        FROM session_chunks
+        FROM transcript_chunks
         ORDER BY embedding <=> %s::vector
         LIMIT %s
     """, (query_vector, query_vector, limit))
@@ -260,51 +271,22 @@ def search_semantic(query: str, limit: int = 10) -> list[dict]:
 
 ### Session Restore
 
-```python
-def restore_session(session_id: str) -> str:
-    """Load past session context for continuation."""
-    session = store.get_session(session_id)
-    transcript = session["transcript"]
-
-    # Reconstruct conversation context
-    messages = [
-        {"role": entry["role"], "content": entry["content"]}
-        for entry in transcript
-        if entry["type"] in ("user", "assistant")
-    ]
-
-    # Return formatted context for injection
-    return format_context_for_claude(messages)
-```
+`restore_session_context(session_id, last_n)` loads recent turns from a past session and formats them as a text block for injection into a new prompt. Returns a `dict` with the formatted `context` string and `char_count`.
 
 ### Task Dispatch
 
-```python
-def dispatch_task(
-    prompt: str,
-    session_context: str | None = None,
-    model: str = "sonnet"
-) -> dict:
-    """Dispatch a new task with optional session context."""
-    runner = ClaudeRunner(
-        binary=config.CLAUDE_BINARY,
-        model=model,
-        timeout=config.CLAUDE_DISPATCH_TIMEOUT
-    )
+`dispatch_task(...)` is fully async and fire-and-forget:
 
-    full_prompt = (
-        f"Previous context:\n{session_context}\n\n"
-        f"New task:\n{prompt}"
-        if session_context else prompt
-    )
+1. Writes job state to `/tmp/agentibridge_jobs/{job_id}.json` immediately
+2. Starts an `asyncio.create_task()` — returns `job_id` to the caller
+3. Background task calls `run_claude()` (local subprocess or HTTP bridge)
+4. On completion, updates the job file with output, exit_code, duration_ms
 
-    result = runner.run(full_prompt)
-    return {
-        "output": result.stdout,
-        "exit_code": result.returncode,
-        "duration": result.duration
-    }
-```
+Clients poll with `get_dispatch_job(job_id)` until `status` is `completed` or `failed`.
+
+**Dispatch modes:**
+- **Local**: `CLAUDE_DISPATCH_URL` is empty → runs `claude` subprocess directly
+- **Bridge**: `CLAUDE_DISPATCH_URL` is set → HTTP POST to `dispatch_bridge.py` on the host
 
 ## Error Handling Patterns
 

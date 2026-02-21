@@ -39,7 +39,7 @@ claude --mcp-debug
 
 ### Available Tools in Claude Code
 
-Once connected, Claude Code can use all 10 tools:
+Once connected, Claude Code can use all 11 tools:
 - "List my recent sessions" → `list_sessions`
 - "What did I work on yesterday?" → `list_sessions` with `since_hours=24`
 - "Search for Docker setup sessions" → `search_sessions`
@@ -48,6 +48,8 @@ Once connected, Claude Code can use all 10 tools:
 - "Find sessions about authentication" → `search_semantic`
 - "Summarize that session" → `generate_summary`
 - "Continue from session abc-123" → `restore_session`
+- "Run this task in the background" → `dispatch_task`
+- "Did that job finish?" → `get_dispatch_job`
 
 ## ChatGPT Custom GPT (Actions)
 

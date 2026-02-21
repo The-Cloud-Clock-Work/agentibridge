@@ -9,7 +9,7 @@ AgentiBridge can be accessed remotely via SSE (Server-Sent Events) over HTTP, al
 |  claude.ai       | ----------------->|  AgentiBridge          |
 |  Mobile app      |   X-API-Key auth  |  SSE transport (:8100)   |
 |  API client      | <---------------- |                          |
-+------------------+     Events        |  All 10 MCP tools        |
++------------------+     Events        |  All 11 MCP tools        |
                                        |  + Redis backend         |
                                        +--------------------------+
 ```
@@ -29,23 +29,47 @@ Transport is selected via the `AGENTIBRIDGE_TRANSPORT` environment variable.
 
 ### `agentibridge/transport.py`
 
-Provides SSE transport configuration with API key authentication.
+Provides SSE/HTTP transport with API key and OAuth authentication.
 
-**Key functions:**
+**Key components:**
 
-| Function | Description |
+| Class / Function | Description |
 |----------|-------------|
-| `validate_api_key(key)` | Check key against AGENTIBRIDGE_API_KEYS |
-| `run_sse_server(mcp)` | Build ASGI stack and start SSE server with auth |
+| `run_sse_server(mcp)` | Build ASGI stack and start uvicorn |
+| `APIKeyAuthMiddleware` | Validates `X-API-Key` header against `AGENTIBRIDGE_API_KEYS` |
+| `OAuthCompatAuthMiddleware` | Dual auth: OAuth Bearer tokens + API keys |
 
-### Authentication
+### HTTP Endpoints
 
-When `AGENTIBRIDGE_API_KEYS` is set, all requests must include a valid API key:
+| Path | Auth | Description |
+|------|------|-------------|
+| `/health` | Public | Health check — always returns `{"status": "ok"}` |
+| `/mcp` | Required | Streamable HTTP transport (preferred for new clients) |
+| `/sse` | Required | Legacy Server-Sent Events transport |
+| `/.well-known/oauth-authorization-server` | Public | OAuth metadata (only when OAuth enabled) |
+| `/authorize`, `/token`, `/register`, `/revoke` | Public | OAuth 2.1 endpoints (only when OAuth enabled) |
+
+### Authentication — API Keys
+
+When `AGENTIBRIDGE_API_KEYS` is set, all requests to `/mcp` and `/sse` must include a valid key:
 
 - **Header**: `X-API-Key: your-key`
 - **Query param**: `?api_key=your-key`
 
 When no keys are configured, auth is disabled (open access).
+
+### Authentication — OAuth 2.1 (Optional)
+
+Set `OAUTH_ISSUER_URL` to enable an in-memory OAuth 2.1 authorization server. This is required by some clients (e.g., claude.ai) that use the MCP OAuth flow.
+
+```bash
+OAUTH_ISSUER_URL=https://bridge.example.com
+OAUTH_CLIENT_ID=your-client-id          # optional: disable dynamic registration
+OAUTH_CLIENT_SECRET=your-client-secret
+OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/...
+```
+
+When OAuth is enabled, API keys continue to work as Bearer token fallback. See [Configuration Reference](../reference/configuration.md) for all OAuth variables.
 
 ### Transport Selection in `server.py`
 
@@ -69,11 +93,29 @@ AGENTIBRIDGE_PORT=8100           # HTTP port for SSE transport
 
 # API key auth (comma-separated, empty = no auth)
 AGENTIBRIDGE_API_KEYS=key1,key2
+
+# OAuth 2.1 (optional)
+OAUTH_ISSUER_URL=https://bridge.example.com
 ```
 
 ## Remote Client Configuration
 
-### claude.ai / Claude Desktop
+### Streamable HTTP (Preferred)
+
+```json
+{
+  "mcpServers": {
+    "agentibridge": {
+      "url": "http://your-host:8100/mcp",
+      "headers": {
+        "X-API-Key": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+### Legacy SSE
 
 ```json
 {
@@ -92,19 +134,21 @@ AGENTIBRIDGE_API_KEYS=key1,key2
 
 ```bash
 docker compose up --build -d
-# SSE endpoint: http://localhost:8100/sse
-# Health check: http://localhost:8100/health
+# Streamable HTTP: http://localhost:8100/mcp
+# Legacy SSE:      http://localhost:8100/sse
+# Health check:    http://localhost:8100/health
 ```
 
 ## Dependencies
 
-- `starlette` — ASGI framework (included with `mcp` package)
+- `starlette` — ASGI framework (included with `fastmcp` package)
 - `uvicorn` — ASGI server
-- `sse-starlette` — SSE support (included with `mcp` package)
+- `fastmcp` — FastMCP with streamable HTTP and SSE support
 
 ## Security Notes
 
 - Always set `AGENTIBRIDGE_API_KEYS` when exposing SSE transport to a network
 - Use HTTPS (reverse proxy) for production deployments
 - API keys are checked against a simple comma-separated list (no hashing)
-- Consider network-level restrictions (firewall, VPN) in addition to API key auth
+- OAuth state (tokens, clients) is in-memory only — lost on server restart
+- Consider network-level restrictions (firewall, VPN) in addition to auth

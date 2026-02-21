@@ -103,6 +103,7 @@ Returns: JSON with ranked matches [{session_id, score, text_preview, project, ti
 ```
 
 Requires:
+- `AGENTIBRIDGE_EMBEDDING_ENABLED=true` (opt-in flag, defaults to `false`)
 - LLM API configured (`LLM_API_BASE` + `LLM_EMBED_MODEL` env vars)
 - Postgres with pgvector (`POSTGRES_URL`)
 - Sessions embedded via `embed_session()`

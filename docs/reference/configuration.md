@@ -32,7 +32,8 @@ This document provides a comprehensive reference for all AgentiBridge configurat
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POSTGRES_URL` | _(none)_ | PostgreSQL connection URL with pgvector extension (e.g., `postgresql://user:pass@localhost:5432/agentibridge`) |
+| `AGENTIBRIDGE_EMBEDDING_ENABLED` | `false` | Enable semantic search. Requires `POSTGRES_URL` and LLM embedding config. Must be explicitly set to `true` |
+| `POSTGRES_URL` | _(none)_ | PostgreSQL connection URL with pgvector extension (e.g., `postgresql://user:pass@localhost:5432/agentibridge`). Also accepted as `DATABASE_URL` |
 | `PGVECTOR_DIMENSIONS` | `1536` | Embedding vector dimensions. Must match your embedding model (e.g., 1536 for `text-embedding-3-small`) |
 
 ### LLM Configuration
@@ -44,6 +45,23 @@ This document provides a comprehensive reference for all AgentiBridge configurat
 | `LLM_API_KEY` | _(none)_ | API key for the LLM endpoint |
 | `LLM_EMBED_MODEL` | _(none)_ | Embedding model name (e.g., `text-embedding-3-small`, `mxbai-embed-large`) |
 | `LLM_CHAT_MODEL` | _(none)_ | Chat model for summaries if `ANTHROPIC_API_KEY` is not set (e.g., `gpt-4o-mini`, `llama3`) |
+| `CF_ACCESS_CLIENT_ID` | _(none)_ | Cloudflare Access service-token ID. Adds `CF-Access-Client-Id` header to LLM API requests |
+| `CF_ACCESS_CLIENT_SECRET` | _(none)_ | Cloudflare Access service-token secret. Adds `CF-Access-Client-Secret` header to LLM API requests |
+
+### OAuth 2.1 Configuration (Optional)
+
+AgentiBridge supports OAuth 2.1 for MCP clients that require it (e.g., claude.ai). Set `OAUTH_ISSUER_URL` to enable.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OAUTH_ISSUER_URL` | _(none)_ | OAuth issuer URL. **Setting this enables OAuth 2.1.** Example: `https://bridge.example.com` |
+| `OAUTH_RESOURCE_URL` | `{issuer}/mcp` | OAuth resource server URL. Defaults to `{OAUTH_ISSUER_URL}/mcp` |
+| `OAUTH_CLIENT_ID` | _(none)_ | Pre-configured client ID. When set, disables dynamic client registration |
+| `OAUTH_CLIENT_SECRET` | _(none)_ | Pre-configured client secret. Required when `OAUTH_CLIENT_ID` is set |
+| `OAUTH_ALLOWED_REDIRECT_URIS` | _(none)_ | Comma-separated allowed redirect URIs for the pre-configured client |
+| `OAUTH_ALLOWED_SCOPES` | _(none)_ | Space-separated OAuth scopes the client may request (e.g., `claudeai`) |
+
+When OAuth is enabled, `AGENTIBRIDGE_API_KEYS` still works as a fallback — Bearer tokens matching an API key are accepted.
 
 ### Dispatch Configuration (Phase 4)
 
@@ -52,13 +70,17 @@ This document provides a comprehensive reference for all AgentiBridge configurat
 | `CLAUDE_BINARY` | `claude` | Path to Claude Code CLI binary. Use absolute path if not in `$PATH` |
 | `CLAUDE_DISPATCH_MODEL` | `sonnet` | Model to use for dispatched tasks. Options: `sonnet`, `opus`, `haiku` |
 | `CLAUDE_DISPATCH_TIMEOUT` | `300` | Maximum execution time for dispatched tasks (seconds) |
+| `CLAUDE_DISPATCH_URL` | _(none)_ | Bridge URL for Docker mode (e.g., `http://host.docker.internal:8101`). Empty = local subprocess mode |
+| `DISPATCH_SECRET` | _(none)_ | Shared secret sent from the container to the dispatch bridge |
+| `DISPATCH_BRIDGE_HOST` | `0.0.0.0` | Bind address for the host-side dispatch bridge |
+| `DISPATCH_BRIDGE_PORT` | `8101` | Port for the host-side dispatch bridge |
 
 ### Logging Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLAUDE_HOOK_LOG_ENABLED` | `true` | Enable or disable structured JSON logging |
-| `AGENTIBRIDGE_LOG_FILE` | _auto_ | Log file path. Auto-detects: `/var/log/agentibridge/agentibridge.log` (Docker) or `~/.agentibridge/agentibridge.log` (native) |
+| `AGENTIBRIDGE_LOG_FILE` | _auto_ | Log file path. Auto-detects: `/app/logs/agentibridge.log` (Docker) or `~/.cache/agentibridge/agentibridge.log` (native) |
 
 ## Configuration Profiles
 
@@ -85,6 +107,9 @@ Enables HTTP/SSE transport with API key authentication for remote MCP clients.
 ### Semantic Search Setup (Phase 2)
 
 ```bash
+# Enable semantic search (required opt-in)
+AGENTIBRIDGE_EMBEDDING_ENABLED=true
+
 # Database
 POSTGRES_URL=postgresql://agentibridge:password@localhost:5432/agentibridge
 PGVECTOR_DIMENSIONS=1536
@@ -94,7 +119,7 @@ LLM_API_BASE=http://localhost:11434/v1
 LLM_EMBED_MODEL=text-embedding-3-small
 ```
 
-Enables `search_semantic` tool with vector similarity search.
+Enables `search_semantic` tool with vector similarity search. `AGENTIBRIDGE_EMBEDDING_ENABLED=true` must be set explicitly — embeddings are off by default.
 
 ### Full Production Setup
 
@@ -113,7 +138,8 @@ AGENTIBRIDGE_API_KEYS=prod-key-xyz
 AGENTIBRIDGE_POLL_INTERVAL=30
 AGENTIBRIDGE_MAX_ENTRIES=1000
 
-# Database
+# Database (semantic search)
+AGENTIBRIDGE_EMBEDDING_ENABLED=true
 POSTGRES_URL=postgresql://agentibridge:secure-password@postgres:5432/agentibridge
 PGVECTOR_DIMENSIONS=1536
 
@@ -162,11 +188,11 @@ Checks service health, Redis connectivity, and session count.
 All Redis keys follow the pattern: `{REDIS_KEY_PREFIX}:sb:{suffix}`
 
 **Common keys:**
-- `{prefix}:sb:sessions` — Session ID set
-- `{prefix}:sb:session:{id}` — Session metadata hash
-- `{prefix}:sb:transcript:{id}` — Session transcript (truncated to MAX_ENTRIES)
-- `{prefix}:sb:lock:collect:{project}` — Collection lock
-- `{prefix}:sb:stats:{id}` — Session statistics
+- `{prefix}:sb:idx:all` — Sorted set of all session IDs (score = last_update timestamp)
+- `{prefix}:sb:idx:project:{encoded}` — Sorted set of session IDs per project
+- `{prefix}:sb:session:{id}:meta` — Hash of session metadata fields
+- `{prefix}:sb:session:{id}:entries` — List of JSON-serialized transcript entries (capped at `AGENTIBRIDGE_MAX_ENTRIES`)
+- `{prefix}:sb:pos:{filepath_hash}` — String: byte offset for incremental transcript reading
 
 ## Docker Compose Overrides
 

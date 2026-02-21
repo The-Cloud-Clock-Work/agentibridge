@@ -34,7 +34,7 @@ python -m agentibridge
 AGENTIBRIDGE_TRANSPORT=sse python -m agentibridge
 ```
 
-**Docker Compose (full stack with Redis):**
+**Docker Compose (full stack with Redis + Postgres):**
 ```bash
 docker compose up --build -d
 ```
@@ -78,8 +78,8 @@ python tests/integration/test_docker.py
 ```
 
 These tests:
-- Spin up Docker containers (agentibridge + Redis)
-- Exercise all MCP tools end-to-end
+- Spin up Docker containers (agentibridge + Redis + Postgres)
+- Exercise all MCP tools end-to-end (Phase 1–4)
 - Verify Redis caching and fallback behavior
 - Clean up automatically on completion
 
@@ -156,8 +156,11 @@ Our GitHub Actions workflows automatically run on pull requests:
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `test.yml` | Push/PR | Unit tests (Python 3.11 + 3.12 matrix), lint (ruff) |
-| `build.yml` | Push to main | Builds Docker image → GHCR |
+| `test.yml` | Push/PR to main | Unit tests (Python 3.14), lint (ruff), integration tests (Docker) |
+| `build.yml` | Tag push (`v*`) or manual | Builds Docker image → GHCR |
+| `docker-publish.yml` | Tag push (`v*`) or manual | Publishes Docker image → Docker Hub |
+| `publish-pypi.yml` | Tag push (`v*`) or manual | Builds wheel + sdist → PyPI |
+| `release.yml` | Manual only | Bumps version in pyproject.toml, commits, tags, pushes |
 | `e2e-smoke.yml` | Daily + manual | Runs 6 MCP tool smoke tests via Claude CLI against live tunnel |
 | `claude.yml` | Issue/PR comments | Claude Code integration for automated code review |
 
@@ -182,20 +185,22 @@ python tests/integration/test_docker.py
 ```
 agentibridge/
 ├── agentibridge/           # Main package
-│   ├── server.py          # FastMCP server with 10 tools
+│   ├── server.py          # FastMCP server with 11 tools
 │   ├── parser.py          # JSONL transcript parser
 │   ├── store.py           # SessionStore (Redis + file fallback)
 │   ├── collector.py       # Background polling daemon
-│   ├── transport.py       # SSE/HTTP transport
+│   ├── transport.py       # SSE/HTTP transport + auth middleware
+│   ├── oauth_provider.py  # OAuth 2.1 authorization server (opt-in)
 │   ├── embeddings.py      # Semantic search (Phase 2)
 │   ├── dispatch.py        # Session restore + dispatch (Phase 4)
-│   ├── claude_runner.py   # Claude CLI runner
+│   ├── dispatch_bridge.py # Host-side HTTP bridge for Docker dispatch
+│   ├── claude_runner.py   # Claude CLI subprocess wrapper
 │   ├── llm_client.py      # OpenAI-compatible LLM client
 │   ├── redis_client.py    # Redis helper
 │   ├── pg_client.py       # Postgres + pgvector
-│   ├── config.py          # Configuration with validation
+│   ├── config.py          # Centralized env-var configuration
 │   ├── cli.py             # CLI tool
-│   └── logging.py         # Structured logging
+│   └── logging.py         # Structured JSON logging
 ├── tests/
 │   ├── unit/              # Unit tests (452+ tests)
 │   ├── integration/       # Docker-based integration tests
@@ -272,7 +277,7 @@ agentibridge/
 
 - Follow [PEP 8](https://peps.python.org/pep-0008/)
 - Use type hints for all function signatures
-- Maximum line length: 100 characters
+- Maximum line length: 120 characters (ruff configured)
 - Use docstrings for public functions and classes
 
 ### Example Function
@@ -313,6 +318,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `automation/cloudfared.sh` | Idempotent Cloudflare Tunnel setup | `./automation/cloudfared.sh` |
+| `automation/compose.sh` | Interactive Docker Compose manager with dispatch bridge support | `./automation/compose.sh` |
 
 The Cloudflare setup script:
 - Installs `cloudflared` (if not present)

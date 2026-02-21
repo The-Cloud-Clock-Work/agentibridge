@@ -1,6 +1,6 @@
 # AgentiBridge
 
-**Memory for your AI agents.** AgentiBridge indexes your Claude Code sessions and makes them searchable by any AI client through 10 MCP tools.
+**Memory for your AI agents.** AgentiBridge indexes your Claude Code sessions and makes them searchable by any AI client through 11 MCP tools.
 
 **Use cases:**
 - 🔍 Search past sessions: "What did I work on last week?"
@@ -59,7 +59,7 @@ See [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup) for detailed configurati
 
 ## Core Concepts
 
-### MCP Tools (10 total)
+### MCP Tools (11 total)
 
 **Phase 1 — Foundation** (6 tools)
 - `list_sessions` — Browse all indexed sessions
@@ -73,9 +73,10 @@ See [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup) for detailed configurati
 - `search_semantic` — Natural language search with embeddings
 - `generate_summary` — AI-generated session summaries
 
-**Phase 4 — Write-back** (2 tools)
+**Phase 4 — Write-back** (3 tools)
 - `restore_session` — Load past session context
-- `dispatch_task` — Start new task with context from past sessions
+- `dispatch_task` — Fire-and-forget background task (returns `job_id` immediately)
+- `get_dispatch_job` — Poll a background job for status and output
 
 > **Note:** Phase 3 is the transport layer (SSE/HTTP), not exposed as tools.
 
@@ -127,7 +128,7 @@ See `agentibridge help` for the full tool and configuration reference.
 ```
 ┌─────────────────────────────────────┐
 │  MCP Server (server.py)             │
-│  10 tools across 4 phases           │
+│  11 tools across 4 phases           │
 │                                     │
 │  Phase 1: list/get/search sessions  │
 │  Phase 2: semantic search + summary │
