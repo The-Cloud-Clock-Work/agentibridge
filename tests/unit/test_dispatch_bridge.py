@@ -362,6 +362,142 @@ class TestDispatchBridgeApp:
 
 
 # ===========================================================================
+# Resume session tests
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestResumeSession:
+    """Tests for the --resume flag path through the dispatch stack."""
+
+    def test_run_claude_http_sends_resume_session_id(self):
+        """_run_claude_http includes resume_session_id in the POST body."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"success": True, "result": "resumed"}
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            asyncio.run(
+                _run_claude_http("http://localhost:8101", "ping", "sonnet", 300, "json", "abc123")
+            )
+
+        call_kwargs = mock_client.post.call_args[1]
+        assert call_kwargs["json"]["resume_session_id"] == "abc123"
+
+    def test_run_claude_local_uses_resume_flag(self):
+        """Local subprocess uses --resume <id> --print instead of -p when resume_session_id set."""
+        output = json.dumps({"result": "resumed ok", "session_id": "abc123"})
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (output.encode(), b"")
+        mock_proc.returncode = 0
+
+        captured_cmd = []
+
+        async def fake_exec(*args, **kwargs):
+            captured_cmd.extend(args)
+            return mock_proc
+
+        with (
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}, clear=False),
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        ):
+            result = asyncio.run(run_claude("ping", resume_session_id="abc123"))
+
+        assert result.success is True
+        assert "--resume" in captured_cmd
+        idx = captured_cmd.index("--resume")
+        assert captured_cmd[idx + 1] == "abc123"
+        assert "--print" in captured_cmd
+        assert "-p" not in captured_cmd
+
+    def test_run_claude_local_no_resume_flag_when_not_set(self):
+        """Without resume_session_id, local subprocess uses -p flag."""
+        output = json.dumps({"result": "ok"})
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (output.encode(), b"")
+        mock_proc.returncode = 0
+
+        captured_cmd = []
+
+        async def fake_exec(*args, **kwargs):
+            captured_cmd.extend(args)
+            return mock_proc
+
+        with (
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}, clear=False),
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        ):
+            asyncio.run(run_claude("ping"))
+
+        assert "-p" in captured_cmd
+        assert "--resume" not in captured_cmd
+
+    def test_run_claude_routes_resume_to_http(self):
+        """run_claude forwards resume_session_id to _run_claude_http when URL is set."""
+        mock_http = AsyncMock(return_value=ClaudeResult(success=True, result="resumed via http"))
+
+        with (
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": "http://bridge:8101"}),
+            patch("agentibridge.claude_runner._run_claude_http", mock_http),
+        ):
+            asyncio.run(run_claude("ping", resume_session_id="session-xyz"))
+
+        call_kwargs = mock_http.call_args[1] if mock_http.call_args[1] else {}
+        call_args = mock_http.call_args[0] if mock_http.call_args[0] else ()
+        # resume_session_id is the last positional arg or in kwargs
+        assert "session-xyz" in list(call_args) or call_kwargs.get("resume_session_id") == "session-xyz"
+
+    def test_bridge_app_passes_resume_session_id(self):
+        """ASGI app extracts resume_session_id from body and passes to run_claude."""
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/dispatch",
+            "headers": [(b"x-dispatch-secret", b"real-secret")],
+        }
+        payload = json.dumps({
+            "prompt": "ping",
+            "model": "sonnet",
+            "resume_session_id": "sess-abc",
+        }).encode()
+
+        mock_result = ClaudeResult(success=True, result="pong", session_id="sess-abc", exit_code=0)
+
+        async def run():
+            from agentibridge.dispatch_bridge import app
+
+            responses = []
+
+            async def receive():
+                return {"body": payload, "more_body": False}
+
+            async def send(message):
+                responses.append(message)
+
+            with (
+                patch.dict("os.environ", {"DISPATCH_BRIDGE_SECRET": "real-secret"}),
+                patch(
+                    "agentibridge.dispatch_bridge.run_claude",
+                    new_callable=AsyncMock,
+                    return_value=mock_result,
+                ) as mock_run,
+            ):
+                await app(scope, receive, send)
+                return responses, mock_run
+
+        responses, mock_run = asyncio.run(run())
+        status = responses[0]["status"]
+        assert status == 200
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("resume_session_id") == "sess-abc"
+
+
+# ===========================================================================
 # Bridge main() tests
 # ===========================================================================
 

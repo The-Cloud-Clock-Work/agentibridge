@@ -538,23 +538,30 @@ async def dispatch_task(
     task_description: str,
     project: str = "",
     session_id: str = "",
+    resume_session_id: str = "",
     command: str = "default",
     context_turns: int = 10,
 ) -> str:
-    """Dispatch a task to the agent, optionally with context from a past session.
+    """Dispatch a task to the agent as a background job (fire-and-forget).
 
-    If session_id is provided, extracts relevant context from that session
-    and injects it into the task prompt. Calls the agent via Claude CLI.
+    Returns immediately with a job_id. Use get_dispatch_job(job_id) to
+    check status and retrieve output when the task completes.
+
+    Two ways to use a past session:
+    - session_id: load context from the session and inject it into a new prompt
+    - resume_session_id: actually resume the session thread via ``--resume``
+      (continues the existing conversation with full memory, no injection needed)
 
     Args:
         task_description: What the agent should do
         project: Project context hint (optional)
         session_id: Past session to pull context from (optional)
+        resume_session_id: Session to resume via --resume flag (optional)
         command: Command preset — default/thinkhard/ultrathink
         context_turns: Number of turns to include from session context
 
     Returns:
-        JSON with dispatch result
+        JSON with job_id and status "running"
     """
     try:
         from agentibridge.dispatch import dispatch_task as _dispatch
@@ -563,6 +570,7 @@ async def dispatch_task(
             task_description=task_description,
             project=project,
             session_id=session_id,
+            resume_session_id=resume_session_id,
             command=command,
             context_turns=context_turns,
         )
@@ -572,6 +580,25 @@ async def dispatch_task(
     except Exception as e:
         log("MCP dispatch_task failed", {"task": task_description, "error": str(e)})
         return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def get_dispatch_job(job_id: str) -> str:
+    """Get the status and output of a background dispatch job.
+
+    Args:
+        job_id: Job UUID returned by dispatch_task
+
+    Returns:
+        JSON with status ("running", "completed", "failed"), output, error,
+        duration_ms, claude_session_id, and other metadata.
+    """
+    from agentibridge.dispatch import get_job_status
+
+    data = get_job_status(job_id)
+    if data is None:
+        return json.dumps({"success": False, "error": f"Job not found: {job_id}"})
+    return json.dumps({"success": True, **data})
 
 
 # =============================================================================

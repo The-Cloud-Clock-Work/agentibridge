@@ -90,6 +90,55 @@ fi
 
 ok "Required variables present"
 
+# ── Detect dispatch bridge state ──────────────────────────────
+detect_bridge() {
+    # Check if dispatch bridge is running on the host
+    if curl -sf http://127.0.0.1:${DISPATCH_BRIDGE_PORT:-8101}/health >/dev/null 2>&1; then
+        echo "running"
+    else
+        echo "stopped"
+    fi
+}
+
+start_bridge() {
+    local secret
+    secret=$(grep -E '^\s*DISPATCH_SECRET=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    if [[ -z "$secret" ]]; then
+        err "DISPATCH_SECRET not found in .env — cannot start bridge"
+        return 1
+    fi
+
+    local port
+    port=$(grep -E '^\s*DISPATCH_BRIDGE_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "8101")
+
+    info "Starting dispatch bridge on 127.0.0.1:${port}..."
+    DISPATCH_BRIDGE_SECRET="$secret" DISPATCH_BRIDGE_PORT="$port" \
+        nohup python -m agentibridge.dispatch_bridge > /tmp/dispatch_bridge.log 2>&1 &
+    local pid=$!
+    sleep 1
+
+    if kill -0 "$pid" 2>/dev/null; then
+        ok "Dispatch bridge started (PID $pid, port $port)"
+        ok "Logs: /tmp/dispatch_bridge.log"
+    else
+        err "Dispatch bridge failed to start — check /tmp/dispatch_bridge.log"
+        return 1
+    fi
+}
+
+stop_bridge() {
+    local pids
+    pids=$(pgrep -f "agentibridge.dispatch_bridge" 2>/dev/null || true)
+    if [[ -z "$pids" ]]; then
+        info "No dispatch bridge process found"
+        return 0
+    fi
+    info "Stopping dispatch bridge (PID: $pids)..."
+    kill $pids 2>/dev/null || true
+    sleep 1
+    ok "Dispatch bridge stopped"
+}
+
 # ── Detect current stack state ───────────────────────────────
 hdr "Stack status"
 
@@ -136,6 +185,15 @@ case "$STATE" in
         ;;
 esac
 
+# ── Detect dispatch bridge ────────────────────────────────────
+BRIDGE_STATE=$(detect_bridge)
+printf "\n"
+if [[ "$BRIDGE_STATE" == "running" ]]; then
+    ok "Dispatch bridge is ${GREEN}running${NC}"
+else
+    info "Dispatch bridge is ${DIM}stopped${NC}"
+fi
+
 # ── Build menu based on state ───────────────────────────────
 hdr "Actions"
 
@@ -167,6 +225,14 @@ case "$STATE" in
         add_option "rebuild"   "Build & start (docker compose up --build)"
         ;;
 esac
+
+# Dispatch bridge options
+if [[ "$BRIDGE_STATE" == "running" ]]; then
+    add_option "bridge-stop"    "Stop dispatch bridge"
+    add_option "bridge-logs"    "View dispatch bridge logs"
+else
+    add_option "bridge-start"   "Start dispatch bridge (host-side Claude CLI proxy)"
+fi
 
 add_option "quit"  "Exit"
 
@@ -240,6 +306,21 @@ case "$ACTION" in
                 *)              printf "  ${YELLOW}●${NC} %-20s %s\n" "$container" "$health" ;;
             esac
         done
+        ;;
+    bridge-start)
+        start_bridge
+        ;;
+    bridge-stop)
+        stop_bridge
+        ;;
+    bridge-logs)
+        if [[ -f /tmp/dispatch_bridge.log ]]; then
+            info "Showing dispatch bridge logs (Ctrl+C to stop)..."
+            printf "\n"
+            tail -f /tmp/dispatch_bridge.log
+        else
+            err "No dispatch bridge log found at /tmp/dispatch_bridge.log"
+        fi
         ;;
     quit)
         ok "Bye!"

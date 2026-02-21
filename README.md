@@ -289,6 +289,65 @@ See [Cloudflare Tunnel Guide](docs/deployment/cloudflare-tunnel.md) for detailed
 
 > **How it works:** Cloudflare Tunnel routes your domain → `localhost:8100`. The bridge has no domain config — it's all in `~/.cloudflared/config.yml`.
 
+## Dispatch Bridge (Docker → Host Claude CLI)
+
+When AgentiBridge runs in Docker, the `claude` CLI binary and auth credentials aren't available inside the container. The dispatch bridge solves this — a lightweight HTTP server running on the **host** that the container calls to execute Claude CLI commands.
+
+```
+Docker Container                         Host Machine
+┌──────────────────────┐   HTTP POST    ┌────────────────────────┐
+│ MCP Server           │  /dispatch     │ dispatch_bridge.py     │
+│  → claude_runner.py  │ ──────────────>│  → claude CLI (local)  │
+│    (HTTP mode)       │ <──────────────│  → returns result JSON │
+└──────────────────────┘                └────────────────────────┘
+```
+
+### Setup
+
+**1. Configure `.env`** (already done if you followed Quick Start):
+
+```bash
+CLAUDE_DISPATCH_URL=http://host.docker.internal:8101
+DISPATCH_SECRET=your-secret-here
+```
+
+**2. Start the bridge on the host:**
+
+```bash
+DISPATCH_BRIDGE_SECRET=your-secret-here python -m agentibridge.dispatch_bridge
+```
+
+The bridge binds to `0.0.0.0:8101` by default so Docker containers can reach it via `host.docker.internal`.
+
+**3. Verify:**
+
+```bash
+curl http://localhost:8101/health
+# {"status": "ok"}
+```
+
+The `dispatch_task` MCP tool will now route through the bridge automatically when `CLAUDE_DISPATCH_URL` is set.
+
+### Bridge Environment Variables
+
+| Variable | Where | Default | Purpose |
+|----------|-------|---------|---------|
+| `CLAUDE_DISPATCH_URL` | Container (`.env`) | *(empty = local mode)* | Bridge URL for container to call |
+| `DISPATCH_SECRET` | Container (`.env`) | *(empty)* | Shared secret sent to bridge |
+| `DISPATCH_BRIDGE_SECRET` | Host shell | *(required)* | Secret the bridge validates against |
+| `DISPATCH_BRIDGE_HOST` | Host shell | `0.0.0.0` | Bridge bind address |
+| `DISPATCH_BRIDGE_PORT` | Host shell | `8101` | Bridge listen port |
+| `CLAUDE_DISPATCH_TIMEOUT` | Host shell | `600` | Max timeout cap (seconds) |
+
+### Using with compose.sh
+
+The interactive compose manager includes dispatch bridge management:
+
+```bash
+./automation/compose.sh
+# Select "Start dispatch bridge" or "Stop dispatch bridge" from the menu
+```
+
 ## What's Next
 
 **Getting Started:**

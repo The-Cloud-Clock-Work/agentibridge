@@ -5,9 +5,55 @@ Enables:
 2. Dispatching tasks to agents via the Claude CLI (no external API needed)
 """
 
-from typing import Any, Dict
+import asyncio
+import json
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from agentibridge.logging import log
+
+# ---------------------------------------------------------------------------
+# Job store (fire-and-forget background tasks)
+# ---------------------------------------------------------------------------
+
+_JOBS_DIR = Path("/tmp/agentibridge_jobs")
+
+# Keep references to running background tasks to prevent GC
+_background_tasks: set = set()
+
+
+def _job_path(job_id: str) -> Path:
+    return _JOBS_DIR / f"{job_id}.json"
+
+
+def _write_job(job_id: str, data: dict) -> None:
+    _JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    _job_path(job_id).write_text(json.dumps(data))
+
+
+def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
+    """Read the current state of a background dispatch job.
+
+    Args:
+        job_id: Job UUID returned by dispatch_task
+
+    Returns:
+        Dict with status, output, error, etc. or None if not found.
+    """
+    path = _job_path(job_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Session context restore
+# ---------------------------------------------------------------------------
 
 
 def restore_session_context(session_id: str, last_n: int = 20) -> str:
@@ -77,29 +123,34 @@ def restore_session_context(session_id: str, last_n: int = 20) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+
 async def dispatch_task(
     task_description: str,
     project: str = "",
     session_id: str = "",
+    resume_session_id: str = "",
     command: str = "default",
     context_turns: int = 10,
 ) -> Dict[str, Any]:
-    """Dispatch a task to the Claude CLI, optionally injecting session context.
+    """Dispatch a task to the Claude CLI as a background job.
 
-    1. If session_id is provided, extracts context from that session
-    2. Builds prompt combining task description + session context
-    3. Runs Claude CLI via subprocess
-    4. Returns result
+    Returns immediately with a job_id. Use get_job_status(job_id) to
+    check progress and retrieve output when done.
 
     Args:
         task_description: What the agent should do
         project: Project context hint
-        session_id: Past session to pull context from (optional)
+        session_id: Past session to pull context from (context injection)
+        resume_session_id: Session to resume via --resume flag (actual continuation)
         command: Command preset (default/thinkhard/ultrathink)
         context_turns: Number of turns to include from session context
 
     Returns:
-        Dict with dispatch result, including success status and output
+        Dict with job_id and initial status
     """
     from agentibridge.claude_runner import run_claude
 
@@ -141,17 +192,78 @@ async def dispatch_task(
 
     full_prompt = "".join(prompt_parts)
 
-    # Dispatch via Claude CLI (async — avoids event loop conflict in MCP)
-    result = await run_claude(prompt=full_prompt, model=model)
+    # Generate job ID and write initial state
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    _write_job(job_id, {
+        "job_id": job_id,
+        "status": "running",
+        "started_at": now,
+        "task": task_description,
+        "project": project,
+        "context_session": session_id or None,
+        "resumed_session": resume_session_id or None,
+        "prompt_length": len(full_prompt),
+        "output": None,
+        "error": None,
+        "exit_code": None,
+        "duration_ms": None,
+        "completed_at": None,
+        "claude_session_id": None,
+    })
+
+    log("dispatch_task: started background job", {"job_id": job_id, "prompt_len": len(full_prompt)})
+
+    async def _run_background() -> None:
+        try:
+            result = await run_claude(
+                prompt=full_prompt,
+                model=model,
+                resume_session_id=resume_session_id or None,
+            )
+            completed_at = datetime.now(timezone.utc).isoformat()
+            _write_job(job_id, {
+                "job_id": job_id,
+                "status": "completed" if result.success else "failed",
+                "started_at": now,
+                "completed_at": completed_at,
+                "task": task_description,
+                "project": project,
+                "context_session": session_id or None,
+                "resumed_session": resume_session_id or None,
+                "prompt_length": len(full_prompt),
+                "output": result.result,
+                "error": result.error,
+                "exit_code": result.exit_code,
+                "duration_ms": result.duration_ms,
+                "timed_out": result.timed_out,
+                "claude_session_id": result.session_id,
+            })
+            log("dispatch_task: job finished", {"job_id": job_id, "success": result.success})
+        except Exception as e:
+            completed_at = datetime.now(timezone.utc).isoformat()
+            _write_job(job_id, {
+                "job_id": job_id,
+                "status": "failed",
+                "started_at": now,
+                "completed_at": completed_at,
+                "task": task_description,
+                "project": project,
+                "error": str(e),
+                "output": None,
+            })
+            log("dispatch_task: job error", {"job_id": job_id, "error": str(e)})
+
+    task = asyncio.create_task(_run_background())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return {
         "dispatched": True,
-        "completed": result.success,
-        "exit_code": result.exit_code,
-        "duration_ms": result.duration_ms,
-        "timed_out": result.timed_out,
-        "output": result.result,
-        "error": result.error,
+        "background": True,
+        "job_id": job_id,
+        "status": "running",
         "context_session": session_id or None,
+        "resumed_session": resume_session_id or None,
         "prompt_length": len(full_prompt),
     }

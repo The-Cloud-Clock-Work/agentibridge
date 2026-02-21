@@ -115,6 +115,7 @@ async def _run_claude_http(
     model: str,
     timeout: int,
     output_format: str,
+    resume_session_id: Optional[str] = None,
 ) -> ClaudeResult:
     """Proxy a dispatch request to the host-side bridge via HTTP.
 
@@ -146,6 +147,7 @@ async def _run_claude_http(
                     "model": model,
                     "timeout": timeout,
                     "output_format": output_format,
+                    "resume_session_id": resume_session_id or "",
                 },
                 headers={"X-Dispatch-Secret": secret},
             )
@@ -195,6 +197,7 @@ async def run_claude(
     timeout: Optional[int] = None,
     cwd: Optional[str] = None,
     output_format: str = "json",
+    resume_session_id: Optional[str] = None,
 ) -> ClaudeResult:
     """Run the ``claude`` CLI and return the parsed result.
 
@@ -217,11 +220,15 @@ async def run_claude(
     # Route to HTTP bridge if configured
     dispatch_url = _dispatch_url()
     if dispatch_url:
-        return await _run_claude_http(dispatch_url, prompt, model, timeout, output_format)
+        return await _run_claude_http(dispatch_url, prompt, model, timeout, output_format, resume_session_id)
 
     # Local subprocess mode
     binary = _claude_binary()
-    cmd = [binary, "--model", model, "--output-format", output_format, "-p", prompt]
+    if resume_session_id:
+        cmd = [binary, "--dangerously-skip-permissions", "--model", model, "--output-format", output_format,
+               "--resume", resume_session_id, "--print", prompt]
+    else:
+        cmd = [binary, "--dangerously-skip-permissions", "--model", model, "--output-format", output_format, "-p", prompt]
 
     log("claude_runner: starting", {"model": model, "prompt_len": len(prompt)})
 

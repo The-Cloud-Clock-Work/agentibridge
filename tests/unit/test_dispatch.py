@@ -94,17 +94,21 @@ class TestDispatchTask:
             error=None,
         )
 
-        with patch(
-            "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
-        ) as mock_run:
-            result = asyncio.run(dispatch_task("Fix the bug"))
+        async def _run():
+            with patch(
+                "agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_run:
+                result = await dispatch_task("Fix the bug")
+                await asyncio.sleep(0)  # let background task run
+                assert result["dispatched"] is True
+                assert result["background"] is True
+                assert "job_id" in result
+                assert result["status"] == "running"
+                mock_run.assert_called_once()
+                # Default command maps to "sonnet"
+                assert mock_run.call_args[1]["model"] == "sonnet"
 
-            assert result["dispatched"] is True
-            assert result["completed"] is True
-            assert result["error"] is None
-            mock_run.assert_called_once()
-            # Default command maps to "sonnet"
-            assert mock_run.call_args[1]["model"] == "sonnet"
+        asyncio.run(_run())
 
     def test_with_project(self):
         mock_result = ClaudeResult(
@@ -182,11 +186,21 @@ class TestDispatchTask:
             error="CLI error",
         )
 
-        with patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.run(dispatch_task("Fix bug"))
+        async def _run():
+            with patch("agentibridge.claude_runner.run_claude", new_callable=AsyncMock, return_value=mock_result):
+                result = await dispatch_task("Fix bug")
+                await asyncio.sleep(0)  # let background task run
+                assert result["dispatched"] is True
+                assert result["background"] is True
+                assert "job_id" in result
+                # Check job file was written with failure
+                from agentibridge.dispatch import get_job_status
+                job = get_job_status(result["job_id"])
+                assert job is not None
+                assert job["status"] == "failed"
+                assert job["error"] == "CLI error"
 
-            assert result["completed"] is False
-            assert result["error"] == "CLI error"
+        asyncio.run(_run())
 
     def test_command_model_mapping(self):
         mock_result = ClaudeResult(success=True, result="done", exit_code=0)

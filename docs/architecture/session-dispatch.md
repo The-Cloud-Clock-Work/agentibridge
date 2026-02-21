@@ -1,153 +1,182 @@
 # Session Dispatch & Context Restore
 
-Session continuity and task delegation capabilities. Agents can restore context from past sessions and dispatch new tasks with that context injected, enabling multi-session workflows and context-aware task handoff.
+Session continuity and task delegation. Agents can dispatch tasks to the Claude CLI as **fire-and-forget background jobs**, restore context from past sessions, or truly resume an existing session thread.
 
 ## Architecture
 
 ```
-Past Session                       New Task
-(transcript)                       (with context)
-     |                                 |
-     v                                 v
-restore_session_context()    -->  dispatch_task()
-     |                                 |
-     v                                 v
-Formatted context blob        Claude CLI subprocess
-(metadata + entries)          (prompt + injected context)
-                                       |
-                                       v
-                                Claude executes task
-                                with session awareness
+                         dispatch_task()
+                               |
+                    ┌──────────┴──────────┐
+                    │                     │
+              session_id?          resume_session_id?
+                    │                     │
+                    v                     v
+        restore_session_context()   --resume <id> flag
+        (inject context into prompt)  (continue thread)
+                    │                     │
+                    └──────────┬──────────┘
+                               │
+                               v
+                    asyncio.create_task()
+                    (fire and forget)
+                               │
+                               v
+                    Returns job_id immediately
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+              job running          get_dispatch_job(job_id)
+              in background         → status / output
 ```
 
-## Components
+## MCP Tools
 
-### `agentibridge/dispatch.py`
+### `dispatch_task`
 
-Two main functions:
-
-#### `restore_session_context(session_id, last_n=20) -> str`
-
-Extracts and formats context from a past session:
+Dispatches a task to the Claude CLI as a **background job**. Returns immediately with a `job_id` — does not wait for completion.
 
 ```
-============================================================
-RESTORED SESSION CONTEXT
-============================================================
-Session ID: abc-123-def
-Project: /home/user/dev/myapp
-Branch: feature/auth
-Started: 2025-01-15T10:00:00Z
-Last Active: 2025-01-15T11:30:00Z
-Stats: 15 user turns, 15 assistant turns, 42 tool calls
-Summary: Implemented OAuth2 login flow with JWT tokens
-------------------------------------------------------------
-RECENT CONVERSATION:
-------------------------------------------------------------
-
-[USER] Add password reset endpoint
-
-[ASSISTANT] (tools: Read, Edit, Write) Created /api/auth/reset...
-
-[USER] Now add email verification
-
-[ASSISTANT] (tools: Write, Bash) Added email verification...
-
-============================================================
-END OF RESTORED CONTEXT
-============================================================
+Args:
+  task_description  (str)           — what to do
+  project           (str, optional) — project path hint
+  session_id        (str, optional) — inject context from past session
+  resume_session_id (str, optional) — resume an existing session thread
+  command           (str, default "default") — model preset
+  context_turns     (int, default 10)        — turns to include from context
 ```
 
-#### `dispatch_task(task_description, project, session_id, command, context_turns) -> dict`
-
-Dispatches a task via the Claude CLI as a subprocess:
-
-1. If `session_id` provided, calls `restore_session_context()` to get context
-2. Builds a prompt: context + project hint + task description
-3. Runs Claude CLI via `agentibridge.claude_runner`
-4. Returns result with dispatch metadata
-
-**Return format:**
+**Returns immediately:**
 ```json
 {
+  "success": true,
   "dispatched": true,
-  "completed": true,
-  "exit_code": 0,
-  "duration_ms": 45000,
-  "timed_out": false,
-  "output": {"result": "..."},
-  "error": null,
-  "context_session": "abc-123-def",
-  "prompt_length": 2500
+  "background": true,
+  "job_id": "71dad581-e7d2-40c2-81a5-bed77bcb813d",
+  "status": "running",
+  "context_session": null,
+  "resumed_session": null,
+  "prompt_length": 162
 }
 ```
 
-## MCP Tools Added
+### `get_dispatch_job`
+
+Poll a background job for status and output.
+
+```
+Args:
+  job_id  (str) — UUID returned by dispatch_task
+```
+
+**While running:**
+```json
+{
+  "job_id": "71dad581...",
+  "status": "running",
+  "started_at": "2026-02-21T11:04:31Z",
+  "output": null
+}
+```
+
+**When done:**
+```json
+{
+  "job_id": "71dad581...",
+  "status": "completed",
+  "started_at": "2026-02-21T11:04:31Z",
+  "completed_at": "2026-02-21T11:05:05Z",
+  "output": "Created tests/test_hello.py with the requested test.",
+  "error": null,
+  "exit_code": 0,
+  "duration_ms": 17412,
+  "timed_out": false,
+  "claude_session_id": "a0f4dd54-5a16-4463-b7b2-24ca41901e12"
+}
+```
+
+`status` values: `running` · `completed` · `failed`
 
 ### `restore_session`
+
+Load context from a past session for injection into a new conversation.
 
 ```
 Args: session_id (str), last_n (int, default 20)
 Returns: JSON with formatted context string + char_count
 ```
 
-Load context from a past session for injection into a new conversation. Useful when an agent needs to continue work from a previous session.
+## Two Ways to Use a Past Session
 
-### `dispatch_task`
+### 1. Context Injection (`session_id`)
 
-```
-Args: task_description (str), project (str), session_id (str),
-      command (str, default "default"), context_turns (int, default 10)
-Returns: JSON with dispatch result
-```
+Extracts recent turns from the past session and injects them as text into the new prompt. Claude starts a **fresh conversation** but is aware of the previous work.
 
-Dispatch a task to the agent, optionally injecting context from a past session. The `command` parameter controls model selection:
-- `default` — Sonnet
-- `thinkhard` — Sonnet
-- `ultrathink` — Opus
-
-## Use Cases
-
-### 1. Session Continuation
-An agent can pick up where a previous session left off:
-
-```
-restore_session("previous-session-id", last_n=30)
--> Formatted context with recent conversation
-```
-
-### 2. Context-Aware Task Delegation
-Dispatch a follow-up task with awareness of past work:
-
-```
+```python
 dispatch_task(
     task_description="Deploy the auth changes to staging",
-    session_id="auth-implementation-session",
-    command="thinkhard",
+    session_id="abc-123",        # context injected as text
     context_turns=15,
 )
 ```
 
-### 3. Multi-Agent Handoff
-Agent A completes research, Agent B receives context:
+Use when: continuing work thematically, summarising, or handing off across projects.
 
+### 2. True Session Resume (`resume_session_id`)
+
+Passes `--resume <id>` to the Claude CLI. The existing session thread is **literally continued** — same conversation, same memory, same context window.
+
+```python
+dispatch_task(
+    task_description="Continue where we left off — fix the failing tests",
+    resume_session_id="abc-123",  # --resume flag passed to CLI
+)
 ```
-# Agent B receives Agent A's session context
-context = restore_session("agent-a-research-session", last_n=50)
-# Agent B uses this to inform its own work
-```
 
-## Dependencies
+Use when: mid-task interruption, picking up an in-progress session, or appending turns to an existing thread.
 
-- `agentibridge.store` — SessionStore for reading sessions
-- `agentibridge.claude_runner` — Claude CLI subprocess runner for dispatch
-- Claude CLI binary must be available at `CLAUDE_BINARY` path for dispatch_task to work
+## Natural Language Status Checks
+
+The `job_id` stays in the conversation context, so you can just ask:
+
+> *"How is that job going?"*
+> *"Did the antoncore task finish?"*
+> *"What did it output?"*
+
+The agent will call `get_dispatch_job` on the relevant job_id without needing it repeated. If checking from a **new conversation**, note the job_id or add `list_dispatch_jobs` (not yet implemented) to browse recent jobs.
+
+## Permissions
+
+All dispatched Claude CLI invocations run with `--dangerously-skip-permissions`. No approval prompts will block background jobs.
+
+## Job Storage
+
+Job state is persisted to `/tmp/agentibridge_jobs/<job_id>.json`. Jobs survive MCP server restarts as long as the filesystem is intact. Background tasks are held in memory via `asyncio.create_task()` with GC protection while running.
+
+## Command Presets
+
+| `command`    | Model  |
+|-------------|--------|
+| `default`   | Sonnet |
+| `thinkhard` | Sonnet |
+| `ultrathink`| Opus   |
+
+## Components
+
+| File | Role |
+|------|------|
+| `agentibridge/dispatch.py` | Job management, context restore, background task runner |
+| `agentibridge/claude_runner.py` | Claude CLI subprocess / HTTP bridge proxy |
+| `agentibridge/dispatch_bridge.py` | Host-side HTTP bridge (Docker mode) |
 
 ## Configuration
 
 ```bash
-# Claude CLI dispatch (for dispatch_task)
 CLAUDE_BINARY=claude
 CLAUDE_DISPATCH_MODEL=sonnet
 CLAUDE_DISPATCH_TIMEOUT=300
+
+# Docker mode — bridge on host proxies CLI calls
+CLAUDE_DISPATCH_URL=http://host.docker.internal:8101
+DISPATCH_SECRET=<shared-secret>
 ```

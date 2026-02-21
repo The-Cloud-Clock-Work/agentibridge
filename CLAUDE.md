@@ -44,7 +44,7 @@ agentibridge help
 ```
 ┌─────────────────────────────────────┐
 │  MCP Server (server.py)             │
-│  10 tools across 4 phases           │
+│  11 tools across 4 phases           │
 │                                     │
 │  Phase 1: list/get/search sessions  │
 │  Phase 2: semantic search + summary │
@@ -67,13 +67,13 @@ agentibridge help
 
 | Module | Purpose |
 |--------|---------|
-| `agentibridge/server.py` | FastMCP server with 10 tools |
+| `agentibridge/server.py` | FastMCP server with 11 tools |
 | `agentibridge/parser.py` | Pure-function JSONL transcript parser |
 | `agentibridge/store.py` | SessionStore (Redis + filesystem fallback) |
 | `agentibridge/collector.py` | Background polling daemon |
 | `agentibridge/transport.py` | SSE/HTTP transport + API key auth |
 | `agentibridge/embeddings.py` | Semantic search (Phase 2) |
-| `agentibridge/dispatch.py` | Session restore + task dispatch (Phase 4) |
+| `agentibridge/dispatch.py` | Background job dispatch, session restore (Phase 4) |
 | `agentibridge/claude_runner.py` | Claude CLI runner (dispatch) |
 | `agentibridge/llm_client.py` | OpenAI-compatible embeddings + chat |
 | `agentibridge/redis_client.py` | Redis helper |
@@ -137,7 +137,8 @@ CLAUDE_HOOK_LOG_ENABLED=true
 
 ### Phase 4 — Write-back & Dispatch
 - `restore_session` — Load session context for continuation
-- `dispatch_task` — Dispatch a task with optional session context
+- `dispatch_task` — Fire-and-forget background job dispatch (returns job_id immediately)
+- `get_dispatch_job` — Poll a background job for status and output
 
 ## Redis + File Fallback Pattern
 
