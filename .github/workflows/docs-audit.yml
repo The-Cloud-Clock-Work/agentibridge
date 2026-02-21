@@ -149,6 +149,6 @@ jobs:
           claude \
             --dangerously-skip-permissions \
             --output-format text \
-            --max-turns 25 \
+            --max-turns 60 \
             ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} \
             -p "$(cat /tmp/audit-prompt.txt)"
