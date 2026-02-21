@@ -6,7 +6,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Gate job: only runs on manual dispatch, requires release environment approval.
+  # Skipped automatically on tag pushes — downstream job proceeds without waiting.
+  gate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: echo "Manual dispatch approved"
+
   push:
+    needs: gate
+    if: always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
