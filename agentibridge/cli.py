@@ -3,6 +3,10 @@
 Provides commands for status, config, connection strings, and service management.
 
 Usage:
+    agentibridge run        — Start the Docker stack (pulls Hub image automatically)
+    agentibridge stop       — Stop the Docker stack
+    agentibridge restart    — Restart the Docker stack
+    agentibridge logs       — View stack logs
     agentibridge status     — Check if running, Redis connectivity, session count
     agentibridge help       — Available MCP tools and configuration reference
     agentibridge connect    — Connection strings for Claude Code, ChatGPT, etc.
@@ -22,6 +26,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+DATA_DIR = Path(__file__).parent / "data"
 
 
 def _version() -> str:
@@ -696,6 +703,104 @@ def cmd_locks(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Docker stack commands
+# ---------------------------------------------------------------------------
+
+_STACK_DIR = Path.home() / ".config" / "agentibridge"
+
+
+def _ensure_stack_dir() -> Path:
+    """Prepare ~/.config/agentibridge/ for docker compose operations.
+
+    Copies bundled compose file and .env template on first run.
+    Exits with code 1 if .env was just created (user must edit it first).
+    """
+    _STACK_DIR.mkdir(parents=True, exist_ok=True)
+
+    compose_dest = _STACK_DIR / "docker-compose.yml"
+    if not compose_dest.exists():
+        shutil.copy2(DATA_DIR / "docker-compose.yml", compose_dest)
+        print(f"Created {compose_dest}")
+
+    env_dest = _STACK_DIR / ".env"
+    if not env_dest.exists():
+        shutil.copy2(DATA_DIR / ".env.example", env_dest)
+        print(f"Created {env_dest} — edit it before running again")
+        sys.exit(1)
+
+    return _STACK_DIR
+
+
+def _compose_cmd(stack_dir: Path) -> list[str]:
+    """Base docker compose invocation for the managed stack."""
+    return [
+        "docker",
+        "compose",
+        "-f",
+        str(stack_dir / "docker-compose.yml"),
+        "--env-file",
+        str(stack_dir / ".env"),
+    ]
+
+
+def cmd_run(args: argparse.Namespace) -> None:
+    if not shutil.which("docker"):
+        print("ERROR: docker is not installed or not in PATH.")
+        print("Install Docker Desktop or Docker Engine first.")
+        sys.exit(1)
+
+    stack_dir = _ensure_stack_dir()
+    cmd = _compose_cmd(stack_dir)
+
+    if args.rebuild:
+        cmd += ["up", "--build", "--pull", "always", "-d"]
+    else:
+        cmd += ["up", "-d"]
+
+    subprocess.run(cmd, check=True)
+
+    # Show running containers after start
+    print()
+    subprocess.run(
+        ["docker", "ps", "--filter", "name=agentibridge", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"],
+        check=False,
+    )
+    print()
+    print("Stack started. Run 'agentibridge status' to check connectivity.")
+    print("View logs with: agentibridge logs --follow")
+
+
+def cmd_stop(args: argparse.Namespace) -> None:
+    if not shutil.which("docker"):
+        print("ERROR: docker is not installed or not in PATH.")
+        sys.exit(1)
+
+    stack_dir = _ensure_stack_dir()
+    subprocess.run(_compose_cmd(stack_dir) + ["down"], check=True)
+
+
+def cmd_restart(args: argparse.Namespace) -> None:
+    if not shutil.which("docker"):
+        print("ERROR: docker is not installed or not in PATH.")
+        sys.exit(1)
+
+    stack_dir = _ensure_stack_dir()
+    subprocess.run(_compose_cmd(stack_dir) + ["restart"], check=True)
+
+
+def cmd_logs(args: argparse.Namespace) -> None:
+    if not shutil.which("docker"):
+        print("ERROR: docker is not installed or not in PATH.")
+        sys.exit(1)
+
+    stack_dir = _ensure_stack_dir()
+    cmd = _compose_cmd(stack_dir) + ["logs", "--tail", str(args.tail)]
+    if args.follow:
+        cmd.append("-f")
+    subprocess.run(cmd, check=False)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -706,6 +811,21 @@ def main() -> None:
         description="AgentiBridge — Claude CLI Transcript MCP Server",
     )
     subparsers = parser.add_subparsers(dest="command")
+
+    # run
+    run_parser = subparsers.add_parser("run", help="Start the Docker stack")
+    run_parser.add_argument("--rebuild", action="store_true", help="Force pull + rebuild before starting")
+
+    # stop
+    subparsers.add_parser("stop", help="Stop the Docker stack")
+
+    # restart
+    subparsers.add_parser("restart", help="Restart the Docker stack")
+
+    # logs
+    logs_parser = subparsers.add_parser("logs", help="View Docker stack logs")
+    logs_parser.add_argument("--tail", type=int, default=100, metavar="N", help="Number of lines to show (default: 100)")
+    logs_parser.add_argument("--follow", "-f", action="store_true", help="Follow log output")
 
     # version
     subparsers.add_parser("version", help="Print version")
@@ -748,6 +868,10 @@ def main() -> None:
     args = parser.parse_args()
 
     commands = {
+        "run": cmd_run,
+        "stop": cmd_stop,
+        "restart": cmd_restart,
+        "logs": cmd_logs,
         "version": cmd_version,
         "status": cmd_status,
         "help": cmd_help,
