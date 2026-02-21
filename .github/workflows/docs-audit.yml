@@ -1,0 +1,253 @@
+name: Docs Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Narrow the audit scope (e.g. 'README only', 'configuration only' — blank = full audit)"
+        required: false
+        type: string
+        default: ""
+      extra_instructions:
+        description: "Additional instructions for Claude (e.g. 'be conservative, only fix clear errors')"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  docs-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create audit branch
+        id: branch
+        run: |
+          BRANCH="docs/audit-$(date +%Y%m%d%H%M)"
+          git checkout -b "$BRANCH"
+          echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      # ── Probe Anthropic endpoints (BASE → FALLBACK → fail) ──────────────────
+      - name: Probe Anthropic endpoints
+        id: anthropic
+        env:
+          BASE_URL: ${{ vars.ANTHROPIC_URL_BASE }}
+          FALLBACK_URL: ${{ vars.ANTHROPIC_URL_FALLBACK }}
+        run: |
+          echo "Probing BASE: ${BASE_URL}"
+          HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "${BASE_URL}" 2>/dev/null || true)
+          echo "  HTTP status: ${HTTP_CODE}"
+
+          if [[ "$HTTP_CODE" != "000" && -n "$HTTP_CODE" ]]; then
+            echo "selected=base" >> "$GITHUB_OUTPUT"
+            echo "url=${BASE_URL}" >> "$GITHUB_OUTPUT"
+            echo "model=${{ vars.ANTHROPIC_MODEL_BASE }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "BASE unreachable, trying FALLBACK: ${FALLBACK_URL}"
+          HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "${FALLBACK_URL}" 2>/dev/null || true)
+          echo "  HTTP status: ${HTTP_CODE}"
+
+          if [[ "$HTTP_CODE" != "000" && -n "$HTTP_CODE" ]]; then
+            echo "selected=fallback" >> "$GITHUB_OUTPUT"
+            echo "url=${FALLBACK_URL}" >> "$GITHUB_OUTPUT"
+            echo "model=${{ vars.ANTHROPIC_MODEL_FALLBACK }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::error::Both Anthropic endpoints unreachable"
+          exit 1
+
+      # ── Resolve API key for selected endpoint ────────────────────────────────
+      - name: Resolve API key
+        id: resolve_key
+        env:
+          TOKEN_BASE: ${{ secrets.ANTHROPIC_TOKEN_BASE }}
+          TOKEN_FALLBACK: ${{ secrets.ANTHROPIC_TOKEN_FALLBACK }}
+        run: |
+          if [ "${{ steps.anthropic.outputs.selected }}" = "base" ]; then
+            echo "api_key=${TOKEN_BASE}" >> "$GITHUB_OUTPUT"
+          else
+            echo "api_key=${TOKEN_FALLBACK}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Check AgentiBridge MCP health (non-fatal) ────────────────────────────
+      - name: Check AgentiBridge MCP health
+        id: mcp_health
+        env:
+          MCP_URL: ${{ vars.MCP_SERVER_URL }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+        run: |
+          if [[ -z "$MCP_URL" ]]; then
+            echo "MCP_SERVER_URL not set — skipping"
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          HEALTH_URL="${MCP_URL%/mcp}/health"
+          HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+            -H "X-API-Key: ${MCP_API_KEY}" "${HEALTH_URL}" 2>/dev/null || true)
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            echo "AgentiBridge reachable"
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::AgentiBridge not reachable (HTTP ${HTTP_CODE}) — audit continues using local files only"
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Generate .mcp.json (only if MCP server is reachable) ─────────────────
+      - name: Generate .mcp.json
+        if: steps.mcp_health.outputs.reachable == 'true'
+        env:
+          MCP_URL: ${{ vars.MCP_SERVER_URL }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+        run: |
+          jq -n --arg url "$MCP_URL" --arg key "$MCP_API_KEY" \
+            '{mcpServers:{"agentibridge":{type:"http",url:$url,headers:{"X-API-Key":$key}}}}' \
+            > .mcp.json
+          echo "Generated .mcp.json"
+
+      # ── Install Claude CLI ───────────────────────────────────────────────────
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # ── Build Claude prompt (Python handles escaping cleanly) ────────────────
+      - name: Build audit prompt
+        env:
+          AUDIT_BRANCH: ${{ steps.branch.outputs.name }}
+          AUDIT_SCOPE: ${{ inputs.scope }}
+          EXTRA_INSTRUCTIONS: ${{ inputs.extra_instructions }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 << 'PYEOF'
+          import os
+
+          branch = os.environ['AUDIT_BRANCH']
+          scope = os.environ.get('AUDIT_SCOPE', '').strip()
+          extra = os.environ.get('EXTRA_INSTRUCTIONS', '').strip()
+          run_url = os.environ['RUN_URL']
+
+          scope_note = f"\nSCOPE RESTRICTION: Only audit: {scope}. Skip all other files.\n" if scope else ""
+          extra_note = f"\nEXTRA INSTRUCTIONS FROM OPERATOR: {extra}\n" if extra else ""
+
+          prompt = f"""You are a documentation auditor for the AgentiBridge project. Your job is to find discrepancies between the documentation files and the actual source code, fix them in-place, and then create a pull request — but ONLY if you actually made changes.
+{scope_note}{extra_note}
+## STEP 1: FORENSIC AUDIT
+
+Read each doc file alongside the corresponding source code and note every discrepancy: wrong values, stale descriptions, missing items, or docs for features that no longer exist.
+
+### File pairs to audit (skip if scope restricts you):
+
+1. docs/reference/configuration.md
+   vs agentibridge/config.py (every os.environ.get call), the env var block in agentibridge/cli.py (_generate_env_template), and .env.example
+   CHECK: Every env var in the code documented? Defaults correct? Descriptions accurate?
+
+2. docs/reference/cli-commands.md
+   vs agentibridge/cli.py (every add_parser call, every add_argument, every help string)
+   CHECK: Every subcommand listed? All flags (--rebuild, --tail, --follow, --clear, --generate-env, --docker, --native, --host, --port, --api-key, tunnel action choices) documented with correct descriptions?
+
+3. docs/architecture/internals.md
+   vs the agentibridge/ directory (list all .py files that are not __pycache__ or data/)
+   CHECK: Every module listed? dispatch_bridge.py and oauth_provider.py must be present. Module descriptions accurate?
+
+4. docs/architecture/session-dispatch.md
+   vs agentibridge/dispatch.py and agentibridge/claude_runner.py
+   CHECK: dispatch_task and get_dispatch_job behavior accurately described? Env vars correct?
+
+5. docs/architecture/semantic-search.md
+   vs agentibridge/embeddings.py and agentibridge/pg_client.py
+   CHECK: AGENTIBRIDGE_EMBEDDING_ENABLED, PGVECTOR_DIMENSIONS, flow description accurate?
+
+6. docs/architecture/remote-access.md
+   vs agentibridge/transport.py and agentibridge/oauth_provider.py
+   CHECK: All OAUTH_* vars documented? Transport modes (stdio/sse/streamable-http) described accurately?
+
+7. README.md
+   CHECK: Tool count matches @mcp.tool decorators in agentibridge/server.py. Module table includes dispatch_bridge.py and oauth_provider.py. Quick-start commands work.
+
+8. CLAUDE.md
+   CHECK: Module table matches actual agentibridge/ directory. MCP tool list has exactly 11 tools matching server.py. Env var list includes CLOUDFLARE_TUNNEL_TOKEN, AGENTIBRIDGE_EMBEDDING_ENABLED, DISPATCH_SECRET, DISPATCH_BRIDGE_PORT.
+
+9. CONTRIBUTING.md
+   CHECK: Python version prerequisites match what test.yml actually uses. Workflow table has all 8 workflows — add a row for docs-audit.yml: "Manual only | Audits docs against source code, creates PR with fixes (Claude CLI)". Workflow count elsewhere in the file is consistent.
+
+## STEP 2: MAKE FIXES
+
+For every discrepancy found, edit the file directly. Rules:
+- Remove docs for features/commands/env vars that no longer exist in the code
+- Add docs for undocumented features/commands/env vars that do exist in the code
+- Correct wrong values, wrong counts, wrong defaults
+- Preserve the existing writing style, heading structure, and tone
+- DO NOT make stylistic changes to correct sections
+
+## STEP 3: CHECK FOR CHANGES
+
+Run: git diff --stat
+
+If there are no changed files, print exactly: NO_CHANGES_MADE
+Then stop — do not proceed to Step 4.
+
+## STEP 4: COMMIT AND CREATE PR
+
+Run in order:
+  git add docs/ README.md CLAUDE.md CONTRIBUTING.md
+  git diff --cached --stat
+  git commit -m "docs: audit corrections — sync docs with codebase"
+  git push origin {branch}
+
+Then create the PR (replace the What was fixed section with a real bullet list of what you changed):
+  gh pr create \\
+    --title "docs: automated audit corrections ($(date +%Y-%m-%d))" \\
+    --body "## Summary
+
+Automated documentation audit — fixes discrepancies between doc files and source code.
+
+### What was fixed
+- (list each actual change made)
+
+### What was NOT changed
+Only factual discrepancies were corrected. No stylistic rewrites.
+
+---
+Generated by \`docs-audit.yml\` · [Workflow run]({run_url})"
+
+After the PR is created, print the PR URL on a line starting with: PR_URL:
+"""
+
+          with open('/tmp/audit-prompt.txt', 'w') as f:
+              f.write(prompt)
+          print(f"Prompt written ({len(prompt)} chars)")
+          PYEOF
+
+      # ── Run docs audit ───────────────────────────────────────────────────────
+      - name: Run docs audit
+        env:
+          ANTHROPIC_API_KEY: ${{ steps.resolve_key.outputs.api_key }}
+          ANTHROPIC_BASE_URL: ${{ steps.anthropic.outputs.url }}
+          CLAUDE_MODEL: ${{ steps.anthropic.outputs.model }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Endpoint: ${ANTHROPIC_BASE_URL}"
+          echo "Model:    ${CLAUDE_MODEL}"
+          echo ""
+          claude \
+            --dangerously-skip-permissions \
+            --output-format text \
+            --max-turns 25 \
+            ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} \
+            -p "$(cat /tmp/audit-prompt.txt)"
