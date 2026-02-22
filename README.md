@@ -1,6 +1,8 @@
 # AgentiBridge
 
-AgentiBridge gives your AI assistants persistent memory of your Claude Code sessions. It runs as a lightweight server on your machine, indexes every session automatically, and exposes them through 11 MCP tools — so any AI client can search, summarize, and resume your past work.
+### Persistent session controller for your Claude Code agents
+
+![AgentiBridge - Persistent session controller for your AI Agents](docs/media/agentibridge-readme-banner.jpg)
 
 ```mermaid
 flowchart LR
