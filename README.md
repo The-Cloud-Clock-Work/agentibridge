@@ -76,6 +76,8 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 | `agentibridge restart` | Restart the stack |
 | `agentibridge logs` | View recent logs |
 | `agentibridge logs --follow` | Stream logs live |
+| `agentibridge update` | Update to the latest version (pip + Docker) |
+| `agentibridge update --docker` | Also update Docker stack even if not running |
 
 ### Status
 
@@ -109,6 +111,7 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 | `agentibridge connect` | Print ready-to-paste configs for all clients |
 | `agentibridge install --docker` | Install systemd service (Docker) |
 | `agentibridge install --native` | Install systemd service (native Python) |
+| `agentibridge uninstall` | Remove systemd service |
 | `agentibridge locks` | View or clear Redis locks |
 
 ---
