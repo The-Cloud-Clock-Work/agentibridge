@@ -296,6 +296,34 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for testing, linting, and CI details.
 
 ---
 
+## FAQ
+
+**Isn't this just session history?**
+
+History is the data layer. The product is remote fleet control — dispatch tasks from your phone, search sessions from any MCP client, monitor jobs from claude.ai. You go from 0% productivity away from your desk to controlling your agents from anywhere.
+
+**VS Code / Cursor already has conversation history.**
+
+IDE conversation history is excellent for local replay within that IDE. AgentiBridge serves CLI-first developers and adds capabilities no IDE provides: remote multi-client access, background dispatch from any device, and semantic search across your full session history. When you leave your desk, your IDE history can't dispatch a background task from your phone. AgentiBridge can.
+
+**Won't Anthropic build this natively?**
+
+AgentiBridge is self-hosted, vendor-neutral infrastructure. Native features optimize for one vendor's client. AgentiBridge works with Claude Code, claude.ai, ChatGPT, Grok, and any MCP client. Your data stays on your machine, and you control the storage backend, embedding model, and access policies. MIT licensed — no lock-in.
+
+**Do I need Redis and Postgres?**
+
+No. `pip install agentibridge && agentibridge run` works with zero dependencies — filesystem-only storage out of the box. Add Redis for caching and Postgres for semantic search when you need them.
+
+**Is my data sent anywhere?**
+
+No. No telemetry, no SaaS dependencies. Cloudflare Tunnel is opt-in, and even then only MCP tool responses traverse the tunnel — your transcripts stay local.
+
+**Which clients are supported?**
+
+Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client. Run `agentibridge connect` for ready-to-paste configs.
+
+---
+
 ## License
 
 MIT
