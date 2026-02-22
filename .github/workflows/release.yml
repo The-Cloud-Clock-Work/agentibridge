@@ -14,46 +14,8 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    environment: release
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          # Use RELEASE_TOKEN (PAT) if pushing to a branch-protected main;
-          # fall back to GITHUB_TOKEN for repos without branch protection.
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Compute next version
-        id: version
-        run: |
-          CURRENT=$(python3 - <<'EOF'
-          import tomllib
-          with open("pyproject.toml", "rb") as f:
-              print(tomllib.load(f)["project"]["version"])
-          EOF
-          )
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          BUMP="${{ github.event.inputs.bump }}"
-          case "$BUMP" in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
-          esac
-          NEXT="${MAJOR}.${MINOR}.${PATCH}"
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
-
-      - name: Bump version in pyproject.toml
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.next }}"/' pyproject.toml
-
-      - name: Commit, tag, and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore: release v${{ steps.version.outputs.next }}"
-          git tag "v${{ steps.version.outputs.next }}"
-          git push origin main
-          git push origin "v${{ steps.version.outputs.next }}"
+    uses: The-Cloud-Clock-Work/.github/.github/workflows/release-reusable.yml@main
+    with:
+      bump: ${{ inputs.bump }}
+    secrets:
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

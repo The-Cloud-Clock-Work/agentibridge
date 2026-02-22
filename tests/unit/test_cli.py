@@ -1,5 +1,7 @@
 """Tests for agentibridge.cli module."""
 
+import tempfile
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -11,7 +13,9 @@ from agentibridge.cli import (
     cmd_connect,
     cmd_config,
     cmd_tunnel,
+    cmd_update,
     _extract_tunnel_url,
+    _short_digest,
 )
 
 
@@ -202,3 +206,327 @@ class TestCmdTunnel:
                 cmd_tunnel(args)
         output = capsys.readouterr().out
         assert "named tunnel" in output
+
+
+@pytest.mark.unit
+class TestShortDigest:
+    def test_shortens_sha256(self):
+        assert _short_digest("sha256:abcdef123456789") == "sha256:abcdef123456"
+
+    def test_handles_none_digest(self):
+        assert _short_digest("<none>") == "(none)"
+        assert _short_digest("") == "(none)"
+
+    def test_no_algo_prefix(self):
+        assert _short_digest("abcdef1234567890") == "abcdef123456"
+
+
+def _make_stack_dir() -> Path:
+    """Return a temp Path with compose + .env files for testing."""
+    d = Path(tempfile.mkdtemp())
+    (d / "docker-compose.yml").write_text("services: {}\n")
+    (d / ".env").write_text(
+        "REDIS_URL=redis://r:6379/0\n"
+        "POSTGRES_URL=postgresql://a:a@localhost/a\n"
+        "POSTGRES_USER=a\nPOSTGRES_PASSWORD=a\nPOSTGRES_DB=a\n"
+        "AGENTIBRIDGE_TRANSPORT=sse\nAGENTIBRIDGE_PORT=8100\n"
+    )
+    return d
+
+
+def _ok(stdout="", stderr=""):
+    """Helper: return a MagicMock subprocess result with rc=0."""
+    r = MagicMock()
+    r.returncode = 0
+    r.stdout = stdout
+    r.stderr = stderr
+    return r
+
+
+def _fail(stdout="", stderr=""):
+    """Helper: return a MagicMock subprocess result with rc=1."""
+    r = MagicMock()
+    r.returncode = 1
+    r.stdout = stdout
+    r.stderr = stderr
+    return r
+
+
+@pytest.mark.unit
+class TestCmdUpdate:
+    """Tests for `agentibridge update`.
+
+    Each test records every subprocess.run call so we can assert on the
+    exact commands, their order, and that the right arguments are passed.
+    """
+
+    def _run_update(self, *, docker_flag=False, has_docker=False, side_effect=None):
+        """Run cmd_update with mocks, return (calls, output).
+
+        calls: list of (cmd_list, kwargs) tuples for every subprocess.run call.
+        """
+        calls = []
+        original_side_effect = side_effect
+
+        def recording_side_effect(cmd, **kwargs):
+            calls.append((list(cmd), kwargs))
+            return original_side_effect(cmd, **kwargs)
+
+        args = MagicMock()
+        args.docker = docker_flag
+
+        docker_path = "/usr/bin/docker" if has_docker else None
+        with patch("shutil.which", return_value=docker_path):
+            with patch("agentibridge.cli.subprocess.run", side_effect=recording_side_effect):
+                cmd_update(args)
+
+        return calls
+
+    # ── pip upgrade: correct command ──────────────────────────────────
+
+    def test_calls_pip_install_upgrade(self, capsys):
+        """Verifies the exact pip install --upgrade command."""
+        import sys as _sys
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.3.0\n")
+            return _fail()
+
+        calls = self._run_update(side_effect=se)
+        capsys.readouterr()  # consume output
+
+        # First call should be pip install --upgrade agentibridge
+        pip_cmd = calls[0][0]
+        assert pip_cmd[0] == _sys.executable
+        assert pip_cmd[1:] == ["-m", "pip", "install", "--upgrade", "agentibridge"]
+
+        # Second call should be pip show agentibridge
+        show_cmd = calls[1][0]
+        assert show_cmd[0] == _sys.executable
+        assert show_cmd[1:] == ["-m", "pip", "show", "agentibridge"]
+
+        # pip install must capture output (not print pip noise)
+        assert calls[0][1].get("capture_output") is True
+        assert calls[0][1].get("text") is True
+
+    # ── pip upgrade: version change detected ──────────────────────────
+
+    def test_pip_version_change_reported(self, capsys):
+        """Reports old -> new version when pip upgrade changes version."""
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.5.0\n")
+            return _fail()
+
+        self._run_update(side_effect=se)
+        output = capsys.readouterr().out
+        # Current version (from __version__) vs new version from pip show
+        assert "Updated:" in output
+        assert "0.5.0" in output
+
+    # ── pip upgrade: already latest ───────────────────────────────────
+
+    def test_pip_already_latest(self, capsys):
+        """Shows 'already up to date' when pip show returns same version."""
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.2.0\n")
+            return _fail()
+
+        self._run_update(side_effect=se)
+        output = capsys.readouterr().out
+        assert "Already up to date" in output
+
+    # ── pip failure: exits with error ─────────────────────────────────
+
+    def test_pip_failure_exits(self, capsys):
+        """Exits with error when pip install fails (no --docker)."""
+
+        def se(cmd, **kw):
+            return _fail(stderr="Could not find a version")
+
+        with pytest.raises(SystemExit):
+            self._run_update(side_effect=se)
+
+        output = capsys.readouterr().out
+        assert "ERROR" in output
+
+    # ── docker skipped when not installed ─────────────────────────────
+
+    def test_no_docker_skips_docker(self, capsys):
+        """When docker is not installed, no docker commands are run."""
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.2.0\n")
+            return _fail()
+
+        calls = self._run_update(has_docker=False, side_effect=se)
+        capsys.readouterr()
+
+        # Only pip commands should have been called (no docker)
+        for cmd, _ in calls:
+            assert "docker" not in " ".join(cmd)
+
+    # ── docker skipped when stack not running ─────────────────────────
+
+    def test_docker_skipped_when_not_running(self, capsys):
+        """When docker exists but stack is stopped, docker update is skipped."""
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.2.0\n")
+            if "inspect" in cmd_str:
+                return _fail()  # container not found
+            return _fail()
+
+        calls = self._run_update(has_docker=True, side_effect=se)
+        output = capsys.readouterr().out
+
+        # Should mention it was skipped
+        assert "skipped" in output.lower()
+
+        # No docker compose pull should have been called
+        for cmd, _ in calls:
+            assert "pull" not in cmd
+
+    # ── docker forced with --docker flag ──────────────────────────────
+
+    def test_docker_forced_with_flag(self, capsys):
+        """--docker flag forces docker update even when stack is stopped."""
+        images_calls = {"n": 0}
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.2.0\n")
+            if "inspect" in cmd_str:
+                return _fail()  # stack not running
+            if "images" in cmd_str:
+                images_calls["n"] += 1
+                return _ok(stdout="sha256:aaa111222333")
+            if "pull" in cmd_str:
+                return _ok()
+            if "ps" in cmd_str and "State" in cmd_str:
+                return _ok(stdout="")  # stopped
+            return _ok()
+
+        with patch("agentibridge.cli._STACK_DIR", _make_stack_dir()):
+            calls = self._run_update(docker_flag=True, has_docker=True, side_effect=se)
+
+        capsys.readouterr()
+
+        # docker compose pull agentibridge should have been called
+        pull_calls = [cmd for cmd, _ in calls if "pull" in cmd]
+        assert len(pull_calls) == 1
+        assert "agentibridge" in pull_calls[0]
+
+    # ── docker: pull + recreate when stack running ────────────────────
+
+    def test_docker_pull_and_recreate_commands(self, capsys):
+        """Verifies the exact docker compose commands for pull + recreate."""
+        images_calls = {"n": 0}
+        stack_dir = _make_stack_dir()
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.2.0\n")
+            if "inspect" in cmd_str:
+                return _ok(stdout="running")
+            if "images" in cmd_str:
+                images_calls["n"] += 1
+                if images_calls["n"] == 1:
+                    return _ok(stdout="sha256:old000000000")
+                return _ok(stdout="sha256:new111111111")
+            if "pull" in cmd_str:
+                return _ok()
+            if "ps" in cmd_str and "State" in cmd_str:
+                return _ok(stdout="running\nrunning\n")
+            if "up" in cmd_str:
+                return _ok()
+            if "ps" in cmd_str:
+                return _ok(stdout="agentibridge\tUp 1s\t8100/tcp")
+            return _ok()
+
+        with patch("agentibridge.cli._STACK_DIR", stack_dir):
+            calls = self._run_update(has_docker=True, side_effect=se)
+
+        output = capsys.readouterr().out
+
+        # Verify pull command uses compose with correct file and env
+        pull_calls = [cmd for cmd, _ in calls if "pull" in cmd]
+        assert len(pull_calls) == 1
+        pull_cmd = pull_calls[0]
+        assert pull_cmd[:2] == ["docker", "compose"]
+        assert "-f" in pull_cmd
+        assert str(stack_dir / "docker-compose.yml") in pull_cmd
+        assert "--env-file" in pull_cmd
+        assert str(stack_dir / ".env") in pull_cmd
+        assert pull_cmd[-1] == "agentibridge"
+
+        # Verify recreate command: up -d --no-deps --force-recreate agentibridge
+        up_calls = [cmd for cmd, _ in calls if "up" in cmd]
+        assert len(up_calls) == 1
+        up_cmd = up_calls[0]
+        assert "--no-deps" in up_cmd
+        assert "--force-recreate" in up_cmd
+        assert "-d" in up_cmd
+        assert up_cmd[-1] == "agentibridge"
+
+        # Verify digest comparison output
+        assert "Image updated:" in output
+
+    # ── docker: image already up to date ──────────────────────────────
+
+    def test_docker_image_already_current(self, capsys):
+        """When docker digest unchanged, reports 'already up to date'."""
+        stack_dir = _make_stack_dir()
+
+        def se(cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "pip" in cmd_str and "install" in cmd_str:
+                return _ok()
+            if "pip" in cmd_str and "show" in cmd_str:
+                return _ok(stdout="Version: 0.2.0\n")
+            if "inspect" in cmd_str:
+                return _ok(stdout="running")
+            if "images" in cmd_str:
+                return _ok(stdout="sha256:same00000000")
+            if "pull" in cmd_str:
+                return _ok()
+            if "ps" in cmd_str and "State" in cmd_str:
+                return _ok(stdout="running\nrunning\n")
+            if "up" in cmd_str:
+                return _ok()
+            if "ps" in cmd_str:
+                return _ok(stdout="agentibridge\tUp 1s")
+            return _ok()
+
+        with patch("agentibridge.cli._STACK_DIR", stack_dir):
+            self._run_update(has_docker=True, side_effect=se)
+
+        output = capsys.readouterr().out
+        assert "Image already up to date" in output

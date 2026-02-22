@@ -4,6 +4,7 @@ Provides commands for status, config, connection strings, and service management
 
 Usage:
     agentibridge run        — Start the Docker stack (pulls Hub image automatically)
+    agentibridge update     — Update to the latest version (pip + Docker)
     agentibridge stop       — Stop the Docker stack
     agentibridge restart    — Restart the Docker stack
     agentibridge logs       — View stack logs
@@ -974,6 +975,139 @@ def _compose_cmd(stack_dir: Path) -> list[str]:
     ]
 
 
+def cmd_update(args: argparse.Namespace) -> None:
+    """Update agentibridge to the latest version (pip package + Docker image)."""
+    old_version = _version()
+    print(f"AgentiBridge v{old_version}")
+    print("=" * 50)
+
+    # ── 1. Update pip package ─────────────────────────────────────────
+    print("\n[pip] Upgrading agentibridge package...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "agentibridge"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"[pip] ERROR: upgrade failed\n{result.stderr.strip()}")
+        if not args.docker:
+            sys.exit(1)
+    else:
+        # Reload version from the freshly installed package
+        new_version = _get_installed_version()
+        if new_version and new_version != old_version:
+            print(f"[pip] Updated: {old_version} -> {new_version}")
+        else:
+            print(f"[pip] Already up to date ({old_version})")
+
+    # ── 2. Update Docker stack (if --docker or stack is running) ──────
+    has_docker = shutil.which("docker") is not None
+
+    if args.docker or (has_docker and _is_stack_running()):
+        if not has_docker:
+            print("\n[docker] Skipped — docker is not installed")
+        else:
+            _update_docker_stack()
+    elif has_docker:
+        print("\n[docker] Stack is not running — skipped (use --docker to force)")
+
+    print("\nUpdate complete.")
+
+
+def _get_installed_version() -> str | None:
+    """Query pip for the currently installed agentibridge version."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "show", "agentibridge"],
+        capture_output=True,
+        text=True,
+    )
+    for line in result.stdout.splitlines():
+        if line.startswith("Version:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _is_stack_running() -> bool:
+    """Check if the agentibridge Docker container exists and is running."""
+    result = subprocess.run(
+        ["docker", "inspect", "-f", "{{.State.Status}}", "agentibridge"],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "running"
+
+
+def _update_docker_stack() -> None:
+    """Pull latest image and recreate the agentibridge container."""
+    stack_dir = _STACK_DIR
+    compose_file = stack_dir / "docker-compose.yml"
+    env_file = stack_dir / ".env"
+
+    if not compose_file.exists() or not env_file.exists():
+        print("\n[docker] Stack not initialised — run 'agentibridge run' first")
+        return
+
+    compose = _compose_cmd(stack_dir)
+
+    # Capture current image digest
+    old_digest = subprocess.run(
+        ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip().split("\n")[0]
+
+    # Pull latest image
+    print("\n[docker] Pulling tccw/agentibridge:latest...")
+    result = subprocess.run(compose + ["pull", "agentibridge"])
+    if result.returncode != 0:
+        print("[docker] ERROR: Failed to pull latest image")
+        return
+
+    # Compare digests
+    new_digest = subprocess.run(
+        ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip().split("\n")[0]
+
+    if old_digest and old_digest == new_digest:
+        print(f"[docker] Image already up to date ({_short_digest(old_digest)})")
+    elif old_digest:
+        print(f"[docker] Image updated: {_short_digest(old_digest)} -> {_short_digest(new_digest)}")
+    else:
+        print(f"[docker] Image pulled: {_short_digest(new_digest)}")
+
+    # Recreate only agentibridge (preserves redis/postgres data)
+    state = _detect_stack_state(stack_dir)
+    if state in ("running", "partial"):
+        print("[docker] Recreating agentibridge container...")
+        subprocess.run(compose + ["up", "-d", "--no-deps", "--force-recreate", "agentibridge"], check=True)
+        print()
+        subprocess.run(
+            [
+                "docker",
+                "ps",
+                "--filter",
+                "name=agentibridge",
+                "--format",
+                "table {{.Names}}\t{{.Status}}\t{{.Ports}}",
+            ],
+            check=False,
+        )
+    else:
+        print("[docker] Stack is not running. Start it with: agentibridge run")
+
+
+def _short_digest(digest: str) -> str:
+    """Shorten a docker digest for display (e.g. sha256:abc123... -> sha256:abc123)."""
+    if not digest or digest == "<none>":
+        return "(none)"
+    if ":" in digest:
+        algo, _, h = digest.partition(":")
+        return f"{algo}:{h[:12]}"
+    return digest[:12]
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     if not shutil.which("docker"):
         print("ERROR: docker is not installed or not in PATH.")
@@ -1129,6 +1263,10 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="command")
 
+    # update
+    update_parser = subparsers.add_parser("update", help="Update agentibridge to the latest version")
+    update_parser.add_argument("--docker", action="store_true", help="Also update Docker stack even if not running")
+
     # run
     run_parser = subparsers.add_parser("run", help="Start the Docker stack")
     run_parser.add_argument("--rebuild", action="store_true", help="Force pull + rebuild before starting")
@@ -1192,6 +1330,7 @@ def main() -> None:
     args = parser.parse_args()
 
     commands = {
+        "update": cmd_update,
         "run": cmd_run,
         "stop": cmd_stop,
         "restart": cmd_restart,
