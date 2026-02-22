@@ -1,15 +1,15 @@
 # AgentiBridge
 
-### Persistent session controller for your Claude Code agents
+### Cloudflare-backed persistent session controller for your Claude Code agents
 
 ![AgentiBridge - Persistent session controller for your AI Agents](docs/media/agentibridge-readme-banner.jpg)
 
 ```mermaid
 flowchart LR
-    A([Claude Code sessions]) -->|index| B[Collector]
-    B -->|store| C[(SessionStore)]
-    C -->|query| D{{MCP Tools}}
-    D -->|respond| E([Any AI Client])
+    E([Any AI Client]) -->|query| D{{MCP Tools}}
+    D -->|read| C[(SessionStore)]
+    C -->|indexed by| B[Collector]
+    B -->|watches| A([Claude Code sessions])
 
     classDef sessions fill:#6366f1,stroke:#4338ca,color:#fff
     classDef collector fill:#f59e0b,stroke:#d97706,color:#fff
@@ -23,6 +23,18 @@ flowchart LR
     class D tools
     class E client
 ```
+
+## Why AgentiBridge?
+
+Your Claude Code sessions disappear when the terminal closes. AgentiBridge indexes every transcript automatically and makes them searchable, resumable, and dispatchable — from any MCP client.
+
+- 🔒 **Security-first** — OAuth 2.1 with PKCE, API key auth, Cloudflare Tunnel with zero inbound ports. Your data never leaves your infrastructure.
+- 🔍 **AI-powered search** — Semantic search with pgvector embeddings. Ask natural language questions across all your past sessions.
+- ⚙️ **Automatic indexing** — Background collector watches `~/.claude/projects/` and incrementally indexes new transcripts. No manual exports.
+- 🌐 **Multi-client** — Works with Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client.
+- 🏠 **Fully self-hosted** — Postgres, Redis, and your data stay on your machine. No SaaS, no vendor lock-in.
+- 🚀 **Background dispatch** — Fire-and-forget task dispatch with session restore. Resume work where you left off.
+- ⚡ **Zero config to start** — Filesystem fallback means no Redis or Postgres required for basic use. Scale up when you need to.
 
 ---
 
