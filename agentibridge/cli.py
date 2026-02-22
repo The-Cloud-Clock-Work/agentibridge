@@ -1050,11 +1050,15 @@ def _update_docker_stack() -> None:
     compose = _compose_cmd(stack_dir)
 
     # Capture current image digest
-    old_digest = subprocess.run(
-        ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
-        capture_output=True,
-        text=True,
-    ).stdout.strip().split("\n")[0]
+    old_digest = (
+        subprocess.run(
+            ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
+            capture_output=True,
+            text=True,
+        )
+        .stdout.strip()
+        .split("\n")[0]
+    )
 
     # Pull latest image
     print("\n[docker] Pulling tccw/agentibridge:latest...")
@@ -1064,11 +1068,15 @@ def _update_docker_stack() -> None:
         return
 
     # Compare digests
-    new_digest = subprocess.run(
-        ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
-        capture_output=True,
-        text=True,
-    ).stdout.strip().split("\n")[0]
+    new_digest = (
+        subprocess.run(
+            ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
+            capture_output=True,
+            text=True,
+        )
+        .stdout.strip()
+        .split("\n")[0]
+    )
 
     if old_digest and old_digest == new_digest:
         print(f"[docker] Image already up to date ({_short_digest(old_digest)})")
