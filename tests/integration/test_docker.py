@@ -713,9 +713,8 @@ print(json.dumps(result))
 """)
         data = json.loads(out.strip().split("\n")[-1])
         assert data["success"], f"get_plan failed: {data}"
-        assert "plan" in data
-        assert len(data["plan"].get("content", "")) > 0
-        print(f"  Got plan: {data['plan'].get('codename', '?')}, agent_plans={len(data.get('agent_plans', []))}")
+        assert len(data.get("content", "")) > 0
+        print(f"  Got plan: {data.get('codename', '?')}, agent_plans={len(data.get('agent_plans', []))}")
         passed += 1
     except Exception as e:
         print(f"  FAILED: {e}")
