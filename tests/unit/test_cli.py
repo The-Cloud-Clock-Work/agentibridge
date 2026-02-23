@@ -26,7 +26,7 @@ class TestCmdVersion:
         cmd_version(args)
         output = capsys.readouterr().out
         assert "agentibridge" in output
-        assert "0.2.0" in output
+        assert "0.2.1" in output
 
 
 @pytest.mark.unit
@@ -115,7 +115,7 @@ class TestMain:
         with patch("sys.argv", ["agentibridge", "version"]):
             main()
         output = capsys.readouterr().out
-        assert "0.2.0" in output
+        assert "0.2.1" in output
 
 
 @pytest.mark.unit
@@ -342,7 +342,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout="Version: 0.2.1\n")
             return _fail()
 
         self._run_update(side_effect=se)
@@ -373,7 +373,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout="Version: 0.2.1\n")
             return _fail()
 
         calls = self._run_update(has_docker=False, side_effect=se)
@@ -393,7 +393,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout="Version: 0.2.1\n")
             if "inspect" in cmd_str:
                 return _fail()  # container not found
             return _fail()
@@ -419,7 +419,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout="Version: 0.2.1\n")
             if "inspect" in cmd_str:
                 return _fail()  # stack not running
             if "images" in cmd_str:
@@ -453,7 +453,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout="Version: 0.2.1\n")
             if "inspect" in cmd_str:
                 return _ok(stdout="running")
             if "images" in cmd_str:
@@ -510,7 +510,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout="Version: 0.2.1\n")
             if "inspect" in cmd_str:
                 return _ok(stdout="running")
             if "images" in cmd_str:

@@ -39,7 +39,7 @@ claude --mcp-debug
 
 ### Available Tools in Claude Code
 
-Once connected, Claude Code can use all 11 tools:
+Once connected, Claude Code can use all 16 tools:
 - "List my recent sessions" → `list_sessions`
 - "What did I work on yesterday?" → `list_sessions` with `since_hours=24`
 - "Search for Docker setup sessions" → `search_sessions`
