@@ -16,7 +16,7 @@ cd "$(dirname "$0")/../.."
 
 PASS=0
 FAIL=0
-TOTAL=6
+TOTAL=9
 SESSION_ID=""
 
 CLAUDE_CMD="claude -p --dangerously-skip-permissions --output-format json --max-turns 3"
@@ -118,6 +118,21 @@ check_collect_now() {
   echo "$result" | grep -qiE "(scan|collect|file|process)" || return 1
 }
 
+check_list_memory_files() {
+  local result="$1"
+  echo "$result" | grep -qiE "(memory|file|project)" || return 1
+}
+
+check_list_plans() {
+  local result="$1"
+  echo "$result" | grep -qiE "(plan|codename)" || return 1
+}
+
+check_search_history() {
+  local result="$1"
+  echo "$result" | grep -qiE "(history|entry|display|result)" || return 1
+}
+
 # ── Test cases ──────────────────────────────────────────────────────────────
 
 echo "Running ${TOTAL} MCP smoke tests..."
@@ -153,6 +168,21 @@ run_test 5 "get_session_actions" \
 run_test 6 "collect_now" \
   "Use the collect_now MCP tool to trigger immediate collection. Show the raw result." \
   check_collect_now
+
+# Test 7: list_memory_files — Phase 5
+run_test 7 "list_memory_files" \
+  "Use the list_memory_files MCP tool. Show the raw result." \
+  check_list_memory_files
+
+# Test 8: list_plans — Phase 5
+run_test 8 "list_plans" \
+  "Use the list_plans MCP tool with limit=3. Show the raw result." \
+  check_list_plans
+
+# Test 9: search_history — Phase 5
+run_test 9 "search_history" \
+  "Use the search_history MCP tool with query='test' and limit=3. Show the raw result." \
+  check_search_history
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 

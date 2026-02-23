@@ -339,6 +339,44 @@ class TestRedisListSessions:
         results = store.list_sessions()
         assert results == []
 
+    def test_upsert_adds_project_to_index_set(self, mock_redis):
+        """Verify upsert_session adds the project_encoded to idx:projects SET."""
+        store = SessionStore()
+        _force_redis(store, mock_redis)
+
+        meta = make_meta(
+            session_id="s1",
+            project_encoded="-home-user-dev-myapp",
+        )
+        store.upsert_session(meta)
+
+        projects = mock_redis.smembers(_rkey("idx:projects"))
+        assert "-home-user-dev-myapp" in projects
+
+    def test_list_sessions_uses_project_index_set(self, mock_redis):
+        """Verify list_sessions with project filter uses SMEMBERS, not SCAN."""
+        store = SessionStore()
+        _force_redis(store, mock_redis)
+
+        # Seed two projects
+        for i, proj in enumerate(["myapp", "backend"]):
+            meta = make_meta(
+                session_id=f"s{i}",
+                project_encoded=f"-home-user-dev-{proj}",
+                project_path=f"/home/user/dev/{proj}",
+                last_update=f"2025-06-01T{10 + i}:00:00Z",
+            )
+            store.upsert_session(meta)
+
+        # Verify project index SET has both projects
+        projects = mock_redis.smembers(_rkey("idx:projects"))
+        assert len(projects) == 2
+
+        # Filter by project
+        results = store.list_sessions(project="myapp", limit=20)
+        assert len(results) == 1
+        assert results[0].project_encoded == "-home-user-dev-myapp"
+
 
 # ---------------------------------------------------------------------------
 # Tests: search_sessions with Redis

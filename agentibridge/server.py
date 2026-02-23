@@ -122,10 +122,12 @@ def _get_store():
 def _get_collector():
     global _collector
     if _collector is None:
+        from agentibridge.config import AGENTIBRIDGE_ENABLED
         from agentibridge.collector import SessionCollector
 
         _collector = SessionCollector(_get_store())
-        _collector.start()
+        if AGENTIBRIDGE_ENABLED:
+            _collector.start()
     return _collector
 
 

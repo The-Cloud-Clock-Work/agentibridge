@@ -66,8 +66,13 @@ jobs:
       - name: Create .env from example
         run: cp .env.example .env
 
-      - name: Start Docker stack
-        run: docker compose up --build -d
+      - name: Clone test dataset
+        run: git clone --depth 1 https://github.com/The-Cloud-Clock-Work/bridge-smoke-dataset.git /tmp/bridge-smoke-dataset
+
+      - name: Start Docker stack with test data
+        run: |
+          echo "CLAUDE_DIR=/tmp/bridge-smoke-dataset/.claude" >> .env
+          docker compose up --build -d
 
       - name: Wait for services
         run: |
@@ -85,6 +90,20 @@ jobs:
             fi
             sleep 1
           done
+
+      - name: Trigger initial collection
+        run: |
+          docker exec agentibridge python3 -c "
+          import sys; sys.path.insert(0, '/app')
+          import os; os.environ['AGENTIBRIDGE_ENABLED'] = 'false'
+          from agentibridge.collector import SessionCollector
+          from agentibridge.store import SessionStore
+          store = SessionStore()
+          c = SessionCollector(store)
+          stats = c.collect_once()
+          print(f'Collected: {stats}')
+          assert stats['files_scanned'] >= 4, f'Expected >=4 files, got {stats[\"files_scanned\"]}'
+          "
 
       - name: Run integration tests
         run: python tests/integration/test_docker.py --test

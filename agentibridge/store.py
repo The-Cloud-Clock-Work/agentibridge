@@ -214,6 +214,7 @@ class SessionStore:
 
         pipe.zadd(_rkey("idx:all"), {meta.session_id: score})
         pipe.zadd(_rkey(f"idx:project:{meta.project_encoded}"), {meta.session_id: score})
+        pipe.sadd(_rkey("idx:projects"), meta.project_encoded)
         pipe.execute()
 
     def _redis_add_entries(self, r, session_id: str, entries: List[SessionEntry]) -> None:
@@ -256,21 +257,21 @@ class SessionStore:
 
     def _redis_list_sessions(self, r, project, limit, offset, since_hours) -> List[SessionMeta]:
         if project:
-            # Find matching project indexes
+            # Find matching projects from the deterministic project index SET
+            all_projects = r.smembers(_rkey("idx:projects"))
+            project_lower = project.lower()
+            matching_projects = [
+                p for p in all_projects if project_lower in p.lower() or project_lower in decode_project_path(p).lower()
+            ]
+
             matching_ids = set()
-            # Scan for project indexes matching the substring
-            cursor = 0
-            pattern = _rkey(f"idx:project:*{_escape_redis_glob(project)}*")
-            while True:
-                cursor, keys = r.scan(cursor, match=pattern, count=100)
-                for key in keys:
-                    min_score = "-inf"
-                    if since_hours:
-                        min_score = str(time() - since_hours * 3600)
-                    ids = r.zrevrangebyscore(key, "+inf", min_score)
-                    matching_ids.update(ids)
-                if cursor == 0:
-                    break
+            for proj_encoded in matching_projects:
+                min_score = "-inf"
+                if since_hours:
+                    min_score = str(time() - since_hours * 3600)
+                ids = r.zrevrangebyscore(_rkey(f"idx:project:{proj_encoded}"), "+inf", min_score)
+                matching_ids.update(ids)
+
             # Sort by fetching scores from idx:all
             scored = []
             for sid in matching_ids:

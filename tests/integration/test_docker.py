@@ -2,7 +2,7 @@
 """AgentiBridge Docker integration tests.
 
 Boots the Docker Compose stack, seeds test data, and validates
-all 10 MCP tools across Phases 1-4.
+all 16 MCP tools across Phases 1-5.
 
 Usage:
     # Start stack + run all tests
@@ -62,8 +62,12 @@ def compose(*args, capture=False, check=True):
 
 def docker_exec(python_code: str, timeout: int = 30) -> str:
     """Execute Python code inside the agentibridge container. Returns stdout."""
-    # Wrap code with PYTHONPATH setup
-    wrapped = f"import sys; sys.path.insert(0, '/app')\n{python_code}"
+    # Wrap code with PYTHONPATH setup and suppress background collector
+    wrapped = (
+        "import sys; sys.path.insert(0, '/app')\n"
+        "import os; os.environ['AGENTIBRIDGE_ENABLED'] = 'false'\n"
+        f"{python_code}"
+    )
     result = subprocess.run(
         ["docker", "exec", "-w", "/app", CONTAINER, "python3", "-c", wrapped],
         capture_output=True,
@@ -613,6 +617,133 @@ print(json.dumps({"restore": "ok", "dispatch": "ok"}))
 
 
 # ---------------------------------------------------------------------------
+# Phase 5 tests
+# ---------------------------------------------------------------------------
+
+
+def test_phase5():
+    """Test Phase 5: Knowledge Catalog (memory, plans, history)."""
+    print("\n" + "=" * 60)
+    print("PHASE 5: Knowledge Catalog")
+    print("=" * 60)
+    passed = 0
+    failed = 0
+
+    # Test: list_memory_files — all
+    print("\n[5.1] list_memory_files — all")
+    try:
+        out = docker_exec("""
+import json
+from agentibridge.server import list_memory_files
+result = json.loads(list_memory_files())
+print(json.dumps(result))
+""")
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"], f"list_memory_files failed: {data}"
+        assert data["count"] >= 3, f"Expected >=3 memory files, got {data['count']}"
+        print(f"  Found {data['count']} memory files")
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        failed += 1
+
+    # Test: list_memory_files — project filter
+    print("\n[5.2] list_memory_files — project filter")
+    try:
+        out = docker_exec("""
+import json
+from agentibridge.server import list_memory_files
+result = json.loads(list_memory_files(project="myapp"))
+print(json.dumps(result))
+""")
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        assert data["count"] >= 1, f"Expected >=1 myapp memory files, got {data['count']}"
+        print(f"  Filtered to {data['count']} memory files (myapp)")
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        failed += 1
+
+    # Test: get_memory_file — content check
+    print("\n[5.3] get_memory_file — content check")
+    try:
+        out = docker_exec("""
+import json
+from agentibridge.server import get_memory_file
+result = json.loads(get_memory_file(project="-home-user-dev-myapp", filename="MEMORY.md"))
+print(json.dumps(result))
+""")
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"], f"get_memory_file failed: {data}"
+        assert data["file_size_bytes"] > 0
+        assert len(data.get("content", "")) > 0
+        print(f"  Got memory file: {data['file_size_bytes']} bytes")
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        failed += 1
+
+    # Test: list_plans
+    print("\n[5.4] list_plans")
+    try:
+        out = docker_exec("""
+import json
+from agentibridge.server import list_plans
+result = json.loads(list_plans())
+print(json.dumps(result))
+""")
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"], f"list_plans failed: {data}"
+        assert data["count"] >= 2, f"Expected >=2 plans, got {data['count']}"
+        print(f"  Found {data['count']} plans")
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        failed += 1
+
+    # Test: get_plan with agent plans
+    print("\n[5.5] get_plan — with agent plans")
+    try:
+        out = docker_exec("""
+import json
+from agentibridge.server import get_plan
+result = json.loads(get_plan(codename="fancy-coding-parrot", include_agent_plans=True))
+print(json.dumps(result))
+""")
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"], f"get_plan failed: {data}"
+        assert "plan" in data
+        assert len(data["plan"].get("content", "")) > 0
+        print(f"  Got plan: {data['plan'].get('codename', '?')}, agent_plans={len(data.get('agent_plans', []))}")
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        failed += 1
+
+    # Test: search_history
+    print("\n[5.6] search_history — keyword")
+    try:
+        out = docker_exec("""
+import json
+from agentibridge.server import search_history
+result = json.loads(search_history(query="Docker"))
+print(json.dumps(result))
+""")
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"], f"search_history failed: {data}"
+        assert data["count"] >= 1, f"Expected >=1 history match, got {data['count']}"
+        print(f"  Found {data['count']} history entries for 'Docker'")
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        failed += 1
+
+    print(f"\nPhase 5: {passed} passed, {failed} failed")
+    return passed, failed
+
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 
@@ -682,7 +813,7 @@ def main():
     parser.add_argument("--stop", action="store_true", help="Stop stack")
     parser.add_argument("--test", action="store_true", help="Run tests only (stack must be running)")
     parser.add_argument("--cleanup", action="store_true", help="Clean up test data")
-    parser.add_argument("--only", type=str, help="Run only specific phase: phase1, phase2, phase3, phase4")
+    parser.add_argument("--only", type=str, help="Run only specific phase: phase1, phase2, phase3, phase4, phase5")
     args = parser.parse_args()
 
     if args.stop:
@@ -712,6 +843,7 @@ def main():
         "phase2": test_phase2,
         "phase3": test_phase3,
         "phase4": test_phase4,
+        "phase5": test_phase5,
     }
 
     if args.only:
