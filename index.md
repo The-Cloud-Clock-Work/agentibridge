@@ -12,6 +12,8 @@ permalink: /
 Step away from your desk and productivity drops to zero. AgentiBridge makes your Claude Code sessions persistent, searchable, and remotely controllable — from any MCP client.
 {: .fs-5 .text-center .text-grey-dk-100 .mb-6 }
 
+![AgentiBridge - Persistent session controller for your AI Agents](docs/media/agentibridge-readme-banner.jpg){: .d-block .mx-auto .mb-6 }
+
 <div class="hero-actions text-center mb-8" markdown="0">
   <a href="#quick-start" class="btn btn-primary fs-5 mr-2">Get Started</a>
   <a href="https://github.com/The-Cloud-Clock-Work/agentibridge" class="btn fs-5" target="_blank">View on GitHub</a>
