@@ -24,6 +24,9 @@ Usage:
 
     # Clean up test data
     python tests/test_docker.py --cleanup
+
+    # Write a markdown report
+    python tests/test_docker.py --test --report report.md
 """
 
 import json
@@ -31,6 +34,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -46,6 +50,64 @@ COMPOSE_ENV = {
 
 # Test session IDs (prefixed so we can clean up)
 TEST_PREFIX = "sb-test-"
+
+
+# ---------------------------------------------------------------------------
+# Report accumulator
+# ---------------------------------------------------------------------------
+
+_report: list[dict] = []
+
+
+def record(test_id: str, name: str, status: str, detail: str = ""):
+    """Record a test result for the markdown report."""
+    _report.append({"id": test_id, "name": name, "status": status, "detail": detail})
+
+
+def write_report(filepath: str):
+    """Render accumulated test results as a markdown report."""
+    total_passed = sum(1 for r in _report if r["status"] == "pass")
+    total_failed = sum(1 for r in _report if r["status"] == "fail")
+
+    lines = [
+        "# AgentiBridge Integration Test Report",
+        "",
+        f"**Run date:** {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}  ",
+        f"**Result:** {total_passed} passed, {total_failed} failed",
+        "",
+    ]
+
+    # Group by phase
+    phases: dict[str, list[dict]] = {}
+    for r in _report:
+        phase = r["id"].split(".")[0]
+        phases.setdefault(phase, []).append(r)
+
+    phase_names = {
+        "1": "Phase 1: Foundation",
+        "2": "Phase 2: Semantic Search",
+        "3": "Phase 3: Remote Access",
+        "4": "Phase 4: Write-back & Dispatch",
+        "5": "Phase 5: Knowledge Catalog",
+    }
+
+    for phase_num, results in sorted(phases.items()):
+        phase_passed = sum(1 for r in results if r["status"] == "pass")
+        name = phase_names.get(phase_num, f"Phase {phase_num}")
+        lines.append(f"## {name} ({phase_passed}/{len(results)})")
+        lines.append("")
+        lines.append("| # | Test | Result | Detail |")
+        lines.append("|---|------|--------|--------|")
+        for r in results:
+            icon = ":white_check_mark:" if r["status"] == "pass" else ":x:"
+            label = "Pass" if r["status"] == "pass" else "Fail"
+            detail = r["detail"].replace("|", "\\|")
+            lines.append(f"| {r['id']} | {r['name']} | {icon} {label} | {detail} |")
+        lines.append("")
+
+    with open(filepath, "w") as f:
+        f.write("\n".join(lines))
+    print(f"\nReport written to {filepath}")
 
 
 # ---------------------------------------------------------------------------
@@ -241,106 +303,155 @@ def test_phase1():
 
     # Test: list_sessions
     print("\n[1.1] list_sessions — all")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import list_sessions
 result = json.loads(list_sessions(limit=50))
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"], f"list_sessions failed: {data}"
-    assert data["count"] >= 3, f"Expected >=3 sessions, got {data['count']}"
-    print(f"  Found {data['count']} sessions")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"], f"list_sessions failed: {data}"
+        assert data["count"] >= 3, f"Expected >=3 sessions, got {data['count']}"
+        detail = f"Found {data['count']} sessions"
+        print(f"  {detail}")
+        record("1.1", "list_sessions — all", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("1.1", "list_sessions — all", "fail", str(e)[:120])
+        failed += 1
 
     # Test: list_sessions with project filter
     print("\n[1.2] list_sessions — project filter")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import list_sessions
 result = json.loads(list_sessions(project="myapp", limit=50))
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"]
-    assert data["count"] >= 2, f"Expected >=2 myapp sessions, got {data['count']}"
-    print(f"  Filtered to {data['count']} sessions (myapp)")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        assert data["count"] >= 2, f"Expected >=2 myapp sessions, got {data['count']}"
+        detail = f"Filtered to {data['count']} sessions (myapp)"
+        print(f"  {detail}")
+        record("1.2", "list_sessions — project filter", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("1.2", "list_sessions — project filter", "fail", str(e)[:120])
+        failed += 1
 
     # Test: get_session
     print("\n[1.3] get_session")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import get_session
 result = json.loads(get_session(session_id="sb-test-auth-02", last_n=10))
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"]
-    assert data["meta"]["git_branch"] == "feature/auth"
-    assert data["entry_count"] > 0
-    print(f"  Got session: branch={data['meta']['git_branch']}, entries={data['entry_count']}")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        assert data["meta"]["git_branch"] == "feature/auth"
+        assert data["entry_count"] > 0
+        detail = f"branch={data['meta']['git_branch']}, entries={data['entry_count']}"
+        print(f"  Got session: {detail}")
+        record("1.3", "get_session", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("1.3", "get_session", "fail", str(e)[:120])
+        failed += 1
 
     # Test: get_session_segment
     print("\n[1.4] get_session_segment")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import get_session_segment
 result = json.loads(get_session_segment(session_id="sb-test-docker-01", offset=0, limit=3))
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"]
-    assert data["count"] == 3
-    assert data["total_count"] >= 8
-    print(f"  Segment: {data['count']} of {data['total_count']} entries")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        assert data["count"] == 3
+        assert data["total_count"] >= 8
+        detail = f"{data['count']} of {data['total_count']} entries"
+        print(f"  Segment: {detail}")
+        record("1.4", "get_session_segment", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("1.4", "get_session_segment", "fail", str(e)[:120])
+        failed += 1
 
     # Test: get_session_actions
     print("\n[1.5] get_session_actions")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import get_session_actions
 result = json.loads(get_session_actions(session_id="sb-test-auth-02"))
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"]
-    assert data["total_tool_calls"] > 0
-    tools = {t["name"]: t["count"] for t in data["tools"]}
-    print(f"  Tools: {tools}")
-    assert "Write" in tools
-    assert "Edit" in tools
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        assert data["total_tool_calls"] > 0
+        tools = {t["name"]: t["count"] for t in data["tools"]}
+        assert "Write" in tools
+        assert "Edit" in tools
+        detail = f"{tools}"
+        print(f"  Tools: {detail}")
+        record("1.5", "get_session_actions", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("1.5", "get_session_actions", "fail", str(e)[:120])
+        failed += 1
 
     # Test: search_sessions
     print("\n[1.6] search_sessions — keyword")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import search_sessions
 result = json.loads(search_sessions(query="JWT authentication"))
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"]
-    assert data["count"] >= 1
-    assert any("auth" in m.get("session_id", "") for m in data["matches"])
-    print(f"  Found {data['count']} match(es) for 'JWT authentication'")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        assert data["count"] >= 1
+        assert any("auth" in m.get("session_id", "") for m in data["matches"])
+        detail = f"{data['count']} match(es) for 'JWT authentication'"
+        print(f"  Found {detail}")
+        record("1.6", "search_sessions — keyword", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("1.6", "search_sessions — keyword", "fail", str(e)[:120])
+        failed += 1
 
     # Test: collect_now
     print("\n[1.7] collect_now")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import collect_now
 result = json.loads(collect_now())
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"]
-    print(f"  Collection: {data.get('files_scanned', 0)} files, {data.get('duration_ms', 0)}ms")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        detail = f"{data.get('files_scanned', 0)} files, {data.get('duration_ms', 0)}ms"
+        print(f"  Collection: {detail}")
+        record("1.7", "collect_now", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("1.7", "collect_now", "fail", str(e)[:120])
+        failed += 1
 
     print(f"\nPhase 1: {passed} passed, {failed} failed")
     return passed, failed
@@ -361,19 +472,27 @@ def test_phase2():
 
     # Test: embedder availability
     print("\n[2.1] Embedder availability check")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.embeddings import TranscriptEmbedder
 e = TranscriptEmbedder()
 print(json.dumps({"available": e.is_available()}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    print(f"  Embedder available: {data['available']}")
-    passed += 1  # Just checking it doesn't crash
+        data = json.loads(out.strip().split("\n")[-1])
+        detail = f"available={data['available']}"
+        print(f"  Embedder {detail}")
+        record("2.1", "Embedder availability check", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("2.1", "Embedder availability check", "fail", str(e)[:120])
+        failed += 1
 
     # Test: chunking logic
     print("\n[2.2] Transcript chunking")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.embeddings import TranscriptEmbedder
 from agentibridge.parser import SessionEntry
@@ -387,14 +506,21 @@ entries = [
 chunks = e._chunk_turns(entries)
 print(json.dumps({"chunks": len(chunks), "texts": [c["text"][:60] for c in chunks]}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["chunks"] == 2, f"Expected 2 chunks, got {data['chunks']}"
-    print(f"  Chunks: {data['chunks']}")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["chunks"] == 2, f"Expected 2 chunks, got {data['chunks']}"
+        detail = f"{data['chunks']} chunks"
+        print(f"  Chunks: {data['chunks']}")
+        record("2.2", "Transcript chunking", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("2.2", "Transcript chunking", "fail", str(e)[:120])
+        failed += 1
 
     # Test: cosine similarity
     print("\n[2.3] Cosine similarity (batch)")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.embeddings import _cosine_similarity_batch
 q = [1.0, 0.0, 0.0]
@@ -402,32 +528,44 @@ vecs = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.7, 0.7, 0.0]]
 scores = _cosine_similarity_batch(q, vecs)
 print(json.dumps({"scores": [round(s, 3) for s in scores]}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    scores = data["scores"]
-    assert scores[0] == 1.0, "Same vector should be 1.0"
-    assert scores[1] == 0.0, "Orthogonal should be 0.0"
-    assert 0.5 < scores[2] < 1.0, "Partial match should be between 0.5 and 1.0"
-    print(f"  Scores: same={scores[0]}, ortho={scores[1]}, partial={scores[2]}")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        scores = data["scores"]
+        assert scores[0] == 1.0, "Same vector should be 1.0"
+        assert scores[1] == 0.0, "Orthogonal should be 0.0"
+        assert 0.5 < scores[2] < 1.0, "Partial match should be between 0.5 and 1.0"
+        detail = f"same={scores[0]}, ortho={scores[1]}, partial={scores[2]}"
+        print(f"  Scores: {detail}")
+        record("2.3", "Cosine similarity (batch)", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("2.3", "Cosine similarity (batch)", "fail", str(e)[:120])
+        failed += 1
 
     # Test: search_semantic tool (graceful when no embeddings stored)
     print("\n[2.4] search_semantic — no embeddings yet")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import search_semantic
 result = json.loads(search_semantic(query="Docker setup"))
 print(json.dumps(result))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    # Should either succeed with 0 results or fail gracefully
-    print(
-        f"  Result: success={data.get('success')}, count={data.get('count', 0)}, error={data.get('error', 'none')[:80]}"
-    )
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        # Should either succeed with 0 results or fail gracefully
+        detail = f"success={data.get('success')}, count={data.get('count', 0)}"
+        print(f"  Result: {detail}, error={data.get('error', 'none')[:80]}")
+        record("2.4", "search_semantic — no embeddings yet", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("2.4", "search_semantic — no embeddings yet", "fail", str(e)[:120])
+        failed += 1
 
     # Test: generate_summary tool
     print("\n[2.5] generate_summary — format check")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.embeddings import TranscriptEmbedder
 from agentibridge.parser import SessionEntry
@@ -439,12 +577,18 @@ entries = [
 text = e._build_transcript_text(entries, max_chars=500)
 print(json.dumps({"length": len(text), "preview": text[:200]}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["length"] > 0
-    assert "User:" in data["preview"]
-    assert "Assistant" in data["preview"]
-    print(f"  Transcript text: {data['length']} chars")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["length"] > 0
+        assert "User:" in data["preview"]
+        assert "Assistant" in data["preview"]
+        detail = f"{data['length']} chars"
+        print(f"  Transcript text: {detail}")
+        record("2.5", "generate_summary — format check", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("2.5", "generate_summary — format check", "fail", str(e)[:120])
+        failed += 1
 
     print(f"\nPhase 2: {passed} passed, {failed} failed")
     return passed, failed
@@ -465,7 +609,8 @@ def test_phase3():
 
     # Test: auth with no keys (pass-through)
     print("\n[3.1] Auth — no keys configured (pass-through)")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.transport import validate_api_key
 results = {
@@ -475,15 +620,22 @@ results = {
 }
 print(json.dumps(results))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["none_key"] is True
-    assert data["any_key"] is True
-    print(f"  No keys: all pass-through = {all(data.values())}")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["none_key"] is True
+        assert data["any_key"] is True
+        detail = f"all pass-through = {all(data.values())}"
+        print(f"  No keys: {detail}")
+        record("3.1", "Auth — no keys (pass-through)", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("3.1", "Auth — no keys (pass-through)", "fail", str(e)[:120])
+        failed += 1
 
     # Test: auth with keys configured
     print("\n[3.2] Auth — with API keys")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import os, json
 os.environ["AGENTIBRIDGE_API_KEYS"] = "key-alpha,key-beta"
 # Reimport to pick up new env
@@ -498,37 +650,57 @@ results = {
 os.environ.pop("AGENTIBRIDGE_API_KEYS", None)
 print(json.dumps(results))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["valid_key"] is True
-    assert data["valid_key2"] is True
-    assert data["invalid_key"] is False
-    assert data["no_key"] is False
-    print(f"  Auth: valid={data['valid_key']}, invalid={data['invalid_key']}")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["valid_key"] is True
+        assert data["valid_key2"] is True
+        assert data["invalid_key"] is False
+        assert data["no_key"] is False
+        detail = f"valid={data['valid_key']}, invalid={data['invalid_key']}"
+        print(f"  Auth: {detail}")
+        record("3.2", "Auth — with API keys", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("3.2", "Auth — with API keys", "fail", str(e)[:120])
+        failed += 1
 
     # Test: transport config
     print("\n[3.3] Transport config defaults")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.config import AGENTIBRIDGE_TRANSPORT, AGENTIBRIDGE_PORT
 print(json.dumps({"transport": AGENTIBRIDGE_TRANSPORT, "port": AGENTIBRIDGE_PORT}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    # In the container, transport is set to "sse" via env
-    print(f"  Transport: {data['transport']}, Port: {data['port']}")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        # In the container, transport is set to "sse" via env
+        detail = f"transport={data['transport']}, port={data['port']}"
+        print(f"  Transport: {data['transport']}, Port: {data['port']}")
+        record("3.3", "Transport config defaults", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("3.3", "Transport config defaults", "fail", str(e)[:120])
+        failed += 1
 
     # Test: transport module imports
     print("\n[3.4] SSE transport module loads")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.transport import run_sse_server, validate_api_key
 print(json.dumps({"run_sse_server": "ok", "validate_api_key": "ok"}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["run_sse_server"] == "ok"
-    print("  SSE module: loaded")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["run_sse_server"] == "ok"
+        detail = "SSE module loaded"
+        print(f"  {detail}")
+        record("3.4", "SSE transport module loads", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("3.4", "SSE transport module loads", "fail", str(e)[:120])
+        failed += 1
 
     print(f"\nPhase 3: {passed} passed, {failed} failed")
     return passed, failed
@@ -549,22 +721,30 @@ def test_phase4():
 
     # Test: restore_session
     print("\n[4.1] restore_session — Docker session")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import restore_session
 result = json.loads(restore_session(session_id="sb-test-docker-01", last_n=10))
 print(json.dumps({"success": result["success"], "chars": result.get("char_count", 0), "preview": result.get("context", "")[:200]}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["success"]
-    assert data["chars"] > 100
-    assert "RESTORED SESSION CONTEXT" in data["preview"]
-    print(f"  Context: {data['chars']} chars")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["success"]
+        assert data["chars"] > 100
+        assert "RESTORED SESSION CONTEXT" in data["preview"]
+        detail = f"{data['chars']} chars"
+        print(f"  Context: {detail}")
+        record("4.1", "restore_session — Docker session", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("4.1", "restore_session — Docker session", "fail", str(e)[:120])
+        failed += 1
 
     # Test: restore_session — content check
     print("\n[4.2] restore_session — content validation")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import restore_session
 result = json.loads(restore_session(session_id="sb-test-auth-02", last_n=5))
@@ -579,38 +759,58 @@ checks = {
 }
 print(json.dumps(checks))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    for check, val in data.items():
-        assert val, f"Content check failed: {check}"
-    print(f"  Content checks: all {len(data)} passed")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        for check, val in data.items():
+            assert val, f"Content check failed: {check}"
+        detail = f"all {len(data)} checks passed"
+        print(f"  Content checks: {detail}")
+        record("4.2", "restore_session — content validation", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("4.2", "restore_session — content validation", "fail", str(e)[:120])
+        failed += 1
 
     # Test: restore_session — nonexistent session
     print("\n[4.3] restore_session — missing session")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.server import restore_session
 result = json.loads(restore_session(session_id="nonexistent-session"))
 print(json.dumps({"success": result["success"], "error": result.get("error", "")[:100]}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert not data["success"]
-    assert "not found" in data["error"].lower()
-    print(f"  Error handled: {data['error'][:60]}")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert not data["success"]
+        assert "not found" in data["error"].lower()
+        detail = f"Error handled: {data['error'][:60]}"
+        print(f"  {detail}")
+        record("4.3", "restore_session — missing session", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("4.3", "restore_session — missing session", "fail", str(e)[:120])
+        failed += 1
 
     # Test: dispatch_task — module loads (actual dispatch needs API server)
     print("\n[4.4] dispatch_task — import check")
-    out = docker_exec("""
+    try:
+        out = docker_exec("""
 import json
 from agentibridge.dispatch import restore_session_context, dispatch_task
 print(json.dumps({"restore": "ok", "dispatch": "ok"}))
 """)
-    data = json.loads(out.strip().split("\n")[-1])
-    assert data["restore"] == "ok"
-    assert data["dispatch"] == "ok"
-    print("  Dispatch module: loaded")
-    passed += 1
+        data = json.loads(out.strip().split("\n")[-1])
+        assert data["restore"] == "ok"
+        assert data["dispatch"] == "ok"
+        detail = "Dispatch module loaded"
+        print(f"  {detail}")
+        record("4.4", "dispatch_task — import check", "pass", detail)
+        passed += 1
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        record("4.4", "dispatch_task — import check", "fail", str(e)[:120])
+        failed += 1
 
     print(f"\nPhase 4: {passed} passed, {failed} failed")
     return passed, failed
@@ -641,10 +841,13 @@ print(json.dumps(result))
         data = json.loads(out.strip().split("\n")[-1])
         assert data["success"], f"list_memory_files failed: {data}"
         assert data["count"] >= 3, f"Expected >=3 memory files, got {data['count']}"
-        print(f"  Found {data['count']} memory files")
+        detail = f"Found {data['count']} memory files"
+        print(f"  {detail}")
+        record("5.1", "list_memory_files — all", "pass", detail)
         passed += 1
     except Exception as e:
         print(f"  FAILED: {e}")
+        record("5.1", "list_memory_files — all", "fail", str(e)[:120])
         failed += 1
 
     # Test: list_memory_files — project filter
@@ -659,10 +862,13 @@ print(json.dumps(result))
         data = json.loads(out.strip().split("\n")[-1])
         assert data["success"]
         assert data["count"] >= 1, f"Expected >=1 myapp memory files, got {data['count']}"
-        print(f"  Filtered to {data['count']} memory files (myapp)")
+        detail = f"Filtered to {data['count']} memory files (myapp)"
+        print(f"  {detail}")
+        record("5.2", "list_memory_files — project filter", "pass", detail)
         passed += 1
     except Exception as e:
         print(f"  FAILED: {e}")
+        record("5.2", "list_memory_files — project filter", "fail", str(e)[:120])
         failed += 1
 
     # Test: get_memory_file — content check
@@ -678,10 +884,13 @@ print(json.dumps(result))
         assert data["success"], f"get_memory_file failed: {data}"
         assert data["file_size_bytes"] > 0
         assert len(data.get("content", "")) > 0
-        print(f"  Got memory file: {data['file_size_bytes']} bytes")
+        detail = f"{data['file_size_bytes']} bytes"
+        print(f"  Got memory file: {detail}")
+        record("5.3", "get_memory_file — content check", "pass", detail)
         passed += 1
     except Exception as e:
         print(f"  FAILED: {e}")
+        record("5.3", "get_memory_file — content check", "fail", str(e)[:120])
         failed += 1
 
     # Test: list_plans
@@ -696,10 +905,13 @@ print(json.dumps(result))
         data = json.loads(out.strip().split("\n")[-1])
         assert data["success"], f"list_plans failed: {data}"
         assert data["count"] >= 2, f"Expected >=2 plans, got {data['count']}"
-        print(f"  Found {data['count']} plans")
+        detail = f"Found {data['count']} plans"
+        print(f"  {detail}")
+        record("5.4", "list_plans", "pass", detail)
         passed += 1
     except Exception as e:
         print(f"  FAILED: {e}")
+        record("5.4", "list_plans", "fail", str(e)[:120])
         failed += 1
 
     # Test: get_plan with agent plans
@@ -714,10 +926,13 @@ print(json.dumps(result))
         data = json.loads(out.strip().split("\n")[-1])
         assert data["success"], f"get_plan failed: {data}"
         assert len(data.get("content", "")) > 0
-        print(f"  Got plan: {data.get('codename', '?')}, agent_plans={len(data.get('agent_plans', []))}")
+        detail = f"codename={data.get('codename', '?')}, agent_plans={len(data.get('agent_plans', []))}"
+        print(f"  Got plan: {detail}")
+        record("5.5", "get_plan — with agent plans", "pass", detail)
         passed += 1
     except Exception as e:
         print(f"  FAILED: {e}")
+        record("5.5", "get_plan — with agent plans", "fail", str(e)[:120])
         failed += 1
 
     # Test: search_history
@@ -732,10 +947,13 @@ print(json.dumps(result))
         data = json.loads(out.strip().split("\n")[-1])
         assert data["success"], f"search_history failed: {data}"
         assert data["count"] >= 1, f"Expected >=1 history match, got {data['count']}"
-        print(f"  Found {data['count']} history entries for 'Docker'")
+        detail = f"{data['count']} entries for 'Docker'"
+        print(f"  Found {detail}")
+        record("5.6", "search_history — keyword", "pass", detail)
         passed += 1
     except Exception as e:
         print(f"  FAILED: {e}")
+        record("5.6", "search_history — keyword", "fail", str(e)[:120])
         failed += 1
 
     print(f"\nPhase 5: {passed} passed, {failed} failed")
@@ -813,6 +1031,7 @@ def main():
     parser.add_argument("--test", action="store_true", help="Run tests only (stack must be running)")
     parser.add_argument("--cleanup", action="store_true", help="Clean up test data")
     parser.add_argument("--only", type=str, help="Run only specific phase: phase1, phase2, phase3, phase4, phase5")
+    parser.add_argument("--report", type=str, metavar="FILE", help="Write markdown test report to FILE")
     args = parser.parse_args()
 
     if args.stop:
@@ -863,6 +1082,10 @@ def main():
     print("\n" + "=" * 60)
     print(f"TOTAL: {total_passed} passed, {total_failed} failed")
     print("=" * 60)
+
+    # Write report if requested
+    if args.report:
+        write_report(args.report)
 
     # Cleanup
     cleanup_test_data()
