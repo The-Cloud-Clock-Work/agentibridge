@@ -101,6 +101,10 @@ exclude:
   - setup.cfg
   - requirements*.txt
   - CONTRIBUTING.md
+  - CHANGELOG.md
+  - CODE_OF_CONDUCT.md
+  - SECURITY.md
+  - README.md
   - CODEOWNERS
   - CLAUDE.md
   - pytest.ini
