@@ -70,11 +70,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: The-Cloud-Clock-Work/bridge-smoke-dataset
-          path: /tmp/bridge-smoke-dataset
+          path: bridge-smoke-dataset
 
       - name: Start Docker stack with test data
         run: |
-          echo "CLAUDE_DIR=/tmp/bridge-smoke-dataset/.claude" >> .env
+          echo "CLAUDE_DIR=${{ github.workspace }}/bridge-smoke-dataset/.claude" >> .env
           docker compose up --build -d
 
       - name: Wait for services
