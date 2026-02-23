@@ -5,6 +5,12 @@ $ab-amber: #f59e0b;
 $ab-emerald: #10b981;
 $ab-cyan: #06b6d4;
 
+// Site logo in header
+.site-logo {
+  max-height: 28px;
+  width: auto;
+}
+
 // Feature grid
 .feature-grid {
   display: grid;
