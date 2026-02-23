@@ -70,6 +70,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: The-Cloud-Clock-Work/bridge-smoke-dataset
+          token: ${{ secrets.ORG_GITHUB_TOKEN }}
           path: bridge-smoke-dataset
 
       - name: Start Docker stack with test data
