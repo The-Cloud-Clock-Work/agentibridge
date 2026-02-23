@@ -75,6 +75,16 @@ When OAuth is enabled, `AGENTIBRIDGE_API_KEYS` still works as a fallback — Bea
 | `DISPATCH_BRIDGE_HOST` | `0.0.0.0` | Bind address for the host-side dispatch bridge |
 | `DISPATCH_BRIDGE_PORT` | `8101` | Port for the host-side dispatch bridge |
 
+### Knowledge Catalog Configuration (Phase 5)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIBRIDGE_PLANS_DIR` | `~/.claude/plans` | Directory containing plan markdown files. Defaults to sibling of projects dir |
+| `AGENTIBRIDGE_HISTORY_FILE` | `~/.claude/history.jsonl` | Path to Claude Code global prompt history file |
+| `AGENTIBRIDGE_MAX_HISTORY_ENTRIES` | `5000` | Maximum history entries to store in Redis. `0` = unlimited |
+| `AGENTIBRIDGE_MAX_MEMORY_CONTENT` | `51200` | Maximum bytes to read from a single memory file (50KB) |
+| `AGENTIBRIDGE_MAX_PLAN_CONTENT` | `102400` | Maximum bytes to read from a single plan file (100KB) |
+
 ### Logging Configuration
 
 | Variable | Default | Description |
@@ -153,6 +163,11 @@ CLAUDE_BINARY=/usr/local/bin/claude
 CLAUDE_DISPATCH_MODEL=sonnet
 CLAUDE_DISPATCH_TIMEOUT=600
 
+# Knowledge Catalog (Phase 5 — defaults work out of the box)
+# AGENTIBRIDGE_PLANS_DIR=~/.claude/plans
+# AGENTIBRIDGE_HISTORY_FILE=~/.claude/history.jsonl
+# AGENTIBRIDGE_MAX_HISTORY_ENTRIES=5000
+
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true
 ```
@@ -193,6 +208,14 @@ All Redis keys follow the pattern: `{REDIS_KEY_PREFIX}:sb:{suffix}`
 - `{prefix}:sb:session:{id}:meta` — Hash of session metadata fields
 - `{prefix}:sb:session:{id}:entries` — List of JSON-serialized transcript entries (capped at `AGENTIBRIDGE_MAX_ENTRIES`)
 - `{prefix}:sb:pos:{filepath_hash}` — String: byte offset for incremental transcript reading
+- `{prefix}:sb:memory:{project}:{filename}` — Hash: memory file metadata + content
+- `{prefix}:sb:idx:memory` — Sorted set: all memory file keys by last modified
+- `{prefix}:sb:plan:{codename}` — Hash: plan metadata + content
+- `{prefix}:sb:plan:{codename}:agents` — List: agent subplan codenames
+- `{prefix}:sb:idx:plans` — Sorted set: all plan codenames by last modified
+- `{prefix}:sb:codename:{slug}` — Set: session IDs linked to a plan codename
+- `{prefix}:sb:history` — List: JSON-serialized prompt history entries
+- `{prefix}:sb:pos:history` — String: byte offset for incremental history parsing
 
 ## Docker Compose Overrides
 

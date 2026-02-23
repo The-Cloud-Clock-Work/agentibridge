@@ -145,6 +145,18 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 
 > Requires the dispatch bridge running on the host. See [Session Dispatch](docs/architecture/session-dispatch.md).
 
+### Knowledge Catalog
+
+| Tool | Example use |
+|------|------------|
+| `list_memory_files` | "What memory files exist across my projects?" |
+| `get_memory_file` | "Show me the MEMORY.md for the antoncore project" |
+| `list_plans` | "What plans have I created recently?" |
+| `get_plan` | "Show me the plan called moonlit-rolling-reddy" |
+| `search_history` | "Find prompts where I mentioned docker" |
+
+> Exposes Claude Code's knowledge layer: project memory files, implementation plans, and prompt history.
+
 ---
 
 ## Configuration
@@ -168,6 +180,8 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 | `LLM_CHAT_MODEL` | Chat model for summaries (e.g. `gpt-4o-mini`) |
 | `ANTHROPIC_API_KEY` | Preferred for `generate_summary` (falls back to `LLM_CHAT_MODEL`) |
 | `CLAUDE_DISPATCH_URL` | Bridge URL for Docker → host Claude CLI dispatch |
+| `AGENTIBRIDGE_PLANS_DIR` | Plans directory (default: `~/.claude/plans`) |
+| `AGENTIBRIDGE_HISTORY_FILE` | History file (default: `~/.claude/history.jsonl`) |
 
 See [Configuration Reference](docs/reference/configuration.md) for the full list.
 
@@ -292,6 +306,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for testing, linting, and CI details.
 - [Reverse Proxy](docs/deployment/reverse-proxy.md) — Nginx, Caddy, and Traefik configs
 - [Releases & CI/CD](docs/deployment/releases.md) — Release process and automation
 - [Internal Architecture](docs/architecture/internals.md) — Key modules and design patterns
+- [Knowledge Catalog](docs/architecture/knowledge-catalog.md) — Memory files, plans, and prompt history
 - [Contributing](CONTRIBUTING.md)
 
 ---
