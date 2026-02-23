@@ -1,3 +1,8 @@
+---
+title: Remote Access
+nav_order: 2
+---
+
 # Remote Access (SSE Transport)
 
 AgentiBridge can be accessed remotely via SSE (Server-Sent Events) over HTTP, allowing external clients like claude.ai, mobile apps, or other API consumers to query session transcripts without local filesystem access.

@@ -1,3 +1,8 @@
+---
+title: Session Dispatch
+nav_order: 3
+---
+
 # Session Dispatch & Context Restore
 
 Session continuity and task delegation. Agents can dispatch tasks to the Claude CLI as **fire-and-forget background jobs**, restore context from past sessions, or truly resume an existing session thread.

@@ -1,3 +1,8 @@
+---
+title: CLI Commands
+nav_order: 1
+---
+
 # CLI Command Reference
 
 Complete reference for the `agentibridge` command-line tool.

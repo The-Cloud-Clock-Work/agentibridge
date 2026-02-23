@@ -1,3 +1,8 @@
+---
+title: Releases
+nav_order: 1
+---
+
 # Release Automation
 
 AgentiBridge uses a fully automated release pipeline. A single `workflow_dispatch` event bumps the version, commits, tags, and triggers all downstream publish workflows automatically. No manual version editing, no manual tagging, no manual Docker pushes.

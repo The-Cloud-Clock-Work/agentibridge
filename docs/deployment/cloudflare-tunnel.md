@@ -1,3 +1,8 @@
+---
+title: Cloudflare Tunnel
+nav_order: 3
+---
+
 # Cloudflare Tunnel Setup
 
 Expose AgentiBridge to the internet securely using Cloudflare Tunnel. No port forwarding, firewall changes, or public IP required.

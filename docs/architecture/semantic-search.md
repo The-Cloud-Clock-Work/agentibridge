@@ -1,3 +1,8 @@
+---
+title: Semantic Search
+nav_order: 1
+---
+
 # Semantic Search
 
 AI-powered semantic search for AgentiBridge, enabling natural language queries across all indexed Claude Code transcripts. Instead of exact keyword matching, users can ask questions like "how does authentication work" and get semantically relevant results.

@@ -1,3 +1,8 @@
+---
+title: Configuration
+nav_order: 2
+---
+
 # Configuration Reference
 
 This document provides a comprehensive reference for all AgentiBridge configuration options.

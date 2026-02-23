@@ -1,3 +1,8 @@
+---
+title: Knowledge Catalog
+nav_order: 4
+---
+
 # Knowledge Catalog
 
 The Knowledge Catalog (Phase 5) exposes Claude Code's local knowledge layer through 5 MCP tools. It makes project memory, implementation plans, and prompt history searchable and accessible from any MCP client.

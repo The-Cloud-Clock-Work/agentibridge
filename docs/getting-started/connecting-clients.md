@@ -1,3 +1,8 @@
+---
+title: Connecting Clients
+nav_order: 1
+---
+
 # Connecting Clients
 
 Step-by-step instructions for connecting various AI clients to AgentiBridge.

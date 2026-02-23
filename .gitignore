@@ -10,3 +10,6 @@ build/
 venv/
 .coverage
 .claude
+_site/
+.jekyll-cache/
+Gemfile.lock

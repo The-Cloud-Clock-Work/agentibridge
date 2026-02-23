@@ -1,0 +1,117 @@
+# Jekyll configuration for AgentiBridge GitHub Pages
+# https://the-cloud-clock-work.github.io/agentibridge
+
+title: AgentiBridge
+description: >-
+  Persistent session controller for Claude Code agents.
+  Index, search, resume, and dispatch AI coding sessions from any MCP client.
+url: "https://the-cloud-clock-work.github.io"
+baseurl: "/agentibridge"
+
+remote_theme: just-the-docs/just-the-docs@v0.10.0
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# Theme settings
+color_scheme: dark
+search_enabled: true
+search.heading_level: 3
+
+# Mermaid diagrams (native just-the-docs support)
+mermaid:
+  version: "11"
+
+# Auxiliary navigation (top-right links)
+aux_links:
+  GitHub: "https://github.com/The-Cloud-Clock-Work/agentibridge"
+  PyPI: "https://pypi.org/project/agentibridge/"
+aux_links_new_tab: true
+
+# Edit on GitHub footer link
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/The-Cloud-Clock-Work/agentibridge"
+gh_edit_branch: "main"
+gh_edit_view_mode: "edit"
+
+# Footer
+footer_content: >-
+  AgentiBridge is open source under the
+  <a href="https://github.com/The-Cloud-Clock-Work/agentibridge/blob/main/LICENSE">MIT License</a>.
+  Maintained by <a href="https://github.com/The-Cloud-Clock-Work">The Cloud Clock Work</a>.
+
+# Back to top link
+back_to_top: true
+back_to_top_text: "Back to top"
+
+# Navigation defaults — auto-assign layout and parent based on path
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"
+  - scope:
+      path: "docs"
+    values:
+      layout: "default"
+  - scope:
+      path: "docs/getting-started"
+    values:
+      parent: "Getting Started"
+      grand_parent: "Documentation"
+  - scope:
+      path: "docs/architecture"
+    values:
+      parent: "Architecture"
+      grand_parent: "Documentation"
+  - scope:
+      path: "docs/deployment"
+    values:
+      parent: "Deployment"
+      grand_parent: "Documentation"
+  - scope:
+      path: "docs/reference"
+    values:
+      parent: "Reference"
+      grand_parent: "Documentation"
+
+# Exclude non-docs files from Jekyll build
+exclude:
+  - agentibridge/
+  - tests/
+  - "*.py"
+  - "*.pyc"
+  - __pycache__/
+  - "*.egg-info"
+  - dist/
+  - build/
+  - .venv/
+  - venv/
+  - .env
+  - .env.example
+  - docker-compose.yml
+  - docker-compose.override.yml
+  - Dockerfile
+  - Makefile
+  - pyproject.toml
+  - setup.py
+  - setup.cfg
+  - requirements*.txt
+  - CONTRIBUTING.md
+  - CODEOWNERS
+  - CLAUDE.md
+  - pytest.ini
+  - ruff.toml
+  - .coverage
+  - "*.log"
+  - .github/workflows/build.yml
+  - .github/workflows/test.yml
+  - .github/workflows/release.yml
+  - .github/workflows/publish-pypi.yml
+  - .github/workflows/docker-publish.yml
+  - .github/workflows/e2e-smoke.yml
+  - .github/workflows/docs-audit.yml
+  - .github/workflows/claude.yml

@@ -1,3 +1,9 @@
+---
+title: Documentation
+nav_order: 2
+has_children: true
+---
+
 # AgentiBridge Documentation
 
 AgentiBridge is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 16 MCP tools.

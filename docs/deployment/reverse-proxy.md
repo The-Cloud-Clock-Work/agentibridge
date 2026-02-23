@@ -1,3 +1,8 @@
+---
+title: Reverse Proxy
+nav_order: 2
+---
+
 # Reverse Proxy Configuration
 
 Guide for exposing AgentiBridge behind a reverse proxy with SSL termination.

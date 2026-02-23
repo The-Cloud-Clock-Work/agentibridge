@@ -1,3 +1,8 @@
+---
+title: Internals
+nav_order: 5
+---
+
 # Internal Architecture
 
 This document provides a deep dive into AgentiBridge's internal modules and implementation patterns.
