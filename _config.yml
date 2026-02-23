@@ -17,7 +17,6 @@ plugins:
 
 # Theme settings
 color_scheme: dark
-logo: "/assets/images/logo.png"
 search_enabled: true
 search.heading_level: 3
 
