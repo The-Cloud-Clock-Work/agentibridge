@@ -3,8 +3,11 @@
 Scans ~/.claude/projects/ for JSONL transcript files and incrementally
 indexes new entries into the SessionStore. Runs as a daemon thread
 inside the MCP server process.
+
+Phase 5 additions: memory files, plans, and history scanning.
 """
 
+import json
 import os
 import sys
 import threading
@@ -32,6 +35,10 @@ class SessionCollector:
                 "AGENTIBRIDGE_PROJECTS_DIR",
                 str(Path.home() / ".claude" / "projects"),
             )
+        )
+        self._plans_dir = Path(os.getenv("AGENTIBRIDGE_PLANS_DIR", str(Path.home() / ".claude" / "plans")))
+        self._history_file = Path(
+            os.getenv("AGENTIBRIDGE_HISTORY_FILE", str(Path.home() / ".claude" / "history.jsonl"))
         )
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -86,12 +93,20 @@ class SessionCollector:
         except Exception as e:
             log("Collector: scan error", {"error": str(e)})
 
+        # Phase 5: scan memory files, plans, and history
+        memory_count = self._scan_memory_files()
+        plans_count = self._scan_plans()
+        history_count = self._scan_history()
+
         duration_ms = int((time() - start) * 1000)
 
         return {
             "files_scanned": files_scanned,
             "sessions_updated": sessions_updated,
             "entries_added": entries_added,
+            "memory_files_indexed": memory_count,
+            "plans_indexed": plans_count,
+            "history_entries_added": history_count,
             "duration_ms": duration_ms,
         }
 
@@ -142,7 +157,78 @@ class SessionCollector:
         if entries:
             self._store.add_entries(session_id, entries)
 
+        # Extract codename (slug) from first line of transcript
+        codename = self._extract_slug(filepath)
+        if codename:
+            self._store.upsert_codename(codename, session_id, project_encoded)
+
         # Save position
         self._store.save_file_position(str(filepath), new_offset)
 
         return {"updated": True, "entries_added": len(entries)}
+
+    def _extract_slug(self, filepath: Path) -> str:
+        """Read slug from first JSONL entry (cheap — reads one line)."""
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+                if first_line:
+                    return json.loads(first_line).get("slug", "")
+        except Exception:
+            pass
+        return ""
+
+    # ------------------------------------------------------------------
+    # Phase 5: Knowledge catalog scan passes
+    # ------------------------------------------------------------------
+
+    def _scan_memory_files(self) -> int:
+        """Scan and index memory files from all projects."""
+        try:
+            from agentibridge.catalog import scan_memory_files
+            from agentibridge.config import AGENTIBRIDGE_MAX_MEMORY_CONTENT
+
+            files = scan_memory_files(self._projects_dir, max_content=AGENTIBRIDGE_MAX_MEMORY_CONTENT)
+            for mem in files:
+                self._store.upsert_memory_file(mem)
+            return len(files)
+        except Exception as e:
+            log("Collector: memory scan error", {"error": str(e)})
+            return 0
+
+    def _scan_plans(self) -> int:
+        """Scan and index plan files, resolving codename→session links."""
+        try:
+            from agentibridge.catalog import scan_plans_dir
+
+            plans = scan_plans_dir(self._plans_dir)
+            for plan in plans:
+                # Resolve session_ids via codename index
+                codename = plan.parent_codename if plan.is_agent_plan else plan.codename
+                sessions = self._store.get_sessions_for_codename(codename)
+                if sessions:
+                    plan.session_ids = [s["session_id"] for s in sessions]
+                    plan.project_path = sessions[0].get("project", "")
+                self._store.upsert_plan(plan)
+            return len(plans)
+        except Exception as e:
+            log("Collector: plans scan error", {"error": str(e)})
+            return 0
+
+    def _scan_history(self) -> int:
+        """Incrementally scan and index history.jsonl."""
+        try:
+            from agentibridge.catalog import parse_history
+
+            pos_key = str(self._history_file)
+            offset = self._store.get_file_position(pos_key)
+            entries, new_offset = parse_history(self._history_file, offset=offset)
+
+            if entries:
+                self._store.add_history_entries(entries)
+                self._store.save_file_position(pos_key, new_offset)
+
+            return len(entries)
+        except Exception as e:
+            log("Collector: history scan error", {"error": str(e)})
+            return 0

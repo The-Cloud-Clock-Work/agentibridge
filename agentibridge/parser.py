@@ -41,6 +41,7 @@ class SessionMeta:
     transcript_path: str
     has_subagents: bool
     file_size_bytes: int
+    codename: str = ""  # slug field from JSONL entries
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -375,6 +376,8 @@ def parse_transcript_meta(
     num_tools = locals_dict.get("num_tools", 0)
     summary = locals_dict.get("summary", "")
 
+    codename = locals_dict.get("codename", "")
+
     return SessionMeta(
         session_id=session_id,
         project_encoded=project_encoded,
@@ -390,6 +393,7 @@ def parse_transcript_meta(
         transcript_path=str(filepath),
         has_subagents=has_subagents,
         file_size_bytes=file_size,
+        codename=codename,
     )
 
 
@@ -428,6 +432,7 @@ def _quick_parse_meta(filepath: Path) -> dict:
         "num_assistant": 0,
         "num_tools": 0,
         "summary": "",
+        "codename": "",
     }
 
     with open(filepath, "r", encoding="utf-8") as f:
@@ -445,6 +450,11 @@ def _quick_parse_meta(filepath: Path) -> dict:
 
             entry_type = entry.get("type", "")
             timestamp = entry.get("timestamp", "")
+
+            if not result["codename"]:
+                slug = entry.get("slug", "")
+                if slug:
+                    result["codename"] = slug
 
             if entry_type not in _INDEX_TYPES:
                 continue

@@ -8,7 +8,7 @@ for new data; all tools work with Redis or filesystem fallback.
 Usage:
     python -m agentibridge
 
-Available tools:
+Available tools (16):
     Phase 1 — Foundation:
     - list_sessions       — List sessions across all projects
     - get_session         — Get full session metadata + transcript
@@ -22,6 +22,13 @@ Available tools:
     Phase 4 — Write-back & Dispatch:
     - restore_session     — Load session context for continuation
     - dispatch_task       — Dispatch a task with optional session context
+    - get_dispatch_job    — Poll background job status
+    Phase 5 — Knowledge Catalog:
+    - list_memory_files   — List memory files across projects
+    - get_memory_file     — Read a specific memory file
+    - list_plans          — List plans sorted by recency
+    - get_plan            — Read a plan by codename
+    - search_history      — Search global prompt history
 """
 
 import json
@@ -599,6 +606,251 @@ async def get_dispatch_job(job_id: str) -> str:
     if data is None:
         return json.dumps({"success": False, "error": f"Job not found: {job_id}"})
     return json.dumps({"success": True, **data})
+
+
+# =============================================================================
+# PHASE 5 — KNOWLEDGE CATALOG (Memory, Plans, History)
+# =============================================================================
+
+
+@mcp.tool()
+def list_memory_files(project: str = "") -> str:
+    """List all memory files across projects.
+
+    Memory files (~/.claude/projects/{project}/memory/*.md) contain curated
+    project knowledge — the highest-signal content per project.
+
+    Args:
+        project: Filter by project path substring (e.g., "agentibridge")
+
+    Returns:
+        JSON with files list
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        files = store.list_memory_files(project=project if project else None)
+
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(files),
+                "files": [
+                    {
+                        "project_path": f.project_path,
+                        "project_encoded": f.project_encoded,
+                        "filename": f.filename,
+                        "file_size_bytes": f.file_size_bytes,
+                        "last_modified": f.last_modified,
+                    }
+                    for f in files
+                ],
+            }
+        )
+
+    except Exception as e:
+        log("MCP list_memory_files failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def get_memory_file(project: str, filename: str = "MEMORY.md") -> str:
+    """Read a specific memory file's content.
+
+    Args:
+        project: Project encoded name (e.g., "-home-user-dev-myapp")
+        filename: Memory filename (default: "MEMORY.md")
+
+    Returns:
+        JSON with project_path, filename, content, file_size_bytes, last_modified
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        mem = store.get_memory_file(project, filename)
+        if mem is None:
+            return json.dumps({"success": False, "error": f"Memory file not found: {project}/{filename}"})
+
+        return json.dumps(
+            {
+                "success": True,
+                "project_path": mem.project_path,
+                "project_encoded": mem.project_encoded,
+                "filename": mem.filename,
+                "content": mem.content,
+                "file_size_bytes": mem.file_size_bytes,
+                "last_modified": mem.last_modified,
+            }
+        )
+
+    except Exception as e:
+        log("MCP get_memory_file failed", {"project": project, "filename": filename, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def list_plans(
+    project: str = "",
+    codename: str = "",
+    limit: int = 30,
+    offset: int = 0,
+    include_agent_plans: bool = False,
+) -> str:
+    """List plans sorted by recency.
+
+    Plans (~/.claude/plans/*.md) are detailed implementation blueprints
+    linked to sessions via the codename/slug field.
+
+    Args:
+        project: Filter by project path substring
+        codename: Filter by codename substring
+        limit: Maximum plans to return (default: 30)
+        offset: Skip first N results for pagination
+        include_agent_plans: Include agent subplans (default: False)
+
+    Returns:
+        JSON with plans list
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        plans = store.list_plans(
+            project=project if project else None,
+            codename=codename if codename else None,
+            limit=limit,
+            offset=offset,
+            include_agent_plans=include_agent_plans,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(plans),
+                "offset": offset,
+                "plans": [
+                    {
+                        "codename": p.codename,
+                        "file_size_bytes": p.file_size_bytes,
+                        "last_modified": p.last_modified,
+                        "is_agent_plan": p.is_agent_plan,
+                        "parent_codename": p.parent_codename,
+                        "session_ids": p.session_ids,
+                        "project_path": p.project_path,
+                    }
+                    for p in plans
+                ],
+            }
+        )
+
+    except Exception as e:
+        log("MCP list_plans failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def get_plan(codename: str, include_agent_plans: bool = False) -> str:
+    """Read a plan by codename.
+
+    Args:
+        codename: Plan codename (e.g., "cached-wondering-sloth")
+        include_agent_plans: Include agent subplans (default: False)
+
+    Returns:
+        JSON with codename, content, session_ids, project_path, agent_plans
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        result = store.get_plan(codename, include_agent_plans=include_agent_plans)
+        if result is None:
+            return json.dumps({"success": False, "error": f"Plan not found: {codename}"})
+
+        plan = result["plan"]
+        response = {
+            "success": True,
+            "codename": plan.codename,
+            "content": plan.content,
+            "file_size_bytes": plan.file_size_bytes,
+            "last_modified": plan.last_modified,
+            "session_ids": plan.session_ids,
+            "project_path": plan.project_path,
+        }
+
+        if include_agent_plans:
+            response["agent_plans"] = [
+                {
+                    "codename": ap.codename,
+                    "content": ap.content,
+                    "file_size_bytes": ap.file_size_bytes,
+                    "last_modified": ap.last_modified,
+                }
+                for ap in result["agent_plans"]
+            ]
+        else:
+            response["agent_plans"] = []
+
+        return json.dumps(response)
+
+    except Exception as e:
+        log("MCP get_plan failed", {"codename": codename, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def search_history(
+    query: str = "",
+    project: str = "",
+    session_id: str = "",
+    limit: int = 20,
+    offset: int = 0,
+    since: str = "",
+) -> str:
+    """Search the global prompt history.
+
+    History (~/.claude/history.jsonl) contains every user prompt across all
+    sessions with timestamps, project paths, and session UUIDs.
+
+    Args:
+        query: Search keyword or phrase (empty = all)
+        project: Filter by project path substring
+        session_id: Filter by session UUID
+        limit: Maximum results (default: 20)
+        offset: Skip first N results for pagination
+        since: ISO timestamp — only entries after this time
+
+    Returns:
+        JSON with entries list and total count
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        entries, total = store.search_history(
+            query=query,
+            project=project if project else None,
+            session_id=session_id if session_id else None,
+            limit=limit,
+            offset=offset,
+            since=since,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "total": total,
+                "count": len(entries),
+                "offset": offset,
+                "entries": [e.to_dict() for e in entries],
+            }
+        )
+
+    except Exception as e:
+        log("MCP search_history failed", {"query": query, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
 
 
 # =============================================================================

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 11 MCP tools. It was extracted from the [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) project to run independently.
+**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 16 MCP tools. It was extracted from the [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) project to run independently.
 
 ## Build & Development
 
@@ -44,12 +44,13 @@ agentibridge help
 ```
 ┌─────────────────────────────────────┐
 │  MCP Server (server.py)             │
-│  11 tools across 4 phases           │
+│  16 tools across 5 phases           │
 │                                     │
 │  Phase 1: list/get/search sessions  │
 │  Phase 2: semantic search + summary │
 │  Phase 3: SSE/HTTP transport + auth │
 │  Phase 4: restore context + dispatch│
+│  Phase 5: memory, plans, history    │
 └─────────────┬───────────────────────┘
               │
     ┌─────────┴─────────┐
@@ -67,7 +68,7 @@ agentibridge help
 
 | Module | Purpose |
 |--------|---------|
-| `agentibridge/server.py` | FastMCP server with 11 tools |
+| `agentibridge/server.py` | FastMCP server with 16 tools |
 | `agentibridge/parser.py` | Pure-function JSONL transcript parser |
 | `agentibridge/store.py` | SessionStore (Redis + filesystem fallback) |
 | `agentibridge/collector.py` | Background polling daemon |
@@ -82,6 +83,7 @@ agentibridge help
 | `agentibridge/pg_client.py` | Postgres + pgvector connection |
 | `agentibridge/config.py` | Configuration with validation |
 | `agentibridge/cli.py` | CLI helper tool (status/connect/install) |
+| `agentibridge/catalog.py` | Knowledge catalog: memory, plans, history (Phase 5) |
 | `agentibridge/logging.py` | Structured JSON logging |
 
 ## Key Environment Variables
@@ -129,11 +131,18 @@ DISPATCH_BRIDGE_PORT=8101       # port the dispatch bridge listens on
 # Cloudflare Tunnel (optional — use docker compose --profile tunnel)
 CLOUDFLARE_TUNNEL_TOKEN=        # set for named tunnel; leave empty for quick tunnel
 
+# Knowledge Catalog (Phase 5)
+AGENTIBRIDGE_PLANS_DIR=~/.claude/plans
+AGENTIBRIDGE_HISTORY_FILE=~/.claude/history.jsonl
+AGENTIBRIDGE_MAX_HISTORY_ENTRIES=5000
+AGENTIBRIDGE_MAX_MEMORY_CONTENT=51200
+AGENTIBRIDGE_MAX_PLAN_CONTENT=102400
+
 # Logging
 CLAUDE_HOOK_LOG_ENABLED=true
 ```
 
-## MCP Tools (11 total)
+## MCP Tools (16 total)
 
 ### Phase 1 — Foundation
 - `list_sessions` — List sessions across all projects
@@ -151,6 +160,13 @@ CLAUDE_HOOK_LOG_ENABLED=true
 - `restore_session` — Load session context for continuation
 - `dispatch_task` — Fire-and-forget background job dispatch (returns job_id immediately)
 - `get_dispatch_job` — Poll a background job for status and output
+
+### Phase 5 — Knowledge Catalog
+- `list_memory_files` — List memory files across projects
+- `get_memory_file` — Read a specific memory file
+- `list_plans` — List plans sorted by recency
+- `get_plan` — Read a plan by codename (with optional agent subplans)
+- `search_history` — Search the global prompt history
 
 ## Redis + File Fallback Pattern
 

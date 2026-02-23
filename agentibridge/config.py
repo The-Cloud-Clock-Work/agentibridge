@@ -103,3 +103,20 @@ OAUTH_ALLOWED_REDIRECT_URIS = os.getenv("OAUTH_ALLOWED_REDIRECT_URIS", "")
 
 # Space-separated OAuth scopes the client is allowed to request (e.g. "claudeai")
 OAUTH_ALLOWED_SCOPES = os.getenv("OAUTH_ALLOWED_SCOPES", "")
+
+# =============================================================================
+# AGENTIBRIDGE — KNOWLEDGE CATALOG (Phase 5)
+# =============================================================================
+
+# Derive defaults from the projects dir parent (~/.claude)
+_CLAUDE_BASE_DIR = str(Path(AGENTIBRIDGE_PROJECTS_DIR).parent)
+
+AGENTIBRIDGE_PLANS_DIR = os.getenv("AGENTIBRIDGE_PLANS_DIR", str(Path(_CLAUDE_BASE_DIR) / "plans"))
+
+AGENTIBRIDGE_HISTORY_FILE = os.getenv("AGENTIBRIDGE_HISTORY_FILE", str(Path(_CLAUDE_BASE_DIR) / "history.jsonl"))
+
+AGENTIBRIDGE_MAX_HISTORY_ENTRIES = _env_int("AGENTIBRIDGE_MAX_HISTORY_ENTRIES", "5000", min_val=0)
+
+AGENTIBRIDGE_MAX_MEMORY_CONTENT = _env_int("AGENTIBRIDGE_MAX_MEMORY_CONTENT", "51200", min_val=1024)
+
+AGENTIBRIDGE_MAX_PLAN_CONTENT = _env_int("AGENTIBRIDGE_MAX_PLAN_CONTENT", "102400", min_val=1024)
