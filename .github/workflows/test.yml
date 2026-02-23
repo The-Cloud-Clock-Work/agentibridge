@@ -67,10 +67,10 @@ jobs:
         run: cp .env.example .env
 
       - name: Clone test dataset
-        uses: actions/checkout@v4
-        with:
-          repository: The-Cloud-Clock-Work/bridge-smoke-dataset
-          path: bridge-smoke-dataset
+        run: |
+          mkdir bridge-smoke-dataset
+          curl -sL https://github.com/The-Cloud-Clock-Work/bridge-smoke-dataset/archive/refs/heads/main.tar.gz \
+            | tar xz --strip-components=1 -C bridge-smoke-dataset
 
       - name: Start Docker stack with test data
         run: |
