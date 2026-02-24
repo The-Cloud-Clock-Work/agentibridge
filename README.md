@@ -4,6 +4,12 @@
 
 ![AgentiBridge - Persistent session controller for your AI Agents](docs/media/agentibridge-readme-banner.jpg)
 
+[![PyPI](https://img.shields.io/pypi/v/agentibridge)](https://pypi.org/project/agentibridge/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clock-Work/agentibridge/blob/main/LICENSE)
+[![Tests](https://github.com/The-Cloud-Clock-Work/agentibridge/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clock-Work/agentibridge/actions/workflows/test.yml)
+[![Docker](https://img.shields.io/docker/v/tccw/agentibridge?label=Docker%20Hub)](https://hub.docker.com/r/tccw/agentibridge)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
+
 ```mermaid
 flowchart LR
     E([Any AI Client]) -->|query| D{{MCP Tools}}
