@@ -210,6 +210,12 @@ Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client. Run `a
 
 ---
 
+## Code Quality
+
+Continuous static analysis via [SonarQube](https://sonar.homeofanton.com/dashboard?id=agentibridge) ensures code quality, security, and maintainability.
+
+---
+
 <div class="text-center mb-4" markdown="0">
   <p class="fs-5 fw-500">Ready to make your AI agents persistent?</p>
   <code class="fs-4">pip install agentibridge</code>

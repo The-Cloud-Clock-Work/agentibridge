@@ -339,6 +339,10 @@ Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client. Run `a
 
 ---
 
+## Code Quality
+
+This project is continuously analyzed by [SonarQube](https://sonar.homeofanton.com/dashboard?id=agentibridge) for code quality, security vulnerabilities, and test coverage.
+
 ## License
 
 MIT
