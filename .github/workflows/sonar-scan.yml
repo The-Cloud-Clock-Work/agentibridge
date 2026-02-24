@@ -8,6 +8,9 @@ on:
 jobs:
   sonar:
     uses: The-Cloud-Clock-Work/.github/.github/workflows/sonar-reusable.yml@main
+    with:
+      python_version: "3.14"
+      test_command: pytest tests/unit -v -m unit --cov=agentibridge --cov-report=xml --tb=short
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

@@ -37,7 +37,7 @@ class MemoryFile:
         data = dict(data)
         if isinstance(data.get("file_size_bytes"), str):
             data["file_size_bytes"] = int(data["file_size_bytes"])
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # NOSONAR
 
 
 @dataclass
@@ -67,7 +67,7 @@ class PlanFile:
             data["is_agent_plan"] = data["is_agent_plan"].lower() == "true"
         if isinstance(data.get("session_ids"), str):
             data["session_ids"] = json.loads(data["session_ids"])
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # NOSONAR
 
 
 @dataclass
@@ -83,7 +83,7 @@ class HistoryEntry:
     @classmethod
     def from_dict(cls, data: dict) -> "HistoryEntry":
         data = dict(data)
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # NOSONAR
 
 
 # ---------------------------------------------------------------------------

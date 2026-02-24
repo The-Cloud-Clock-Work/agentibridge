@@ -126,7 +126,7 @@ Uses Claude Sonnet to produce 2-3 sentence session summaries.
 
 ```bash
 # Postgres + pgvector (required for vector storage)
-POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
+POSTGRES_URL=postgresql://DB_USER:DB_PASSWORD@localhost:5432/agentibridge
 PGVECTOR_DIMENSIONS=1536
 
 # Enable/disable embedding (default: false — opt-in)

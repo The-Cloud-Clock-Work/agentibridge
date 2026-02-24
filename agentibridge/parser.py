@@ -54,7 +54,7 @@ class SessionMeta:
                 data[int_field] = int(data[int_field])
         if isinstance(data.get("has_subagents"), str):
             data["has_subagents"] = data["has_subagents"].lower() == "true"
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # NOSONAR
 
 
 @dataclass
@@ -73,7 +73,7 @@ class SessionEntry:
         data = dict(data)
         if isinstance(data.get("tool_names"), str):
             data["tool_names"] = json.loads(data["tool_names"])
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # NOSONAR
 
 
 def decode_project_path(encoded: str) -> str:

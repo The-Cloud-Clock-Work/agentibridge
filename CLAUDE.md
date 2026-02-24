@@ -107,7 +107,7 @@ AGENTIBRIDGE_MAX_ENTRIES=500
 AGENTIBRIDGE_EMBEDDING_ENABLED=false  # set to "true" to enable (requires POSTGRES_URL + LLM config)
 
 # Postgres + pgvector (vector storage for semantic search)
-POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
+POSTGRES_URL=postgresql://DB_USER:DB_PASSWORD@localhost:5432/agentibridge
 PGVECTOR_DIMENSIONS=1536
 
 # Embeddings + LLM (OpenAI-compatible API)
@@ -167,6 +167,13 @@ CLAUDE_HOOK_LOG_ENABLED=true
 - `list_plans` — List plans sorted by recency
 - `get_plan` — Read a plan by codename (with optional agent subplans)
 - `search_history` — Search the global prompt history
+
+## Related Projects
+
+| Project | Repo | Description |
+|---------|------|-------------|
+| **agenticore** | [The-Cloud-Clock-Work/agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) | The parent orchestration project AgentiBridge was extracted from |
+| **agentihooks** | [The-Cloud-Clock-Work/agentihooks](https://github.com/The-Cloud-Clock-Work/agentihooks) | Hook system & MCP tool server for Claude Code agents, designed for agenticore |
 
 ## Redis + File Fallback Pattern
 

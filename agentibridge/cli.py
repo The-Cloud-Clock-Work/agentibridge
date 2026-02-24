@@ -630,7 +630,7 @@ AGENTIBRIDGE_MAX_ENTRIES=500
 # AGENTIBRIDGE_PROJECTS_DIR=~/.claude/projects
 
 # Postgres + pgvector (required for semantic search vector storage)
-# POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
+# POSTGRES_URL=postgresql://DB_USER:DB_PASSWORD@localhost:5432/agentibridge
 # PGVECTOR_DIMENSIONS=1536
 
 # Semantic search + LLM (OpenAI-compatible API)
