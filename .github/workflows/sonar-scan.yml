@@ -6,41 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  scan:
-    name: SonarQube Analysis
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Cloudflare Access proxy
-        env:
-          CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq nginx >/dev/null
-          sudo rm -f /etc/nginx/sites-enabled/default
-          cat <<CONF | sudo tee /etc/nginx/sites-enabled/sonar-proxy
-          server {
-              listen 9000;
-              location / {
-                  proxy_pass https://sonar.homeofanton.com;
-                  proxy_set_header Host sonar.homeofanton.com;
-                  proxy_set_header CF-Access-Client-Id "${CF_ID}";
-                  proxy_set_header CF-Access-Client-Secret "${CF_SECRET}";
-                  proxy_ssl_server_name on;
-              }
-          }
-          CONF
-          sudo nginx -t && sudo systemctl restart nginx
-          sleep 1
-          curl -sf http://localhost:9000/api/system/status && echo " Proxy OK" || echo "Warning: proxy health check failed"
-
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@v4
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://localhost:9000
+  sonar:
+    uses: The-Cloud-Clock-Work/.github/.github/workflows/sonar-reusable.yml@main
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
