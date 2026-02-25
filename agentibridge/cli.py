@@ -751,7 +751,8 @@ def cmd_config(args: argparse.Namespace) -> None:
     for key, default in env_vars:
         val = os.getenv(key, "")
         source = "env" if val else "default"
-        display = val if val else default if default else _NOT_SET
+        fallback = default if default else _NOT_SET
+        display = val if val else fallback
         print(f"  {key}={display}  [{source}]")
 
 
