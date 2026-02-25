@@ -193,28 +193,66 @@ See [Configuration Reference](docs/reference/configuration.md) for the full list
 
 ---
 
-## Connect to Claude Code (same machine)
+## MCP Configuration
 
-Add to `~/.mcp.json`:
+AgentiBridge supports two connection modes: **local** (stdio, zero-config) and **remote** (HTTP with API key auth). Use one or both depending on your setup.
+
+### Option A — Local (stdio)
+
+Runs AgentiBridge as a subprocess alongside Claude Code. No server to manage, no auth needed. Best for single-machine use.
+
+```bash
+pip install agentibridge
+```
+
+Add to your project `.mcp.json` or `~/.mcp.json`:
 
 ```json
-// No API key configured (default)
 {
   "mcpServers": {
     "agentibridge": {
-      "url": "http://localhost:8100/mcp"
+      "command": "python",
+      "args": ["-m", "agentibridge"]
     }
   }
 }
 ```
 
+### Option B — Remote (HTTP + API key)
+
+Runs AgentiBridge as a persistent server — access your sessions from any device or MCP client over the network. Requires `AGENTIBRIDGE_API_KEYS` set on the server.
+
 ```json
-// With API key (if AGENTIBRIDGE_API_KEYS is set)
 {
   "mcpServers": {
     "agentibridge": {
-      "url": "http://localhost:8100/mcp",
-      "headers": { "X-API-Key": "your-key" }
+      "type": "http",
+      "url": "https://bridge.yourdomain.com/mcp",
+      "headers": {
+        "X-API-Key": "sk-ab-your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+### Using Both
+
+You can run both side by side — local for low-latency access to your own machine, remote for accessing sessions on another machine or from your phone:
+
+```json
+{
+  "mcpServers": {
+    "agentibridge": {
+      "command": "python",
+      "args": ["-m", "agentibridge"]
+    },
+    "agentibridge-remote": {
+      "type": "http",
+      "url": "https://bridge.yourdomain.com/mcp",
+      "headers": {
+        "X-API-Key": "sk-ab-your-api-key-here"
+      }
     }
   }
 }

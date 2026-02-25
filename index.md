@@ -70,17 +70,62 @@ It indexes every Claude Code transcript automatically, makes them searchable wit
 
 ```bash
 pip install agentibridge
-agentibridge run
-curl http://localhost:8100/health
 ```
 
-Add to your MCP config (`~/.mcp.json`):
+AgentiBridge supports two connection modes. Pick one or use both.
+
+### Local (stdio) — Zero config
+{: .fs-5 .fw-500 }
+
+Runs as a subprocess alongside Claude Code. No server, no auth. Add to `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "agentibridge": {
-      "url": "http://localhost:8100/mcp"
+      "command": "python",
+      "args": ["-m", "agentibridge"]
+    }
+  }
+}
+```
+
+### Remote (HTTP + API key) — Access from anywhere
+{: .fs-5 .fw-500 }
+
+Runs as a persistent server. Access your sessions from your phone, another laptop, or claude.ai:
+
+```json
+{
+  "mcpServers": {
+    "agentibridge": {
+      "type": "http",
+      "url": "https://bridge.yourdomain.com/mcp",
+      "headers": {
+        "X-API-Key": "sk-ab-your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+### Both at once
+
+Local for speed, remote for mobility — run them side by side:
+
+```json
+{
+  "mcpServers": {
+    "agentibridge": {
+      "command": "python",
+      "args": ["-m", "agentibridge"]
+    },
+    "agentibridge-remote": {
+      "type": "http",
+      "url": "https://bridge.yourdomain.com/mcp",
+      "headers": {
+        "X-API-Key": "sk-ab-your-api-key-here"
+      }
     }
   }
 }
