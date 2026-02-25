@@ -20,7 +20,7 @@ agentibridge run [--rebuild]
 ```
 
 On first run, copies the bundled `docker-compose.yml` and `.env.example` template to
-`~/.config/agentibridge/`. If `.env` does not yet exist the command exits immediately
+`~/.agentibridge/`. If `.env` does not yet exist the command exits immediately
 with instructions to edit it before retrying.
 
 Before starting, the command validates that all [required env vars](#env-required-variables)
@@ -47,7 +47,7 @@ Stop the Docker stack.
 agentibridge stop
 ```
 
-Runs `docker compose down` against the managed stack in `~/.config/agentibridge/`.
+Runs `docker compose down` against the managed stack in `~/.agentibridge/`.
 
 ---
 
@@ -157,7 +157,7 @@ agentibridge bridge start
 ```
 
 Reads `DISPATCH_SECRET` and `DISPATCH_BRIDGE_PORT` (default `8101`) from
-`~/.config/agentibridge/.env`. If `DISPATCH_SECRET` is not set the command exits
+`~/.agentibridge/.env`. If `DISPATCH_SECRET` is not set the command exits
 with an error.
 
 Checks whether an existing bridge process is already running (via `pgrep`) and
@@ -269,7 +269,7 @@ Install AgentiBridge as a systemd user service.
 agentibridge install [--docker | --native]
 ```
 
-Creates `~/.config/agentibridge/env` (if absent), copies the appropriate `.service`
+Creates `~/.agentibridge/env` (if absent), copies the appropriate `.service`
 file to `~/.config/systemd/user/`, then runs `systemctl --user enable --now agentibridge`.
 
 **Flags**
@@ -290,7 +290,7 @@ agentibridge uninstall
 ```
 
 Stops and disables the service, removes the `.service` file, and reloads systemd.
-Config files in `~/.config/agentibridge/` are **not** removed.
+Config files in `~/.agentibridge/` are **not** removed.
 
 ---
 
@@ -337,7 +337,7 @@ command exits with a descriptive error.
 Generate a fully-annotated template:
 
 ```bash
-agentibridge config --generate-env > ~/.config/agentibridge/.env
+agentibridge config --generate-env > ~/.agentibridge/.env
 ```
 
 See [Configuration](configuration.md) for the complete list of optional variables.

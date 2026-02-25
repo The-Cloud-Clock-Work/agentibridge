@@ -610,7 +610,7 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 def _generate_env_template() -> None:
     template = """# AgentiBridge Configuration
-# Copy to ~/.config/agentibridge/env or .env
+# Copy to ~/.agentibridge/.env or .env
 
 # Redis (optional — falls back to filesystem)
 # REDIS_URL=redis://localhost:6379/0
@@ -726,7 +726,7 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
 
     print("  Service uninstalled")
     print()
-    print("Note: Config files in ~/.config/agentibridge/ were preserved.")
+    print("Note: Config files in ~/.agentibridge/ were preserved.")
     print("Remove manually if no longer needed.")
 
 
@@ -899,7 +899,8 @@ def cmd_locks(args: argparse.Namespace) -> None:
 # Docker stack commands
 # ---------------------------------------------------------------------------
 
-_STACK_DIR = Path.home() / ".config" / "agentibridge"
+_STACK_DIR = Path.home() / ".agentibridge"
+_LEGACY_STACK_DIR = Path.home() / ".config" / "agentibridge"
 
 _REQUIRED_ENV_VARS = [
     "REDIS_URL",
@@ -925,11 +926,17 @@ def _validate_env(env_file: Path) -> None:
 
 
 def _ensure_stack_dir() -> Path:
-    """Prepare ~/.config/agentibridge/ for docker compose operations.
+    """Prepare ~/.agentibridge/ for docker compose operations.
 
+    Migrates from legacy ~/.config/agentibridge/ if needed.
     Copies bundled compose file and .env template on first run.
     Exits with code 1 if .env was just created (user must edit it first).
     """
+    # Migrate legacy ~/.config/agentibridge/ → ~/.agentibridge/
+    if _LEGACY_STACK_DIR.exists() and not _STACK_DIR.exists():
+        shutil.move(str(_LEGACY_STACK_DIR), str(_STACK_DIR))
+        print(f"Migrated {_LEGACY_STACK_DIR} → {_STACK_DIR}")
+
     _STACK_DIR.mkdir(parents=True, exist_ok=True)
 
     compose_dest = _STACK_DIR / "docker-compose.yml"

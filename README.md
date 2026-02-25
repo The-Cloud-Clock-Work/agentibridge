@@ -205,6 +205,14 @@ Runs AgentiBridge as a subprocess alongside Claude Code. No server to manage, no
 pip install agentibridge
 ```
 
+To persist configuration, create `~/.agentibridge/.env` (loaded automatically):
+
+```bash
+mkdir -p ~/.agentibridge
+cp .env.example ~/.agentibridge/.env
+# edit ~/.agentibridge/.env with your settings
+```
+
 Add to your project `.mcp.json` or `~/.mcp.json`:
 
 ```json
