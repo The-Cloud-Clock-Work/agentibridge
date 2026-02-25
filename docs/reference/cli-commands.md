@@ -61,6 +61,13 @@ agentibridge restart
 
 Runs `docker compose restart`.
 
+> **Important:** `restart` does **not** reload `docker.env`. Docker Compose `restart` only sends SIGHUP to existing containers — environment variables are baked in at container creation time. If you changed `docker.env` (e.g., enabled OAuth, changed API keys, updated ports), you must recreate the containers:
+>
+> ```bash
+> agentibridge stop   # docker compose down
+> agentibridge run    # docker compose up -d (recreates with new env)
+> ```
+
 ---
 
 ### `agentibridge logs`
@@ -202,12 +209,14 @@ Show Cloudflare Tunnel container state and the active URL.
 agentibridge tunnel [status]
 ```
 
-Inspects the `agentibridge-tunnel` Docker container. Outputs differ by mode:
+Checks both the `agentibridge-tunnel` Docker container and the `cloudflared` systemd service. Outputs differ by mode:
 
-- **Quick tunnel** — prints the `*.trycloudflare.com` URL and a ready-to-paste
+- **Quick tunnel (Docker)** — prints the `*.trycloudflare.com` URL and a ready-to-paste
   `~/.mcp.json` snippet including an API key (if `AGENTIBRIDGE_API_KEYS` is set).
-- **Named tunnel** — confirms connected state and directs you to the Cloudflare
+- **Named tunnel (Docker)** — confirms connected state and directs you to the Cloudflare
   Zero Trust dashboard for the hostname.
+- **Systemd service** — shows tunnel ID, hostname, service target, and credentials path
+  from `~/.cloudflared/config.yml`, plus a ready-to-paste `~/.mcp.json` snippet.
 - **Not running** — prints start instructions for both quick and named tunnel modes.
 
 ---

@@ -65,18 +65,34 @@ When no keys are configured, auth is disabled (open access).
 
 ### Authentication — OAuth 2.1 (Optional)
 
-Set `OAUTH_ISSUER_URL` to enable an in-memory OAuth 2.1 authorization server. This is required by some clients (e.g., claude.ai) that use the MCP OAuth flow.
+Set `OAUTH_ISSUER_URL` to enable an in-memory OAuth 2.1 authorization server. This is required by some clients (e.g., claude.ai) that use the MCP OAuth flow. API key auth continues to work alongside OAuth — both methods are active simultaneously.
 
-Add to `~/.agentibridge/.env` (auto-created on first run):
+Uncomment and set these in `~/.agentibridge/docker.env`:
 
 ```bash
-OAUTH_ISSUER_URL=https://bridge.example.com
-OAUTH_CLIENT_ID=your-client-id          # optional: disable dynamic registration
-OAUTH_CLIENT_SECRET=your-client-secret
-OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/...
+OAUTH_ISSUER_URL=https://bridge.yourdomain.com   # must be your actual public hostname
+OAUTH_CLIENT_ID=my-bridge-client                  # locks down dynamic registration
+OAUTH_CLIENT_SECRET=generate-a-strong-secret-here
+OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback
+OAUTH_ALLOWED_SCOPES=claudeai
 ```
 
-When OAuth is enabled, API keys continue to work as Bearer token fallback. See [Configuration Reference](../reference/configuration.md) for all OAuth variables.
+After changing OAuth config, you must recreate the containers (not just restart):
+
+```bash
+agentibridge stop    # tears down containers
+agentibridge run     # recreates with new env vars
+```
+
+> **Why not `agentibridge restart`?** Docker Compose `restart` only restarts existing containers — environment variables are baked in at creation time and are not reloaded. You must `stop` + `run` to pick up any `docker.env` changes.
+
+Verify the OAuth discovery endpoint returns your actual hostname:
+
+```bash
+curl -s https://bridge.yourdomain.com/.well-known/oauth-authorization-server | head
+```
+
+See [Configuration Reference](../reference/configuration.md) for all OAuth variables.
 
 ### Transport Selection in `server.py`
 

@@ -14,6 +14,7 @@ from agentibridge.cli import (
     cmd_help,
     cmd_connect,
     cmd_config,
+    cmd_status,
     cmd_tunnel,
     cmd_update,
     _extract_tunnel_url,
@@ -73,6 +74,7 @@ class TestCmdConnect:
         assert "Claude Code CLI" in output
         assert "ChatGPT" in output
         assert "localhost:8100" in output
+        assert '"type": "http"' in output
         assert "/sse" in output
         assert "/health" in output
 
@@ -105,6 +107,146 @@ class TestCmdConfig:
         assert "AGENTIBRIDGE_TRANSPORT" in output
         assert "REDIS_URL" in output
         assert "LLM_API_BASE" in output
+
+
+@pytest.mark.unit
+class TestCmdStatus:
+    """Tests for `agentibridge status`."""
+
+    def _docker_inspect_side_effect(self, container_health: dict):
+        """Return a side_effect that handles docker inspect + systemctl calls."""
+
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(str(c) for c in cmd)
+            # docker inspect for container health
+            if "docker" in cmd_str and "inspect" in cmd_str:
+                for name, status in container_health.items():
+                    if name in cmd_str:
+                        if status is None:
+                            return _fail()
+                        return _ok(stdout=status)
+                return _fail()
+            # systemctl --user is-active agentibridge
+            if "systemctl" in cmd_str and "--user" in cmd_str:
+                return _ok(stdout="inactive")
+            # systemctl is-active cloudflared
+            if "systemctl" in cmd_str and "cloudflared" in cmd_str:
+                return _ok(stdout="inactive")
+            return _fail()
+
+        return side_effect
+
+    def test_status_docker_running(self, capsys, tmp_path):
+        """When Docker stack is running, shows container health + docker.env values."""
+        stack_dir = tmp_path / "agentibridge"
+        stack_dir.mkdir()
+        env_file = stack_dir / "docker.env"
+        env_file.write_text(
+            "REDIS_URL=redis://redis:6379/0\n"
+            "POSTGRES_URL=postgresql://ab:secret@postgres:5432/agentibridge\n"
+            "AGENTIBRIDGE_TRANSPORT=sse\n"
+            "AGENTIBRIDGE_PORT=8100\n"
+            "AGENTIBRIDGE_POLL_INTERVAL=30\n"
+        )
+
+        container_health = {
+            "agentibridge-redis": "healthy",
+            "agentibridge-postgres": "healthy",
+            "agentibridge-tunnel": None,  # not found
+            "agentibridge": "running",
+        }
+
+        se = self._docker_inspect_side_effect(container_health)
+
+        with (
+            patch("agentibridge.cli._is_stack_running", return_value=True),
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli.subprocess.run", side_effect=se),
+        ):
+            cmd_status(MagicMock())
+
+        output = capsys.readouterr().out
+
+        # Redis section shows container health + docker.env URL
+        assert "container: healthy" in output
+        assert "redis://redis:6379/0 (Docker internal)" in output
+
+        # Postgres section shows container health + docker.env URL
+        assert "postgresql://ab:secret@postgres:5432/agentibridge (Docker internal)" in output
+
+        # Config section reads from docker.env
+        assert "transport: sse (docker.env)" in output
+        assert "port: 8100 (docker.env)" in output
+        assert "poll interval: 30s (docker.env)" in output
+
+    def test_status_docker_not_running(self, capsys):
+        """When Docker is NOT running, falls back to host env vars."""
+
+        def se(cmd, **kwargs):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "systemctl" in cmd_str and "--user" in cmd_str:
+                return _ok(stdout="inactive")
+            if "systemctl" in cmd_str and "cloudflared" in cmd_str:
+                return _ok(stdout="inactive")
+            return _fail()
+
+        with (
+            patch("agentibridge.cli._is_stack_running", return_value=False),
+            patch("agentibridge.cli.subprocess.run", side_effect=se),
+            patch.dict(
+                "os.environ",
+                {
+                    "AGENTIBRIDGE_TRANSPORT": "stdio",
+                    "AGENTIBRIDGE_PORT": "8100",
+                    "AGENTIBRIDGE_POLL_INTERVAL": "60",
+                },
+            ),
+        ):
+            # Mock redis/pg imports to avoid real connections
+            mock_get_redis = MagicMock(return_value=None)
+            mock_get_pg = MagicMock(return_value=None)
+            with (
+                patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
+                patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
+            ):
+                cmd_status(MagicMock())
+
+        output = capsys.readouterr().out
+
+        # Config should show host env values (no "docker.env" annotation)
+        assert "transport: stdio" in output
+        assert "docker.env" not in output
+
+        # Redis shows unavailable with host env
+        assert "unavailable" in output
+
+    def test_status_tunnel_systemd(self, capsys):
+        """When cloudflared systemd service is active, shows 'systemd' in output."""
+
+        def se(cmd, **kwargs):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "systemctl" in cmd_str and "cloudflared" in cmd_str:
+                return _ok(stdout="active")
+            if "systemctl" in cmd_str and "--user" in cmd_str:
+                return _ok(stdout="inactive")
+            return _fail()
+
+        with (
+            patch("agentibridge.cli._is_stack_running", return_value=False),
+            patch("agentibridge.cli.subprocess.run", side_effect=se),
+            patch("agentibridge.cli._cloudflared_hostname", return_value="tunnel.example.com"),
+        ):
+            mock_get_redis = MagicMock(return_value=None)
+            mock_get_pg = MagicMock(return_value=None)
+            with (
+                patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
+                patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
+            ):
+                cmd_status(MagicMock())
+
+        output = capsys.readouterr().out
+        assert "active (systemd)" in output
+        assert "hostname: tunnel.example.com" in output
 
 
 @pytest.mark.unit
@@ -142,19 +284,25 @@ class TestExtractTunnelUrl:
 
 @pytest.mark.unit
 class TestCmdTunnel:
-    def test_tunnel_no_docker(self, capsys):
-        with patch("shutil.which", return_value=None):
+    def test_tunnel_no_docker_no_systemd(self, capsys):
+        with (
+            patch("shutil.which", return_value=None),
+            patch("agentibridge.cli._systemd_active", return_value="inactive"),
+        ):
             args = MagicMock()
             cmd_tunnel(args)
         output = capsys.readouterr().out
-        assert "Docker is not installed" in output
+        assert "not running" in output
 
-    def test_tunnel_not_running(self, capsys):
+    def test_tunnel_not_running_no_systemd(self, capsys):
         with patch("shutil.which", return_value="/usr/bin/docker"):
             mock_result = MagicMock()
             mock_result.returncode = 1
             mock_result.stdout = ""
-            with patch("agentibridge.cli.subprocess.run", return_value=mock_result):
+            with (
+                patch("agentibridge.cli.subprocess.run", return_value=mock_result),
+                patch("agentibridge.cli._systemd_active", return_value="inactive"),
+            ):
                 args = MagicMock()
                 cmd_tunnel(args)
         output = capsys.readouterr().out
@@ -187,6 +335,7 @@ class TestCmdTunnel:
         output = capsys.readouterr().out
         assert "https://my-test-tunnel.trycloudflare.com" in output
         assert "quick tunnel" in output
+        assert '"type": "http"' in output
         assert "/sse" in output
 
     def test_tunnel_named_connected(self, capsys):
@@ -210,6 +359,37 @@ class TestCmdTunnel:
                 cmd_tunnel(args)
         output = capsys.readouterr().out
         assert "named tunnel" in output
+
+    def test_tunnel_systemd_with_config(self, capsys):
+        """When no Docker tunnel but cloudflared runs via systemd, shows config."""
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+
+        cfg_info = {
+            "tunnel_id": "abc-123",
+            "hostname": "bridge.example.com",
+            "service": "http://localhost:8100",
+            "credentials_file": "/home/user/.cloudflared/abc-123.json",
+        }
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("agentibridge.cli.subprocess.run", return_value=mock_result),
+            patch("agentibridge.cli._systemd_active", return_value="active"),
+            patch("agentibridge.cli._parse_cloudflared_config", return_value=cfg_info),
+        ):
+            args = MagicMock()
+            cmd_tunnel(args)
+
+        output = capsys.readouterr().out
+        assert "active (systemd)" in output
+        assert "tunnel id: abc-123" in output
+        assert "hostname:  bridge.example.com" in output
+        assert "service:   http://localhost:8100" in output
+        assert "https://bridge.example.com/health" in output
+        assert "https://bridge.example.com/mcp" in output
+        assert '"type": "http"' in output
 
 
 @pytest.mark.unit
@@ -566,17 +746,18 @@ class TestValidateEnv:
 @pytest.mark.unit
 class TestEnsureStackDir:
     def test_scaffolds_compose_and_env(self, tmp_path, capsys):
-        """Creates compose file and docker.env, then exits for first-time setup."""
+        """Creates compose file and docker.env, returns stack_dir on first run."""
         stack_dir = tmp_path / "agentibridge"
         with (
             patch("agentibridge.cli._STACK_DIR", stack_dir),
             patch("agentibridge.cli._LEGACY_STACK_DIR", tmp_path / "legacy"),
         ):
-            with pytest.raises(SystemExit) as exc:
-                _ensure_stack_dir()
-            assert exc.value.code == 1
+            result = _ensure_stack_dir()
+        assert result == stack_dir
         output = capsys.readouterr().out
         assert "Created" in output
+        assert "default configuration" in output
+        assert "github.com" in output
         assert (stack_dir / "docker-compose.yml").exists()
         assert (stack_dir / "docker.env").exists()
 

@@ -44,6 +44,13 @@ Your Claude Code sessions disappear when the terminal closes. AgentiBridge index
 
 ---
 
+## Prerequisites
+
+- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** (`claude` binary) — AgentiBridge indexes Claude Code transcripts, so the CLI must be installed. The tunnel wizard and dispatch features also invoke it directly.
+- **[cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)** — required for `agentibridge tunnel setup` (the tunnel wizard). Not needed if you don't use Cloudflare Tunnel.
+- **Docker** — required for `agentibridge run` (Docker mode). Not needed for native/stdio mode.
+- **Python 3.12+**
+
 ## Quick Start
 
 ```bash
@@ -58,6 +65,7 @@ Then add AgentiBridge to `~/.mcp.json`:
 {
   "mcpServers": {
     "agentibridge": {
+      "type": "http",
       "url": "http://localhost:8100/mcp"
     }
   }
@@ -88,7 +96,7 @@ See [Configuration Reference](docs/reference/configuration.md) for all variables
 | `agentibridge run` | Start the Docker stack |
 | `agentibridge run --rebuild` | Force rebuild before starting |
 | `agentibridge stop` | Stop the stack |
-| `agentibridge restart` | Restart the stack |
+| `agentibridge restart` | Restart the stack (does **not** reload `docker.env` — use `stop` + `run` after config changes) |
 | `agentibridge logs` | View recent logs (`--follow` to stream) |
 | `agentibridge status` | Health, containers, session count |
 | `agentibridge version` | Print version |
@@ -191,29 +199,51 @@ Run `agentibridge connect` to get ready-to-paste configs for other clients (Chat
 
 Claude.ai requires **OAuth 2.1** to connect to remote MCP servers. AgentiBridge has a built-in OAuth 2.1 authorization server with PKCE — just enable it with one env var.
 
-**1. Enable OAuth on your server:**
-
-Add to `~/.agentibridge/.env` (auto-created on first run — see [Configuration](#configuration)):
+**1. Set up your tunnel first** (if you haven't already):
 
 ```bash
-# Required — enables OAuth 2.1
+agentibridge tunnel setup    # interactive wizard — installs cloudflared, creates DNS record
+agentibridge run             # start the Docker stack
+agentibridge tunnel          # verify your hostname and connection
+```
+
+**2. Enable OAuth on your server:**
+
+Uncomment and set the OAuth variables in `~/.agentibridge/docker.env`:
+
+```bash
+# Required — must be your actual tunnel hostname
 OAUTH_ISSUER_URL=https://bridge.yourdomain.com
 
-# Optional — lock to a single client (recommended for production)
+# Lock to a single client (recommended)
 OAUTH_CLIENT_ID=my-bridge-client
 OAUTH_CLIENT_SECRET=generate-a-strong-secret-here
 OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback
 OAUTH_ALLOWED_SCOPES=claudeai
 ```
 
-**2. Expose your server over HTTPS:**
+**3. Restart the stack to apply changes:**
+
+> **Important:** `agentibridge restart` does **not** reload `docker.env` — it only restarts existing containers with the old config. You must stop and start the stack to pick up env var changes.
 
 ```bash
-agentibridge tunnel setup    # Cloudflare Tunnel (easiest)
-# or use your own reverse proxy (nginx, Caddy, etc.)
+agentibridge stop
+agentibridge run
 ```
 
-**3. Add to claude.ai:**
+**4. Verify OAuth is working:**
+
+```bash
+curl -s https://bridge.yourdomain.com/.well-known/oauth-authorization-server | head
+```
+
+The response must show your actual hostname (not a placeholder). If it still shows the old value, you need to `stop` + `run` again.
+
+```bash
+curl https://bridge.yourdomain.com/health
+```
+
+**5. Add to claude.ai:**
 
 Go to [claude.ai/settings/connectors](https://claude.ai/settings/connectors), add your server URL:
 
@@ -228,13 +258,6 @@ Claude.ai will automatically:
 4. Store the access token and refresh it automatically
 
 No manual JSON config needed — claude.ai handles the entire OAuth flow.
-
-**4. Verify OAuth is working:**
-
-```bash
-curl https://bridge.yourdomain.com/.well-known/oauth-authorization-server
-curl https://bridge.yourdomain.com/health
-```
 
 > API key auth (`X-API-Key` header) continues to work alongside OAuth. Both auth methods are active simultaneously.
 
@@ -268,6 +291,16 @@ curl https://mcp.yourdomain.com/health
 The wizard installs `cloudflared`, authenticates, creates the DNS record, and writes the config. The bridge itself has no domain config — it just listens on `localhost:8100` and the tunnel routes your domain to it.
 
 The wizard writes `CLOUDFLARE_TUNNEL_TOKEN` into `~/.agentibridge/docker.env` automatically. This token authenticates the `cloudflared` container to your Cloudflare tunnel — it's static, so it works permanently across restarts, reboots, and redeployments. It only changes if you delete and recreate the tunnel in the Cloudflare Zero Trust dashboard.
+
+### Tunnel warning on `agentibridge run`
+
+You may see this when starting the stack:
+
+```
+WARN[0000] The "CLOUDFLARE_TUNNEL_TOKEN" variable is not set. Defaulting to a blank string.
+```
+
+This is harmless. Docker Compose parses the entire compose file — including the optional `tunnel` profile — and warns about any unset `${VARIABLES}` it finds, even if that profile isn't started. The tunnel wizard (`agentibridge tunnel setup`) installs cloudflared as a **systemd service** on the host, which reads its config from `~/.cloudflared/config.yml` and doesn't use this variable at all. The `CLOUDFLARE_TUNNEL_TOKEN` variable is only used if you run the tunnel as a Docker container via `docker compose --profile tunnel up -d` (the quick-tunnel approach). To silence the warning, add `CLOUDFLARE_TUNNEL_TOKEN=` (empty) to your `~/.agentibridge/docker.env`.
 
 See [Cloudflare Tunnel Guide](docs/deployment/cloudflare-tunnel.md) for full details.
 
