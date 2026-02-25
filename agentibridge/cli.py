@@ -186,9 +186,7 @@ def cmd_status(args: argparse.Namespace) -> None:
             pool = get_pg()
             if pool is not None:
                 with pool.connection() as conn:
-                    row = conn.execute(
-                        "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks"
-                    ).fetchone()
+                    row = conn.execute("SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks").fetchone()
                     print("  status: connected")
                     print(f"  chunks indexed: {row[0]}")
                     print(f"  sessions with embeddings: {row[1]}")
@@ -1319,12 +1317,8 @@ def cmd_run(args: argparse.Namespace) -> None:
         systemd_state = _systemd_active("cloudflared")
         if systemd_state == "active":
             print()
-            print(
-                "Note: The CLOUDFLARE_TUNNEL_TOKEN warning above is harmless — your tunnel"
-            )
-            print(
-                "runs via systemd, not Docker. To silence it, add CLOUDFLARE_TUNNEL_TOKEN="
-            )
+            print("Note: The CLOUDFLARE_TUNNEL_TOKEN warning above is harmless — your tunnel")
+            print("runs via systemd, not Docker. To silence it, add CLOUDFLARE_TUNNEL_TOKEN=")
             print(f"(empty) to {env_file}.")
 
     # Show running containers after start
