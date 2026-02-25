@@ -92,6 +92,7 @@ See [Configuration Reference](docs/reference/configuration.md) for all variables
 | `agentibridge logs` | View recent logs (`--follow` to stream) |
 | `agentibridge status` | Health, containers, session count |
 | `agentibridge version` | Print version |
+| `agentibridge update` | Updates agentibridge |
 | `agentibridge config` | View current config |
 | `agentibridge connect` | Ready-to-paste client configs |
 | `agentibridge tunnel` | Tunnel status and URL |
