@@ -202,6 +202,36 @@ flowchart LR
 
 ---
 
+## Connect to Claude.ai
+{: #claude-ai }
+
+Claude.ai requires OAuth 2.1 to connect to remote MCP servers. AgentiBridge includes a built-in OAuth 2.1 authorization server — enable it with one env var.
+
+**1. Add to your `.env`:**
+
+```bash
+OAUTH_ISSUER_URL=https://bridge.yourdomain.com
+```
+
+**2. Expose over HTTPS** (Cloudflare Tunnel or reverse proxy):
+
+```bash
+agentibridge tunnel setup
+```
+
+**3. Add to claude.ai** at [claude.ai/settings/connectors](https://claude.ai/settings/connectors):
+
+```
+https://bridge.yourdomain.com/mcp
+```
+
+Claude.ai automatically discovers OAuth metadata, registers as a client, and completes the PKCE flow. No manual JSON config needed.
+
+{: .note }
+> For production, set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` to lock down registration to a single pre-configured client. API key auth (`X-API-Key`) continues to work alongside OAuth.
+
+---
+
 ## Deployment Options
 
 | | Minimal | Standard | Production |
