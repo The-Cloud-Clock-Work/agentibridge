@@ -63,8 +63,8 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      - name: Create docker.env from example
-        run: cp .env.example docker.env
+      - name: Create .env from example
+        run: cp .env.example .env
 
       - name: Clone test dataset
         uses: actions/checkout@v4
@@ -75,7 +75,7 @@ jobs:
 
       - name: Start Docker stack with test data
         run: |
-          echo "CLAUDE_DIR=${{ github.workspace }}/bridge-smoke-dataset/.claude" >> docker.env
+          echo "CLAUDE_DIR=${{ github.workspace }}/bridge-smoke-dataset/.claude" >> .env
           docker compose up --build -d
 
       - name: Wait for services
