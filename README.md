@@ -70,6 +70,20 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 
 ---
 
+## Configuration
+
+All configuration is done via environment variables. AgentiBridge auto-creates `~/.agentibridge/.env` on first run with a commented template.
+
+**Config resolution order** (first found wins, explicit env vars always override):
+
+1. Explicit env vars (already set in shell/process)
+2. Project-local `.env` (current working directory)
+3. `~/.agentibridge/.env` (canonical user config home)
+
+Edit `~/.agentibridge/.env` to configure OAuth, Cloudflare Tunnel, API keys, semantic search, and more. See [Configuration Reference](docs/reference/configuration.md) for all variables.
+
+---
+
 ## CLI Commands
 
 ### Stack
@@ -205,13 +219,7 @@ Runs AgentiBridge as a subprocess alongside Claude Code. No server to manage, no
 pip install agentibridge
 ```
 
-To persist configuration, create `~/.agentibridge/.env` (loaded automatically):
-
-```bash
-mkdir -p ~/.agentibridge
-cp .env.example ~/.agentibridge/.env
-# edit ~/.agentibridge/.env with your settings
-```
+Configuration is auto-loaded from `~/.agentibridge/.env` (created on first run). Edit it to customize settings.
 
 Add to your project `.mcp.json` or `~/.mcp.json`:
 
@@ -276,7 +284,7 @@ Claude.ai requires **OAuth 2.1** to connect to remote MCP servers. AgentiBridge 
 
 **1. Enable OAuth on your server:**
 
-Add to your `.env`:
+Add to `~/.agentibridge/.env` (auto-created on first run — see [Configuration](#configuration)):
 
 ```bash
 # Required — enables OAuth 2.1

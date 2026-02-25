@@ -67,6 +67,8 @@ When no keys are configured, auth is disabled (open access).
 
 Set `OAUTH_ISSUER_URL` to enable an in-memory OAuth 2.1 authorization server. This is required by some clients (e.g., claude.ai) that use the MCP OAuth flow.
 
+Add to `~/.agentibridge/.env` (auto-created on first run):
+
 ```bash
 OAUTH_ISSUER_URL=https://bridge.example.com
 OAUTH_CLIENT_ID=your-client-id          # optional: disable dynamic registration
