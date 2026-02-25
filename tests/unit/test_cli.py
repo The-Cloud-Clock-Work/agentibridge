@@ -18,6 +18,8 @@ from agentibridge.cli import (
     cmd_update,
     _extract_tunnel_url,
     _short_digest,
+    _validate_env,
+    _ensure_stack_dir,
 )
 
 
@@ -532,3 +534,79 @@ class TestCmdUpdate:
 
         output = capsys.readouterr().out
         assert "Image already up to date" in output
+
+
+@pytest.mark.unit
+class TestValidateEnv:
+    def test_passes_when_all_vars_present(self, tmp_path):
+        """No exit when all required vars are present."""
+        env_file = tmp_path / "docker.env"
+        env_file.write_text(
+            "REDIS_URL=redis://redis:6379/0\n"
+            "POSTGRES_URL=postgresql://a:a@postgres:5432/a\n"
+            "AGENTIBRIDGE_TRANSPORT=sse\n"
+            "AGENTIBRIDGE_PORT=8100\n"
+            "POSTGRES_USER=agentibridge\n"
+            "POSTGRES_PASSWORD=agentibridge\n"
+            "POSTGRES_DB=agentibridge\n"
+        )
+        _validate_env(env_file)  # should not raise
+
+    def test_exits_when_vars_missing(self, tmp_path, capsys):
+        """Exits with code 1 listing missing variables."""
+        env_file = tmp_path / "docker.env"
+        env_file.write_text("REDIS_URL=redis://redis:6379/0\n")
+        with pytest.raises(SystemExit) as exc:
+            _validate_env(env_file)
+        assert exc.value.code == 1
+        output = capsys.readouterr().out
+        assert "missing required variables" in output
+
+
+@pytest.mark.unit
+class TestEnsureStackDir:
+    def test_scaffolds_compose_and_env(self, tmp_path, capsys):
+        """Creates compose file and docker.env, then exits for first-time setup."""
+        stack_dir = tmp_path / "agentibridge"
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli._LEGACY_STACK_DIR", tmp_path / "legacy"),
+        ):
+            with pytest.raises(SystemExit) as exc:
+                _ensure_stack_dir()
+            assert exc.value.code == 1
+        output = capsys.readouterr().out
+        assert "Created" in output
+        assert (stack_dir / "docker-compose.yml").exists()
+        assert (stack_dir / "docker.env").exists()
+
+    def test_migrates_old_env_with_docker_vars(self, tmp_path, capsys):
+        """Moves .env to docker.env when it contains Docker vars."""
+        stack_dir = tmp_path / "agentibridge"
+        stack_dir.mkdir()
+        # Write a compose file so it doesn't trigger first-run exit
+        import shutil
+
+        from agentibridge.cli import DATA_DIR
+
+        shutil.copy2(DATA_DIR / "docker-compose.yml", stack_dir / "docker-compose.yml")
+        # Create .env with Docker vars
+        old_env = stack_dir / ".env"
+        old_env.write_text(
+            "REDIS_URL=redis://redis:6379/0\n"
+            "POSTGRES_URL=postgresql://a:a@postgres:5432/a\n"
+            "AGENTIBRIDGE_TRANSPORT=sse\n"
+            "AGENTIBRIDGE_PORT=8100\n"
+            "POSTGRES_USER=agentibridge\n"
+            "POSTGRES_PASSWORD=agentibridge\n"
+            "POSTGRES_DB=agentibridge\n"
+        )
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli._LEGACY_STACK_DIR", tmp_path / "legacy"),
+        ):
+            result = _ensure_stack_dir()
+        output = capsys.readouterr().out
+        assert "Migrated" in output
+        assert (stack_dir / "docker.env").exists()
+        assert result == stack_dir

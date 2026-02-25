@@ -33,6 +33,7 @@ from pathlib import Path
 
 
 DATA_DIR = Path(__file__).parent / "data"
+_DOCKER_ENV = "docker.env"
 
 
 def _version() -> str:
@@ -948,7 +949,7 @@ def _ensure_stack_dir() -> Path:
         shutil.copy2(DATA_DIR / "docker-compose.yml", compose_dest)
         print(f"Created {compose_dest}")
 
-    env_dest = _STACK_DIR / "docker.env"
+    env_dest = _STACK_DIR / _DOCKER_ENV
 
     # Migration: if .env exists with Docker vars but docker.env doesn't, move it
     old_env = _STACK_DIR / ".env"
@@ -996,7 +997,7 @@ def _compose_cmd(stack_dir: Path) -> list[str]:
         "-f",
         str(stack_dir / "docker-compose.yml"),
         "--env-file",
-        str(stack_dir / "docker.env"),
+        str(stack_dir / _DOCKER_ENV),
     ]
 
 
@@ -1066,7 +1067,7 @@ def _update_docker_stack() -> None:
     """Pull latest image and recreate the agentibridge container."""
     stack_dir = _STACK_DIR
     compose_file = stack_dir / "docker-compose.yml"
-    env_file = stack_dir / "docker.env"
+    env_file = stack_dir / _DOCKER_ENV
 
     if not compose_file.exists() or not env_file.exists():
         print("\n[docker] Stack not initialised — run 'agentibridge run' first")
@@ -1228,7 +1229,7 @@ def cmd_bridge(args: argparse.Namespace) -> None:
     log_file = Path("/tmp/dispatch_bridge.log")
 
     if action == "start":
-        env_file = _STACK_DIR / "docker.env"
+        env_file = _STACK_DIR / _DOCKER_ENV
         if not env_file.exists():
             print(f"ERROR: {env_file} not found. Run 'agentibridge run' first.")
             sys.exit(1)
