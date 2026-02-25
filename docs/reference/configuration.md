@@ -7,6 +7,16 @@ nav_order: 2
 
 This document provides a comprehensive reference for all AgentiBridge configuration options.
 
+## Config File Location
+
+AgentiBridge auto-creates `~/.agentibridge/.env` on first run with a commented template. Edit this file to configure your deployment.
+
+**Config resolution order** (first found wins, explicit env vars always override):
+
+1. Explicit env vars (already set in shell/process)
+2. Project-local `.env` (current working directory)
+3. `~/.agentibridge/.env` (canonical user config home)
+
 ## Environment Variables
 
 ### Redis Configuration
