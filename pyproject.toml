@@ -55,7 +55,7 @@ build-backend = "setuptools.build_meta"
 include = ["agentibridge*"]
 
 [tool.setuptools.package-data]
-agentibridge = ["data/*"]
+agentibridge = ["data/*", "data/.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
