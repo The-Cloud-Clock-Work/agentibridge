@@ -17,6 +17,10 @@ from agentibridge.cli import (
     cmd_status,
     cmd_tunnel,
     cmd_update,
+    _container_health,
+    _systemd_active,
+    _cloudflared_hostname,
+    _parse_cloudflared_config,
     _extract_tunnel_url,
     _short_digest,
     _validate_env,
@@ -247,6 +251,82 @@ class TestCmdStatus:
         output = capsys.readouterr().out
         assert "active (systemd)" in output
         assert "hostname: tunnel.example.com" in output
+
+
+@pytest.mark.unit
+class TestContainerHealth:
+    def test_returns_health_status(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout="healthy")):
+            assert _container_health("agentibridge-redis") == "healthy"
+
+    def test_returns_none_when_not_found(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_fail()):
+            assert _container_health("agentibridge-redis") is None
+
+    def test_returns_none_on_exception(self):
+        with patch("agentibridge.cli.subprocess.run", side_effect=Exception("no docker")):
+            assert _container_health("agentibridge-redis") is None
+
+
+@pytest.mark.unit
+class TestSystemdActive:
+    def test_returns_active(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout="active")):
+            assert _systemd_active("cloudflared") == "active"
+
+    def test_returns_inactive(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout="inactive")):
+            assert _systemd_active("cloudflared") == "inactive"
+
+    def test_returns_none_on_exception(self):
+        with patch("agentibridge.cli.subprocess.run", side_effect=FileNotFoundError):
+            assert _systemd_active("cloudflared") is None
+
+
+def _mock_cloudflared_dir(tmp_path):
+    """Create a .cloudflared dir under tmp_path and patch the constants."""
+    cf_dir = tmp_path / ".cloudflared"
+    cf_dir.mkdir()
+    return cf_dir
+
+
+@pytest.mark.unit
+class TestCloudflaredHostname:
+    def test_extracts_hostname(self, tmp_path):
+        cf_dir = _mock_cloudflared_dir(tmp_path)
+        (cf_dir / "config.yml").write_text(
+            "tunnel: abc-123\ningress:\n  - hostname: bridge.example.com\n    service: http://localhost:8100\n"
+        )
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            assert _cloudflared_hostname() == "bridge.example.com"
+
+    def test_returns_none_when_no_file(self, tmp_path):
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            assert _cloudflared_hostname() is None
+
+
+@pytest.mark.unit
+class TestParseCloudflaredConfig:
+    def test_parses_full_config(self, tmp_path):
+        cf_dir = _mock_cloudflared_dir(tmp_path)
+        (cf_dir / "config.yml").write_text(
+            "tunnel: abc-123\n"
+            "credentials-file: /home/user/.cloudflared/abc-123.json\n"
+            "ingress:\n"
+            "  - hostname: bridge.example.com\n"
+            "    service: http://localhost:8100\n"
+            "  - service: http_status:404\n"
+        )
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            info = _parse_cloudflared_config()
+        assert info["tunnel_id"] == "abc-123"
+        assert info["hostname"] == "bridge.example.com"
+        assert info["service"] == "http://localhost:8100"
+        assert info["credentials_file"] == "/home/user/.cloudflared/abc-123.json"
+
+    def test_returns_empty_when_no_file(self, tmp_path):
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            assert _parse_cloudflared_config() == {}
 
 
 @pytest.mark.unit

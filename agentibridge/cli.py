@@ -34,6 +34,10 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
 _DOCKER_ENV = "docker.env"
+_CLOUDFLARED_DIR = ".cloudflared"
+_CLOUDFLARED_CONFIG = "config.yml"
+_NOT_SET = "(not set)"
+_MCP_JSON_HINT = "Add to ~/.mcp.json:"
 
 
 def _version() -> str:
@@ -89,17 +93,7 @@ def _systemd_active(service: str) -> str | None:
 
 def _cloudflared_hostname() -> str | None:
     """Try to extract tunnel hostname from ~/.cloudflared/config.yml."""
-    cfg = Path.home() / ".cloudflared" / "config.yml"
-    if not cfg.exists():
-        return None
-    try:
-        for line in cfg.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("hostname:"):
-                return line.split(":", 1)[1].strip()
-    except Exception:
-        pass
-    return None
+    return _parse_cloudflared_config().get("hostname")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -150,7 +144,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     # --- Redis ---
     print("\n[Redis]")
     if docker_mode and env_file and env_file.exists():
-        redis_url = _read_env_value("REDIS_URL", env_file) or "(not set)"
+        redis_url = _read_env_value("REDIS_URL", env_file) or _NOT_SET
         health = _container_health("agentibridge-redis") or "unknown"
         print(f"  container: {health}")
         print(f"  url: {redis_url} (Docker internal)")
@@ -167,7 +161,7 @@ def cmd_status(args: argparse.Namespace) -> None:
                 count = r.zcard(_rkey("idx:all"))
                 print(f"  sessions indexed: {count}")
             else:
-                url = os.getenv("REDIS_URL", "(not set)")
+                url = os.getenv("REDIS_URL", _NOT_SET)
                 print(f"  status: unavailable (REDIS_URL={url})")
         except Exception as e:
             print(f"  status: error ({e})")
@@ -175,7 +169,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     # --- Postgres ---
     print("\n[Postgres]")
     if docker_mode and env_file and env_file.exists():
-        pg_url = _read_env_value("POSTGRES_URL", env_file) or "(not set)"
+        pg_url = _read_env_value("POSTGRES_URL", env_file) or _NOT_SET
         health = _container_health("agentibridge-postgres") or "unknown"
         print(f"  container: {health}")
         print(f"  url: {pg_url} (Docker internal)")
@@ -191,7 +185,7 @@ def cmd_status(args: argparse.Namespace) -> None:
                     print(f"  chunks indexed: {row[0]}")
                     print(f"  sessions with embeddings: {row[1]}")
             else:
-                url = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", "(not set)"))
+                url = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", _NOT_SET))
                 print(f"  status: unavailable (POSTGRES_URL={url})")
         except Exception as e:
             print(f"  status: error ({e})")
@@ -341,7 +335,7 @@ def cmd_connect(args: argparse.Namespace) -> None:
 
     print()
     print("=== Claude Code CLI ===")
-    print("Add to ~/.mcp.json:")
+    print(_MCP_JSON_HINT)
     config = {
         "mcpServers": {
             "agentibridge": {
@@ -389,7 +383,7 @@ def _extract_tunnel_url(log_output: str) -> str | None:
 
 def _parse_cloudflared_config() -> dict:
     """Parse ~/.cloudflared/config.yml for tunnel details."""
-    cfg = Path.home() / ".cloudflared" / "config.yml"
+    cfg = Path.home() / _CLOUDFLARED_DIR / _CLOUDFLARED_CONFIG
     if not cfg.exists():
         return {}
     info: dict = {}
@@ -422,7 +416,7 @@ def _print_systemd_tunnel_status() -> bool:
 
     cfg = _parse_cloudflared_config()
     if cfg:
-        print("[Config] (~/.cloudflared/config.yml)")
+        print(f"[Config] (~/{_CLOUDFLARED_DIR}/{_CLOUDFLARED_CONFIG})")
         if "tunnel_id" in cfg:
             print(f"  tunnel id: {cfg['tunnel_id']}")
         if "hostname" in cfg:
@@ -438,7 +432,7 @@ def _print_systemd_tunnel_status() -> bool:
         print("Test:")
         print(f"  curl -s https://{hostname}/health")
         print()
-        print("Add to ~/.mcp.json:")
+        print(_MCP_JSON_HINT)
         mcp_config = {
             "mcpServers": {
                 "agentibridge": {
@@ -456,95 +450,102 @@ def _print_systemd_tunnel_status() -> bool:
     return True
 
 
+def _check_docker_tunnel() -> bool:
+    """Check Docker tunnel container status. Returns True if found."""
+    if not shutil.which("docker"):
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}}", "agentibridge-tunnel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return False
+    if result.returncode != 0:
+        return False
+
+    status = result.stdout.strip()
+    print(f"Cloudflare Tunnel: {status} (docker)")
+
+    if status != "running":
+        print("Container exists but is not running. Check logs:")
+        print("  docker logs agentibridge-tunnel")
+        return True
+
+    # Read logs to detect mode and URL
+    try:
+        log_result = subprocess.run(
+            ["docker", "logs", "--tail", "50", "agentibridge-tunnel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        print("Could not read tunnel container logs.")
+        return True
+
+    log_output = log_result.stdout + log_result.stderr
+
+    url = _extract_tunnel_url(log_output)
+    if url:
+        _print_quick_tunnel(url)
+        return True
+
+    if "Starting named tunnel" in log_output:
+        print("Mode: named tunnel")
+        print("The tunnel is connected via your Cloudflare configuration.")
+        print("Check your Cloudflare Zero Trust dashboard for the hostname.")
+        print()
+        print("Logs:")
+        print("  docker logs agentibridge-tunnel")
+
+    return True
+
+
+def _print_quick_tunnel(url: str) -> None:
+    """Print quick tunnel URL and MCP config snippet."""
+    print("Mode: quick tunnel")
+    print(f"URL:  {url}")
+    print()
+    print(_MCP_JSON_HINT)
+    config: dict = {
+        "mcpServers": {
+            "agentibridge": {
+                "type": "http",
+                "url": f"{url}/sse",
+            }
+        }
+    }
+    api_keys = os.getenv("AGENTIBRIDGE_API_KEYS", "")
+    if api_keys:
+        first_key = api_keys.split(",")[0].strip()
+        config["mcpServers"]["agentibridge"]["headers"] = {"X-API-Key": first_key}
+    print(json.dumps(config, indent=2))
+    print()
+    print("Test:")
+    print(f"  curl -s {url}/health")
+
+
 def _cmd_tunnel_status() -> None:
     """Show Cloudflare Tunnel status — checks Docker container and systemd."""
-    docker_found = False
+    if _check_docker_tunnel():
+        return
 
-    # Check Docker tunnel container
-    if shutil.which("docker"):
-        try:
-            result = subprocess.run(
-                ["docker", "inspect", "-f", "{{.State.Status}}", "agentibridge-tunnel"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                docker_found = True
-                status = result.stdout.strip()
-                print(f"Cloudflare Tunnel: {status} (docker)")
-
-                if status != "running":
-                    print("Container exists but is not running. Check logs:")
-                    print("  docker logs agentibridge-tunnel")
-                    return
-
-                # Read logs to detect mode and URL
-                try:
-                    log_result = subprocess.run(
-                        ["docker", "logs", "--tail", "50", "agentibridge-tunnel"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                except Exception:
-                    print("Could not read tunnel container logs.")
-                    return
-
-                log_output = log_result.stdout + log_result.stderr
-
-                # Quick tunnel — extract URL
-                url = _extract_tunnel_url(log_output)
-                if url:
-                    print("Mode: quick tunnel")
-                    print(f"URL:  {url}")
-                    print()
-                    print("Add to ~/.mcp.json:")
-                    config = {
-                        "mcpServers": {
-                            "agentibridge": {
-                                "type": "http",
-                                "url": f"{url}/sse",
-                            }
-                        }
-                    }
-                    api_keys = os.getenv("AGENTIBRIDGE_API_KEYS", "")
-                    if api_keys:
-                        first_key = api_keys.split(",")[0].strip()
-                        config["mcpServers"]["agentibridge"]["headers"] = {"X-API-Key": first_key}
-                    print(json.dumps(config, indent=2))
-                    print()
-                    print("Test:")
-                    print(f"  curl -s {url}/health")
-                    return
-
-                # Named tunnel (Docker)
-                if "Starting named tunnel" in log_output:
-                    print("Mode: named tunnel")
-                    print("The tunnel is connected via your Cloudflare configuration.")
-                    print("Check your Cloudflare Zero Trust dashboard for the hostname.")
-                    print()
-                    print("Logs:")
-                    print("  docker logs agentibridge-tunnel")
-                    return
-        except Exception:
-            pass
-
-    # Check systemd cloudflared
     if _print_systemd_tunnel_status():
         return
 
-    if not docker_found:
-        print("Cloudflare Tunnel is not running.")
-        print()
-        print("Start a quick tunnel (no Cloudflare account needed):")
-        print("  docker compose --profile tunnel up -d")
-        print()
-        print("Start a named tunnel (persistent hostname):")
-        print("  CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel up -d")
-        print()
-        print("Set up a named tunnel interactively:")
-        print("  agentibridge tunnel setup")
+    print("Cloudflare Tunnel is not running.")
+    print()
+    print("Start a quick tunnel (no Cloudflare account needed):")
+    print("  docker compose --profile tunnel up -d")
+    print()
+    print("Start a named tunnel (persistent hostname):")
+    print("  CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel up -d")
+    print()
+    print("Set up a named tunnel interactively:")
+    print("  agentibridge tunnel setup")
 
     # Unknown state
     print("Tunnel is running but could not determine mode.")
@@ -635,10 +636,10 @@ def _cmd_tunnel_setup() -> None:
     )
 
     # Step 8 — Write config.yml
-    print("Step 8: Writing ~/.cloudflared/config.yml...")
-    config_dir = Path.home() / ".cloudflared"
+    print(f"Step 8: Writing ~/{_CLOUDFLARED_DIR}/{_CLOUDFLARED_CONFIG}...")
+    config_dir = Path.home() / _CLOUDFLARED_DIR
     config_dir.mkdir(exist_ok=True)
-    config_file = config_dir / "config.yml"
+    config_file = config_dir / _CLOUDFLARED_CONFIG
     creds_file = config_dir / f"{tunnel_id}.json"
     port = os.getenv("AGENTIBRIDGE_PORT", "8100")
     desired = (
@@ -750,7 +751,7 @@ def cmd_config(args: argparse.Namespace) -> None:
     for key, default in env_vars:
         val = os.getenv(key, "")
         source = "env" if val else "default"
-        display = val if val else default if default else "(not set)"
+        display = val if val else default if default else _NOT_SET
         print(f"  {key}={display}  [{source}]")
 
 
