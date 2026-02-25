@@ -9,7 +9,7 @@
 #   agentibridge logs -f     # follow logs
 #
 # Manual usage:
-#   cd ~/.config/agentibridge
+#   cd ~/.agentibridge
 #   docker compose up -d
 #
 # With Cloudflare Tunnel:

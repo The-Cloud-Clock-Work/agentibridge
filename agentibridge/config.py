@@ -4,6 +4,17 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
+
+# Load .env files (first found wins; explicit env vars always take precedence)
+_cwd_env = Path.cwd() / ".env"
+_home_env = Path.home() / ".agentibridge" / ".env"
+
+if _cwd_env.exists():
+    load_dotenv(_cwd_env, override=False)
+if _home_env.exists():
+    load_dotenv(_home_env, override=False)
+
 
 def _env_bool(key: str, default: str = "false") -> bool:
     """Parse env var as boolean. Accepts: true/false, 1/0, yes/no."""
