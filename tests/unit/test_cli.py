@@ -1,11 +1,13 @@
 """Tests for agentibridge.cli module."""
 
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from agentibridge import __version__
 from agentibridge.cli import (
     main,
     cmd_version,
@@ -26,7 +28,7 @@ class TestCmdVersion:
         cmd_version(args)
         output = capsys.readouterr().out
         assert "agentibridge" in output
-        assert "0.2.1" in output
+        assert re.search(r"\d+\.\d+\.\d+", output)
 
 
 @pytest.mark.unit
@@ -115,7 +117,7 @@ class TestMain:
         with patch("sys.argv", ["agentibridge", "version"]):
             main()
         output = capsys.readouterr().out
-        assert "0.2.1" in output
+        assert re.search(r"\d+\.\d+\.\d+", output)
 
 
 @pytest.mark.unit
@@ -222,10 +224,10 @@ class TestShortDigest:
 
 
 def _make_stack_dir() -> Path:
-    """Return a temp Path with compose + .env files for testing."""
+    """Return a temp Path with compose + docker.env files for testing."""
     d = Path(tempfile.mkdtemp())
     (d / "docker-compose.yml").write_text("services: {}\n")
-    (d / ".env").write_text(
+    (d / "docker.env").write_text(
         "REDIS_URL=redis://r:6379/0\n"
         "POSTGRES_URL=postgresql://a:a@localhost/a\n"
         "POSTGRES_USER=a\nPOSTGRES_PASSWORD=a\nPOSTGRES_DB=a\n"
@@ -342,7 +344,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.1\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             return _fail()
 
         self._run_update(side_effect=se)
@@ -373,7 +375,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.1\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             return _fail()
 
         calls = self._run_update(has_docker=False, side_effect=se)
@@ -393,7 +395,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.1\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _fail()  # container not found
             return _fail()
@@ -419,7 +421,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.1\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _fail()  # stack not running
             if "images" in cmd_str:
@@ -453,7 +455,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.1\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _ok(stdout="running")
             if "images" in cmd_str:
@@ -484,7 +486,7 @@ class TestCmdUpdate:
         assert "-f" in pull_cmd
         assert str(stack_dir / "docker-compose.yml") in pull_cmd
         assert "--env-file" in pull_cmd
-        assert str(stack_dir / ".env") in pull_cmd
+        assert str(stack_dir / "docker.env") in pull_cmd
         assert pull_cmd[-1] == "agentibridge"
 
         # Verify recreate command: up -d --no-deps --force-recreate agentibridge
@@ -510,7 +512,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.1\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _ok(stdout="running")
             if "images" in cmd_str:

@@ -1,6 +1,6 @@
 # AgentiBridge
 
-### Cloudflare-backed persistent session controller for your Claude Code agents
+### MCP server that indexes your Claude Code sessions — searchable, resumable, dispatchable
 
 ![AgentiBridge - Persistent session controller for your AI Agents](docs/media/agentibridge-readme-banner.jpg)
 
@@ -64,78 +64,45 @@ Then add AgentiBridge to `~/.mcp.json`:
 }
 ```
 
-> If you set `AGENTIBRIDGE_API_KEYS`, add `"headers": {"X-API-Key": "your-key"}` to the block above.
-
-That's it. Your Claude Code sessions are now searchable from any MCP-compatible client.
-
 ---
 
-## Configuration
+## Run Modes
 
-All configuration is done via environment variables. AgentiBridge auto-creates `~/.agentibridge/.env` on first run with a commented template.
+Each mode has its own config file, auto-created from a bundled template. Both can run simultaneously.
 
-**Config resolution order** (first found wins, explicit env vars always override):
+| Mode | Command | Config | Storage |
+|------|---------|--------|---------|
+| **Docker** | `agentibridge run` | `~/.agentibridge/docker.env` | Redis + Postgres (bundled), `TRANSPORT=sse` |
+| **Native** | `python -m agentibridge` | `~/.agentibridge/.env` | Filesystem only (default), `TRANSPORT=stdio` |
 
-1. Explicit env vars (already set in shell/process)
-2. Project-local `.env` (current working directory)
-3. `~/.agentibridge/.env` (canonical user config home)
+**Docker** starts 3 containers (AgentiBridge + Redis + Postgres) with sessions indexed in Redis. **Native** reads raw JSONL files from `~/.claude/projects/` on each call — no external services needed. To add Redis/Postgres in native mode, run them yourself and set `REDIS_URL` / `POSTGRES_URL` in `~/.agentibridge/.env`.
 
-Edit `~/.agentibridge/.env` to configure OAuth, Cloudflare Tunnel, API keys, semantic search, and more. See [Configuration Reference](docs/reference/configuration.md) for all variables.
+See [Configuration Reference](docs/reference/configuration.md) for all variables.
 
 ---
 
 ## CLI Commands
 
-### Stack
-
 | Command | What it does |
 |---------|-------------|
-| `agentibridge run` | Start the stack |
-| `agentibridge run --rebuild` | Force pull and rebuild before starting |
+| `agentibridge run` | Start the Docker stack |
+| `agentibridge run --rebuild` | Force rebuild before starting |
 | `agentibridge stop` | Stop the stack |
 | `agentibridge restart` | Restart the stack |
-| `agentibridge logs` | View recent logs |
-| `agentibridge logs --follow` | Stream logs live |
-
-### Status
-
-| Command | What it does |
-|---------|-------------|
-| `agentibridge status` | Service health, container status, session count |
+| `agentibridge logs` | View recent logs (`--follow` to stream) |
+| `agentibridge status` | Health, containers, session count |
 | `agentibridge version` | Print version |
-| `agentibridge config` | View current configuration |
-| `agentibridge config --generate-env` | Generate a `.env` template |
+| `agentibridge config` | View current config |
+| `agentibridge connect` | Ready-to-paste client configs |
+| `agentibridge tunnel` | Tunnel status and URL |
+| `agentibridge tunnel setup` | Interactive tunnel wizard |
 | `agentibridge help` | Full reference |
 
-### Cloudflare Tunnel
-
-| Command | What it does |
-|---------|-------------|
-| `agentibridge tunnel` | Show tunnel status and current URL |
-| `agentibridge tunnel setup` | Interactive wizard: install, auth, DNS, config |
-
-### Dispatch Bridge
-
-| Command | What it does |
-|---------|-------------|
-| `agentibridge bridge start` | Start the host-side dispatch bridge |
-| `agentibridge bridge stop` | Stop the dispatch bridge |
-| `agentibridge bridge logs` | Tail dispatch bridge logs |
-
-### Client Setup
-
-| Command | What it does |
-|---------|-------------|
-| `agentibridge connect` | Print ready-to-paste configs for all clients |
-| `agentibridge install --docker` | Install systemd service (Docker) |
-| `agentibridge install --native` | Install systemd service (native Python) |
-| `agentibridge locks` | View or clear Redis locks |
+See [CLI Reference](docs/reference/cli-commands.md) for all commands and flags.
 
 ---
 
 ## MCP Tools
-
-### Foundation
 
 | Tool | Example use |
 |------|------------|
@@ -145,65 +112,28 @@ Edit `~/.agentibridge/.env` to configure OAuth, Cloudflare Tunnel, API keys, sem
 | `get_session_actions` | "What tools did I use most in that session?" |
 | `search_sessions` | "Find sessions where I worked on authentication" |
 | `collect_now` | "Refresh the index now" |
-
-### AI-Powered
-
-| Tool | Example use |
-|------|------------|
 | `search_semantic` | "What were my sessions about database migrations?" |
 | `generate_summary` | "Summarize what happened in session abc123" |
-
-> Requires embeddings + LLM configured. See [Semantic Search](docs/architecture/semantic-search.md).
-
-### Dispatch
-
-| Tool | Example use |
-|------|------------|
 | `restore_session` | "Load the context from my last session on this project" |
 | `dispatch_task` | "Continue that refactor task in the background" |
 | `get_dispatch_job` | "What's the status of job xyz?" |
-
-> Requires the dispatch bridge running on the host. See [Session Dispatch](docs/architecture/session-dispatch.md).
-
-### Knowledge Catalog
-
-| Tool | Example use |
-|------|------------|
 | `list_memory_files` | "What memory files exist across my projects?" |
 | `get_memory_file` | "Show me the MEMORY.md for the antoncore project" |
 | `list_plans` | "What plans have I created recently?" |
 | `get_plan` | "Show me the plan called moonlit-rolling-reddy" |
 | `search_history` | "Find prompts where I mentioned docker" |
 
-> Exposes Claude Code's knowledge layer: project memory files, implementation plans, and prompt history.
+> **Note:** `search_semantic` and `generate_summary` require embeddings + LLM — see [Semantic Search](docs/architecture/semantic-search.md). `dispatch_task` and `restore_session` require the dispatch bridge — see [Session Dispatch](docs/architecture/session-dispatch.md). Knowledge catalog tools (`list_memory_files`, `get_memory_file`, `list_plans`, `get_plan`, `search_history`) expose Claude Code's memory files, plans, and prompt history.
 
 ---
 
 ## Configuration
 
-### Remote Access
+Config files are auto-created from bundled templates:
+- **Docker:** `~/.agentibridge/docker.env` (created on first `agentibridge run`)
+- **Native:** `~/.agentibridge/.env` (created on first `import agentibridge`)
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `AGENTIBRIDGE_TRANSPORT` | `stdio` | Set to `sse` for remote clients |
-| `AGENTIBRIDGE_HOST` | `127.0.0.1` | Bind address |
-| `AGENTIBRIDGE_PORT` | `8100` | Listen port |
-| `AGENTIBRIDGE_API_KEYS` | *(empty)* | Comma-separated API keys; empty = no auth |
-
-### Optional Features
-
-| Variable | Purpose |
-|----------|---------|
-| `POSTGRES_URL` | Enables semantic search (pgvector) |
-| `LLM_API_BASE` | OpenAI-compatible embeddings/chat endpoint |
-| `LLM_EMBED_MODEL` | Embedding model (e.g. `text-embedding-3-small`) |
-| `LLM_CHAT_MODEL` | Chat model for summaries (e.g. `gpt-4o-mini`) |
-| `ANTHROPIC_API_KEY` | Preferred for `generate_summary` (falls back to `LLM_CHAT_MODEL`) |
-| `CLAUDE_DISPATCH_URL` | Bridge URL for Docker → host Claude CLI dispatch |
-| `AGENTIBRIDGE_PLANS_DIR` | Plans directory (default: `~/.claude/plans`) |
-| `AGENTIBRIDGE_HISTORY_FILE` | History file (default: `~/.claude/history.jsonl`) |
-
-See [Configuration Reference](docs/reference/configuration.md) for the full list.
+Run `agentibridge config` to view current values. See [Configuration Reference](docs/reference/configuration.md) for all environment variables.
 
 ---
 
@@ -242,28 +172,6 @@ Runs AgentiBridge as a persistent server — access your sessions from any devic
 {
   "mcpServers": {
     "agentibridge": {
-      "type": "http",
-      "url": "https://bridge.yourdomain.com/mcp",
-      "headers": {
-        "X-API-Key": "sk-ab-your-api-key-here"
-      }
-    }
-  }
-}
-```
-
-### Using Both
-
-You can run both side by side — local for low-latency access to your own machine, remote for accessing sessions on another machine or from your phone:
-
-```json
-{
-  "mcpServers": {
-    "agentibridge": {
-      "command": "python",
-      "args": ["-m", "agentibridge"]
-    },
-    "agentibridge-remote": {
       "type": "http",
       "url": "https://bridge.yourdomain.com/mcp",
       "headers": {
@@ -327,16 +235,6 @@ curl https://bridge.yourdomain.com/.well-known/oauth-authorization-server
 curl https://bridge.yourdomain.com/health
 ```
 
-### OAuth Configuration Reference
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OAUTH_ISSUER_URL` | Yes | Public URL of your server (e.g., `https://bridge.yourdomain.com`) |
-| `OAUTH_CLIENT_ID` | No | Pre-configured client ID — disables dynamic registration |
-| `OAUTH_CLIENT_SECRET` | No | Pre-configured client secret (required with `OAUTH_CLIENT_ID`) |
-| `OAUTH_ALLOWED_REDIRECT_URIS` | No | Comma-separated callback URIs (e.g., `https://claude.ai/api/mcp/auth_callback`) |
-| `OAUTH_ALLOWED_SCOPES` | No | Space-separated scopes (claude.ai requests `claudeai`) |
-
 > API key auth (`X-API-Key` header) continues to work alongside OAuth. Both auth methods are active simultaneously.
 
 See [Remote Access & Auth](docs/architecture/remote-access.md) for the full reference.
@@ -367,6 +265,8 @@ curl https://mcp.yourdomain.com/health
 ```
 
 The wizard installs `cloudflared`, authenticates, creates the DNS record, and writes the config. The bridge itself has no domain config — it just listens on `localhost:8100` and the tunnel routes your domain to it.
+
+The wizard writes `CLOUDFLARE_TUNNEL_TOKEN` into `~/.agentibridge/docker.env` automatically. This token authenticates the `cloudflared` container to your Cloudflare tunnel — it's static, so it works permanently across restarts, reboots, and redeployments. It only changes if you delete and recreate the tunnel in the Cloudflare Zero Trust dashboard.
 
 See [Cloudflare Tunnel Guide](docs/deployment/cloudflare-tunnel.md) for full details.
 
@@ -409,7 +309,7 @@ History is the data layer. The product is remote fleet control — dispatch task
 
 **VS Code / Cursor already has conversation history.**
 
-IDE conversation history is excellent for local replay within that IDE. AgentiBridge serves CLI-first developers and adds capabilities no IDE provides: remote multi-client access, background dispatch from any device, and semantic search across your full session history. When you leave your desk, your IDE history can't dispatch a background task from your phone. AgentiBridge can.
+IDE history is local to that IDE. AgentiBridge adds remote multi-client access, background dispatch from any device, and semantic search across your full session history. Leave your desk and dispatch a background task from your phone — your IDE can't do that.
 
 **Won't Anthropic build this natively?**
 
@@ -417,7 +317,7 @@ AgentiBridge is self-hosted, vendor-neutral infrastructure. Native features opti
 
 **Do I need Redis and Postgres?**
 
-No. `pip install agentibridge && agentibridge run` works with zero dependencies — filesystem-only storage out of the box. Add Redis for caching and Postgres for semantic search when you need them.
+Not for basic use. `agentibridge run` bundles Redis and Postgres automatically via Docker — no setup needed. If you run natively (`python -m agentibridge`), it works without either — sessions are read directly from `~/.claude/projects/` JSONL files on each call. This is slower but has zero dependencies. To add Redis or Postgres in native mode, run them yourself and set `REDIS_URL` / `POSTGRES_URL` in `~/.agentibridge/.env`.
 
 **Is my data sent anywhere?**
 

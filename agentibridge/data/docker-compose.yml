@@ -27,7 +27,7 @@ services:
       - ${CLAUDE_PROJECTS_DIR:-~/.claude/projects}:/home/appuser/.claude/projects:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    env_file: .env
+    env_file: docker.env
     networks:
       - sb-network
     depends_on:
@@ -57,7 +57,7 @@ services:
   postgres:
     container_name: agentibridge-postgres
     image: pgvector/pgvector:pg16
-    env_file: .env
+    env_file: docker.env
     volumes:
       - sb_postgres_data:/var/lib/postgresql/data
     networks:

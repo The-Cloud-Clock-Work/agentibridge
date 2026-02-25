@@ -235,7 +235,7 @@ class TranscriptEmbedder:
         """Generate session summary via LLM.
 
         Priority:
-        1. Anthropic SDK (if ANTHROPIC_API_KEY is set)
+        1. Anthropic SDK (if ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is set)
         2. OpenAI-compatible API via llm_client (if LLM_API_BASE is set)
         """
         from agentibridge.store import SessionStore
@@ -297,7 +297,7 @@ class TranscriptEmbedder:
 
         if summary is None:
             return (
-                "Summary generation unavailable: configure ANTHROPIC_API_KEY, LLM_API_BASE, or mount claude CLI binary"
+                "Summary generation unavailable: configure ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL), LLM_API_BASE, or mount claude CLI binary"
             )
 
         # Store summary in session metadata (Redis)

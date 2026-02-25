@@ -242,6 +242,8 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("  LLM_EMBED_MODEL                Embedding model name")
     print("  LLM_CHAT_MODEL                 Chat model for summaries (fallback)")
     print("  ANTHROPIC_API_KEY               Anthropic key for summaries (preferred)")
+    print("  ANTHROPIC_AUTH_TOKEN            Auth token for LLM proxies (alternative)")
+    print("  ANTHROPIC_BASE_URL              Base URL for LLM proxies")
     print("  CLAUDE_BINARY                   Path to Claude CLI (default: claude)")
     print("  CLAUDE_DISPATCH_MODEL           Dispatch model (default: sonnet)")
     print("  CLAUDE_DISPATCH_TIMEOUT         Dispatch timeout in seconds (default: 300)")
@@ -594,6 +596,8 @@ def cmd_config(args: argparse.Namespace) -> None:
         ("LLM_EMBED_MODEL", ""),
         ("LLM_CHAT_MODEL", ""),
         ("ANTHROPIC_API_KEY", ""),
+        ("ANTHROPIC_AUTH_TOKEN", ""),
+        ("ANTHROPIC_BASE_URL", ""),
         ("CLAUDE_BINARY", "claude"),
         ("CLAUDE_DISPATCH_MODEL", "sonnet"),
         ("CLAUDE_DISPATCH_TIMEOUT", "300"),
@@ -914,14 +918,14 @@ _REQUIRED_ENV_VARS = [
 
 
 def _validate_env(env_file: Path) -> None:
-    """Exit with error if any required variable is missing from .env."""
+    """Exit with error if any required variable is missing from docker.env."""
     text = env_file.read_text()
     missing = [v for v in _REQUIRED_ENV_VARS if not re.search(rf"^\s*{v}=", text, re.MULTILINE)]
     if missing:
-        print("ERROR: .env is missing required variables:")
+        print(f"ERROR: {env_file.name} is missing required variables:")
         for v in missing:
             print(f"  • {v}")
-        print(f"\nReference: {env_file.parent / '.env.example'}")
+        print(f"\nReference: {env_file.parent / 'docker.env.example'}")
         sys.exit(1)
 
 
@@ -929,8 +933,8 @@ def _ensure_stack_dir() -> Path:
     """Prepare ~/.agentibridge/ for docker compose operations.
 
     Migrates from legacy ~/.config/agentibridge/ if needed.
-    Copies bundled compose file and .env template on first run.
-    Exits with code 1 if .env was just created (user must edit it first).
+    Copies bundled compose file and docker.env template on first run.
+    Exits with code 1 if docker.env was just created (user must edit it first).
     """
     # Migrate legacy ~/.config/agentibridge/ → ~/.agentibridge/
     if _LEGACY_STACK_DIR.exists() and not _STACK_DIR.exists():
@@ -944,9 +948,23 @@ def _ensure_stack_dir() -> Path:
         shutil.copy2(DATA_DIR / "docker-compose.yml", compose_dest)
         print(f"Created {compose_dest}")
 
-    env_dest = _STACK_DIR / ".env"
+    env_dest = _STACK_DIR / "docker.env"
+
+    # Migration: if .env exists with Docker vars but docker.env doesn't, move it
+    old_env = _STACK_DIR / ".env"
+    if not env_dest.exists() and old_env.exists():
+        old_text = old_env.read_text()
+        if re.search(r"^\s*REDIS_URL=redis://redis", old_text, re.MULTILINE):
+            shutil.move(str(old_env), str(env_dest))
+            print(f"Migrated {old_env} → {env_dest}")
+            # Scaffold a fresh native .env from the bundled template
+            if not old_env.exists():
+                bundled = DATA_DIR / ".env.example"
+                if bundled.exists():
+                    shutil.copy2(str(bundled), str(old_env))
+
     if not env_dest.exists():
-        shutil.copy2(DATA_DIR / ".env.example", env_dest)
+        shutil.copy2(DATA_DIR / "docker.env.example", env_dest)
         print(f"Created {env_dest} — edit it before running again")
         sys.exit(1)
 
@@ -978,7 +996,7 @@ def _compose_cmd(stack_dir: Path) -> list[str]:
         "-f",
         str(stack_dir / "docker-compose.yml"),
         "--env-file",
-        str(stack_dir / ".env"),
+        str(stack_dir / "docker.env"),
     ]
 
 
@@ -1048,7 +1066,7 @@ def _update_docker_stack() -> None:
     """Pull latest image and recreate the agentibridge container."""
     stack_dir = _STACK_DIR
     compose_file = stack_dir / "docker-compose.yml"
-    env_file = stack_dir / ".env"
+    env_file = stack_dir / "docker.env"
 
     if not compose_file.exists() or not env_file.exists():
         print("\n[docker] Stack not initialised — run 'agentibridge run' first")
@@ -1210,13 +1228,13 @@ def cmd_bridge(args: argparse.Namespace) -> None:
     log_file = Path("/tmp/dispatch_bridge.log")
 
     if action == "start":
-        env_file = _STACK_DIR / ".env"
+        env_file = _STACK_DIR / "docker.env"
         if not env_file.exists():
             print(f"ERROR: {env_file} not found. Run 'agentibridge run' first.")
             sys.exit(1)
         secret = _read_env_value("DISPATCH_SECRET", env_file)
         if not secret:
-            print("ERROR: DISPATCH_SECRET not set in .env")
+            print("ERROR: DISPATCH_SECRET not set in docker.env")
             sys.exit(1)
         port = _read_env_value("DISPATCH_BRIDGE_PORT", env_file) or "8101"
 
