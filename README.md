@@ -266,7 +266,7 @@ curl https://mcp.yourdomain.com/health
 
 The wizard installs `cloudflared`, authenticates, creates the DNS record, and writes the config. The bridge itself has no domain config — it just listens on `localhost:8100` and the tunnel routes your domain to it.
 
-The `CLOUDFLARE_TUNNEL_TOKEN` is **static** — set it once in `docker.env` and it works permanently across restarts, reboots, and redeployments. It only changes if you delete and recreate the tunnel in the Cloudflare Zero Trust dashboard.
+The wizard writes `CLOUDFLARE_TUNNEL_TOKEN` into `~/.agentibridge/docker.env` automatically. This token authenticates the `cloudflared` container to your Cloudflare tunnel — it's static, so it works permanently across restarts, reboots, and redeployments. It only changes if you delete and recreate the tunnel in the Cloudflare Zero Trust dashboard.
 
 See [Cloudflare Tunnel Guide](docs/deployment/cloudflare-tunnel.md) for full details.
 
