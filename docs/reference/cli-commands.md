@@ -19,12 +19,12 @@ Start the Docker stack (AgentiBridge + Redis + Postgres).
 agentibridge run [--rebuild]
 ```
 
-On first run, copies the bundled `docker-compose.yml` and `.env.example` template to
-`~/.agentibridge/`. If `.env` does not yet exist the command exits immediately
+On first run, copies the bundled `docker-compose.yml` and `docker.env.example` template to
+`~/.agentibridge/`. If `docker.env` does not yet exist the command exits immediately
 with instructions to edit it before retrying.
 
 Before starting, the command validates that all [required env vars](#env-required-variables)
-are present in `.env`. If any are missing it prints them and exits with code 1.
+are present in `docker.env`. If any are missing it prints them and exits with code 1.
 
 State detection:
 - **running** — prints advisory, pulls latest images, and restarts
@@ -157,7 +157,7 @@ agentibridge bridge start
 ```
 
 Reads `DISPATCH_SECRET` and `DISPATCH_BRIDGE_PORT` (default `8101`) from
-`~/.agentibridge/.env`. If `DISPATCH_SECRET` is not set the command exits
+`~/.agentibridge/docker.env`. If `DISPATCH_SECRET` is not set the command exits
 with an error.
 
 Checks whether an existing bridge process is already running (via `pgrep`) and
@@ -318,26 +318,26 @@ Sections:
 
 ---
 
-## `.env` Required Variables
+## `docker.env` Required Variables
 
 The following variables are validated by `_validate_env` before every
 `run`, `stop`, `restart`, or `logs` invocation. If any are absent the
-command exits with a descriptive error.
+command exits with a descriptive error. These are checked in `~/.agentibridge/docker.env`.
 
 | Variable | Description |
 |----------|-------------|
-| `REDIS_URL` | Redis connection URL (e.g. `redis://localhost:6379/0`) |
+| `REDIS_URL` | Redis connection URL (e.g. `redis://redis:6379/0`) |
 | `POSTGRES_URL` | Postgres connection URL (e.g. `postgresql://user:pass@localhost:5432/db`) |
 | `POSTGRES_USER` | Postgres username |
 | `POSTGRES_PASSWORD` | Postgres password |
 | `POSTGRES_DB` | Postgres database name |
-| `AGENTIBRIDGE_TRANSPORT` | Transport mode: `stdio` or `sse` |
+| `AGENTIBRIDGE_TRANSPORT` | Transport mode (should be `sse` for Docker) |
 | `AGENTIBRIDGE_PORT` | HTTP port for SSE transport (e.g. `8100`) |
 
 Generate a fully-annotated template:
 
 ```bash
-agentibridge config --generate-env > ~/.agentibridge/.env
+agentibridge config --generate-env > ~/.agentibridge/docker.env
 ```
 
 See [Configuration](configuration.md) for the complete list of optional variables.

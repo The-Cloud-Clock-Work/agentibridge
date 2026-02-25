@@ -138,7 +138,10 @@ LLM_API_KEY=your-api-key
 LLM_EMBED_MODEL=text-embedding-3-small
 LLM_CHAT_MODEL=gpt-4o-mini
 
-# Required for summary generation (preferred over LLM_CHAT_MODEL):
+# Summary generation — set ONE of these:
+#   Direct API:  ANTHROPIC_API_KEY=sk-ant-xxxxx
+#   LLM proxy:   ANTHROPIC_AUTH_TOKEN=your-proxy-token
+#                ANTHROPIC_BASE_URL=https://your-proxy.example.com
 ANTHROPIC_API_KEY=...
 ```
 

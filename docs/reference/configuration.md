@@ -7,23 +7,41 @@ nav_order: 2
 
 This document provides a comprehensive reference for all AgentiBridge configuration options.
 
-## Config File Location
+## Config File Locations
 
-AgentiBridge auto-creates `~/.agentibridge/.env` on first run with a commented template. Edit this file to configure your deployment.
+Each run mode has its own config file in `~/.agentibridge/`:
 
-**Config resolution order** (first found wins, explicit env vars always override):
+| File | Purpose | Created by |
+|------|---------|------------|
+| `~/.agentibridge/.env` | Native mode config | Auto-created on first `import agentibridge` |
+| `~/.agentibridge/docker.env` | Docker mode config | Auto-created on first `agentibridge run` |
+
+**Native mode config resolution** (first found wins, explicit env vars always override):
 
 1. Explicit env vars (already set in shell/process)
 2. Project-local `.env` (current working directory)
 3. `~/.agentibridge/.env` (canonical user config home)
 
+## Run Modes and Storage
+
+AgentiBridge has two run modes that can run simultaneously without conflict:
+
+| Mode | Command | Config file | Storage | Setup |
+|------|---------|-------------|---------|-------|
+| **Docker** | `agentibridge run` | `docker.env` | Redis + Postgres (bundled) | Zero config — compose starts all 3 containers |
+| **Native** | `python -m agentibridge` | `.env` | Filesystem only (default) | No external services needed |
+
+**Docker mode** uses `~/.agentibridge/docker.env` (transport=sse, Redis, Postgres). The collector daemon indexes transcripts into Redis in the background. Tool calls read from Redis — fast, paginated, with time-range filters.
+
+**Native mode** uses `~/.agentibridge/.env` (transport=stdio, no Redis by default). Every tool call (`list_sessions`, `search_sessions`, `get_session`, etc.) reads and parses the raw JSONL files from `~/.claude/projects/` directly. This works but is slower and re-parses files on every call. To add Redis in native mode, run your own instance and set `REDIS_URL` in `.env`.
+
 ## Environment Variables
 
-### Redis Configuration
+### Storage — Redis
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REDIS_URL` | _(none)_ | Redis connection URL (e.g., `redis://localhost:6379/0`). If not set, falls back to filesystem-only storage |
+| `REDIS_URL` | _(none)_ | Redis connection URL (e.g., `redis://localhost:6379/0`). When set, sessions are indexed in Redis for fast access. When unset, every tool call re-parses raw JSONL files from disk. In Docker mode this is set automatically. |
 | `REDIS_KEY_PREFIX` | `agentibridge` | Namespace prefix for all Redis keys (format: `{prefix}:sb:{key}`) |
 
 ### Transport Configuration
@@ -43,12 +61,14 @@ AgentiBridge auto-creates `~/.agentibridge/.env` on first run with a commented t
 | `AGENTIBRIDGE_MAX_ENTRIES` | `500` | Maximum transcript entries to store per session in Redis. `0` = unlimited (use with caution) |
 | `AGENTIBRIDGE_PROJECTS_DIR` | `~/.claude/projects` | Directory where Claude Code stores session transcripts |
 
-### Database Configuration (Phase 2)
+### Storage — Postgres + pgvector (semantic search)
+
+Required for the `search_semantic` and `generate_summary` tools. Without Postgres, keyword search (`search_sessions`) still works. In Docker mode, Postgres is bundled (`pgvector/pgvector:pg16` image). In native mode, run your own Postgres with pgvector and set the URL below.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTIBRIDGE_EMBEDDING_ENABLED` | `false` | Enable semantic search. Requires `POSTGRES_URL` and LLM embedding config. Must be explicitly set to `true` |
-| `POSTGRES_URL` | _(none)_ | PostgreSQL connection URL with pgvector extension (e.g., `postgresql://user:pass@localhost:5432/agentibridge`). Also accepted as `DATABASE_URL` |
+| `POSTGRES_URL` | _(none)_ | PostgreSQL connection URL with pgvector extension (e.g., `postgresql://user:pass@localhost:5432/agentibridge`). Also accepted as `DATABASE_URL`. In Docker mode this is set automatically. |
 | `PGVECTOR_DIMENSIONS` | `1536` | Embedding vector dimensions. Must match your embedding model (e.g., 1536 for `text-embedding-3-small`) |
 
 ### LLM Configuration
@@ -56,12 +76,14 @@ AgentiBridge auto-creates `~/.agentibridge/.env` on first run with a commented t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | _(none)_ | Anthropic API key for session summary generation (preferred). Uses Claude via official SDK |
+| `ANTHROPIC_AUTH_TOKEN` | _(none)_ | Auth token for LLM proxies (LiteLLM, OpenRouter, etc.). Alternative to `ANTHROPIC_API_KEY` — the SDK resolves both automatically |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Base URL for the Anthropic SDK. Set when using an LLM proxy alongside `ANTHROPIC_AUTH_TOKEN` |
 | `LLM_API_BASE` | _(none)_ | OpenAI-compatible API base URL for embeddings and chat (e.g., `http://localhost:11434/v1` for Ollama) |
 | `LLM_API_KEY` | _(none)_ | API key for the LLM endpoint |
 | `LLM_EMBED_MODEL` | _(none)_ | Embedding model name (e.g., `text-embedding-3-small`, `mxbai-embed-large`) |
 | `LLM_CHAT_MODEL` | _(none)_ | Chat model for summaries if `ANTHROPIC_API_KEY` is not set (e.g., `gpt-4o-mini`, `llama3`) |
-| `CF_ACCESS_CLIENT_ID` | _(none)_ | Cloudflare Access service-token ID. Adds `CF-Access-Client-Id` header to LLM API requests |
-| `CF_ACCESS_CLIENT_SECRET` | _(none)_ | Cloudflare Access service-token secret. Adds `CF-Access-Client-Secret` header to LLM API requests |
+| `CF_ACCESS_CLIENT_ID` | _(none)_ | Cloudflare Access service-token ID. Only needed when your LLM proxy is behind Cloudflare Access Zero Trust (not an AgentiBridge feature — see [Cloudflare Tunnel Guide](../deployment/cloudflare-tunnel.md#fix-3--cloudflare-access-service-token-for-llm-backend-behind-access)) |
+| `CF_ACCESS_CLIENT_SECRET` | _(none)_ | Cloudflare Access service-token secret. Paired with `CF_ACCESS_CLIENT_ID` for outbound LLM API requests through Cloudflare Access |
 
 ### OAuth 2.1 Configuration (Optional)
 
@@ -234,17 +256,16 @@ All Redis keys follow the pattern: `{REDIS_KEY_PREFIX}:sb:{suffix}`
 
 ## Docker Compose Overrides
 
-The `docker-compose.yml` sets these defaults:
+The `docker-compose.yml` reads from `docker.env` (not `.env`). The bundled `docker.env` template sets these defaults:
 
-```yaml
-environment:
-  REDIS_URL: redis://redis:6379/0
-  AGENTIBRIDGE_TRANSPORT: sse
-  AGENTIBRIDGE_HOST: 0.0.0.0
-  AGENTIBRIDGE_PORT: 8100
+```bash
+REDIS_URL=redis://redis:6379/0
+AGENTIBRIDGE_TRANSPORT=sse
+AGENTIBRIDGE_HOST=0.0.0.0
+AGENTIBRIDGE_PORT=8100
 ```
 
-Override by creating a `.env` file in the project root or exporting variables before running `docker compose`.
+Override by editing `~/.agentibridge/docker.env` or exporting variables before running `agentibridge run`.
 
 ## See Also
 

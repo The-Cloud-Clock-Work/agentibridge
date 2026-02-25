@@ -222,10 +222,10 @@ class TestShortDigest:
 
 
 def _make_stack_dir() -> Path:
-    """Return a temp Path with compose + .env files for testing."""
+    """Return a temp Path with compose + docker.env files for testing."""
     d = Path(tempfile.mkdtemp())
     (d / "docker-compose.yml").write_text("services: {}\n")
-    (d / ".env").write_text(
+    (d / "docker.env").write_text(
         "REDIS_URL=redis://r:6379/0\n"
         "POSTGRES_URL=postgresql://a:a@localhost/a\n"
         "POSTGRES_USER=a\nPOSTGRES_PASSWORD=a\nPOSTGRES_DB=a\n"
@@ -484,7 +484,7 @@ class TestCmdUpdate:
         assert "-f" in pull_cmd
         assert str(stack_dir / "docker-compose.yml") in pull_cmd
         assert "--env-file" in pull_cmd
-        assert str(stack_dir / ".env") in pull_cmd
+        assert str(stack_dir / "docker.env") in pull_cmd
         assert pull_cmd[-1] == "agentibridge"
 
         # Verify recreate command: up -d --no-deps --force-recreate agentibridge
