@@ -142,49 +142,58 @@ check_search_history() {
 
 # ── Test cases ──────────────────────────────────────────────────────────────
 
-echo "Running ${TOTAL} MCP smoke tests..."
+DELAY=${SMOKE_TEST_DELAY:-3}
+echo "Running ${TOTAL} MCP smoke tests (delay=${DELAY}s)..."
 echo ""
 
 # Test 1: list_sessions — basic
 run_test 1 "list_sessions" \
   "Use the list_sessions MCP tool with limit=3. Show the raw result." \
   check_list_sessions
+sleep "$DELAY"
 
 # Test 2: list_sessions with project filter
 run_test 2 "list_sessions (filtered)" \
   "Use the list_sessions MCP tool with project='agentic' and limit=3. Show the raw result." \
   check_list_sessions_filtered
+sleep "$DELAY"
 
 # Test 3: get_session — fetch a full session
 # We ask Claude to first list, then get, in one prompt
 run_test 3 "get_session" \
   "First call list_sessions with limit=1 to get a session_id, then call get_session with that session_id and last_n=5. Show the get_session result." \
   check_get_session
+sleep "$DELAY"
 
 # Test 4: search_sessions — keyword search
 run_test 4 "search_sessions" \
   "Use the search_sessions MCP tool with query='test' and limit=3. Show the raw result." \
   check_search_sessions
+sleep "$DELAY"
 
 # Test 5: get_session_actions — tool call extraction
 run_test 5 "get_session_actions" \
   "First call list_sessions with limit=1 to get a session_id, then call get_session_actions with that session_id. Show the result." \
   check_get_session_actions
+sleep "$DELAY"
 
 # Test 6: collect_now — trigger collection
 run_test 6 "collect_now" \
   "Use the collect_now MCP tool to trigger immediate collection. Show the raw result." \
   check_collect_now
+sleep "$DELAY"
 
 # Test 7: list_memory_files — Phase 5
 run_test 7 "list_memory_files" \
   "Use the list_memory_files MCP tool. Show the raw result." \
   check_list_memory_files
+sleep "$DELAY"
 
 # Test 8: list_plans — Phase 5
 run_test 8 "list_plans" \
   "Use the list_plans MCP tool with limit=3. Show the raw result." \
   check_list_plans
+sleep "$DELAY"
 
 # Test 9: search_history — Phase 5
 run_test 9 "search_history" \
