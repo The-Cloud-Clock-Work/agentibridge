@@ -23,20 +23,7 @@ jobs:
           BASE_URL: ${{ vars.ANTHROPIC_URL_BASE }}
           FALLBACK_URL: ${{ vars.ANTHROPIC_URL_FALLBACK }}
         run: |
-          # Try FALLBACK first (direct API), then BASE (proxy)
-          echo "Probing FALLBACK: ${FALLBACK_URL}"
-          HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "${FALLBACK_URL}" 2>/dev/null || true)
-          echo "  HTTP status: ${HTTP_CODE}"
-
-          if [[ "$HTTP_CODE" != "000" && -n "$HTTP_CODE" ]]; then
-            echo "FALLBACK endpoint reachable"
-            echo "selected=fallback" >> "$GITHUB_OUTPUT"
-            echo "url=${FALLBACK_URL}" >> "$GITHUB_OUTPUT"
-            echo "model=${{ vars.ANTHROPIC_MODEL_FALLBACK }}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "FALLBACK unreachable, trying BASE: ${BASE_URL}"
+          echo "Probing BASE: ${BASE_URL}"
           HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "${BASE_URL}" 2>/dev/null || true)
           echo "  HTTP status: ${HTTP_CODE}"
 
@@ -45,6 +32,18 @@ jobs:
             echo "selected=base" >> "$GITHUB_OUTPUT"
             echo "url=${BASE_URL}" >> "$GITHUB_OUTPUT"
             echo "model=${{ vars.ANTHROPIC_MODEL_BASE }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "BASE unreachable, trying FALLBACK: ${FALLBACK_URL}"
+          HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "${FALLBACK_URL}" 2>/dev/null || true)
+          echo "  HTTP status: ${HTTP_CODE}"
+
+          if [[ "$HTTP_CODE" != "000" && -n "$HTTP_CODE" ]]; then
+            echo "FALLBACK endpoint reachable"
+            echo "selected=fallback" >> "$GITHUB_OUTPUT"
+            echo "url=${FALLBACK_URL}" >> "$GITHUB_OUTPUT"
+            echo "model=${{ vars.ANTHROPIC_MODEL_FALLBACK }}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -128,17 +127,6 @@ jobs:
           jq -n --arg url "http://localhost:8100/mcp" --arg key "$MCP_API_KEY" \
             '{mcpServers:{"agentibridge":{type:"http",url:$url,headers:{"X-API-Key":$key}}}}' \
             > .mcp.json
-
-      # ── Sanity check: LLM reachable ─────────────────────────────────────
-      - name: Verify LLM connection
-        env:
-          ANTHROPIC_API_KEY: ${{ steps.resolve_key.outputs.api_key }}
-          ANTHROPIC_BASE_URL: ${{ steps.anthropic.outputs.url }}
-          CLAUDE_MODEL: ${{ steps.anthropic.outputs.model }}
-        run: |
-          echo "Testing LLM at ${ANTHROPIC_BASE_URL} with model ${CLAUDE_MODEL}..."
-          RESULT=$(claude -p "Say exactly: LLM OK" --output-format json --dangerously-skip-permissions --max-turns 1 ${CLAUDE_MODEL:+--model $CLAUDE_MODEL} 2>&1) || true
-          echo "$RESULT" | jq 'del(.usage)' 2>/dev/null || echo "$RESULT"
 
       # ── Run smoke tests ─────────────────────────────────────────────────
       - name: Run smoke tests
