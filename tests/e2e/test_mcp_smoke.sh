@@ -74,13 +74,12 @@ run_test() {
     PASS=$((PASS + 1))
   else
     echo "[${num}/${TOTAL}] FAIL  ${name}"
-    local subtype
-    subtype=$(echo "$raw" | jq -r '.subtype // empty' 2>/dev/null) || subtype=""
-    [[ -n "$subtype" ]] && echo "  subtype: ${subtype}"
-    echo "  result:  ${result:0:500}"
+    # Dump full JSON minus verbose usage block for diagnosis
+    echo "  json:"
+    echo "$raw" | jq 'del(.usage)' 2>/dev/null || echo "  raw: ${raw:0:1000}"
     local stderr_content
     stderr_content=$(head -20 "$stderr_file" 2>/dev/null)
-    [[ -n "$stderr_content" ]] && echo "  stderr:  ${stderr_content}"
+    [[ -n "$stderr_content" ]] && echo "  stderr: ${stderr_content}"
     FAIL=$((FAIL + 1))
   fi
   rm -f "$stderr_file"
