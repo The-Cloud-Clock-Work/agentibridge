@@ -134,6 +134,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ steps.resolve_key.outputs.api_key }}
           ANTHROPIC_BASE_URL: ${{ steps.anthropic.outputs.url }}
           CLAUDE_MODEL: ${{ steps.anthropic.outputs.model }}
+          ANTHROPIC_CUSTOM_HEADERS: '{"CF-Access-Client-Id":"${{ secrets.CF_ACCESS_CLIENT_ID }}","CF-Access-Client-Secret":"${{ secrets.CF_ACCESS_CLIENT_SECRET }}"}'
         run: |
           echo "Endpoint: ${ANTHROPIC_BASE_URL}"
           echo "Model:    ${CLAUDE_MODEL}"
