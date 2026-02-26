@@ -59,9 +59,10 @@ echo ""
 
 run_test() {
   local num="$1" name="$2" prompt="$3" check_fn="$4"
-  local raw result
+  local raw result stderr_file
+  stderr_file=$(mktemp)
 
-  raw=$($CLAUDE_CMD "$prompt" 2>/dev/null) || true
+  raw=$($CLAUDE_CMD "$prompt" 2>"$stderr_file") || true
 
   # claude --output-format json wraps output in {"type":"result","result":"..."}
   # Extract the inner result text; on error responses, result may be empty
@@ -73,9 +74,16 @@ run_test() {
     PASS=$((PASS + 1))
   else
     echo "[${num}/${TOTAL}] FAIL  ${name}"
-    echo "  output:  ${result:0:300}"
+    local subtype
+    subtype=$(echo "$raw" | jq -r '.subtype // empty' 2>/dev/null) || subtype=""
+    [[ -n "$subtype" ]] && echo "  subtype: ${subtype}"
+    echo "  result:  ${result:0:500}"
+    local stderr_content
+    stderr_content=$(head -20 "$stderr_file" 2>/dev/null)
+    [[ -n "$stderr_content" ]] && echo "  stderr:  ${stderr_content}"
     FAIL=$((FAIL + 1))
   fi
+  rm -f "$stderr_file"
 }
 
 # ── Check functions ─────────────────────────────────────────────────────────
