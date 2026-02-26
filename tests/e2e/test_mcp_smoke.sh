@@ -18,7 +18,7 @@ cd "$(dirname "$0")/../.."
 PASS=0
 FAIL=0
 TOTAL=9
-MAX_RETRIES=${SMOKE_TEST_RETRIES:-3}
+MAX_RETRIES=${SMOKE_TEST_RETRIES:-2}
 
 CLAUDE_CMD="claude -p --dangerously-skip-permissions --output-format json --max-turns 3"
 [[ -n "${CLAUDE_MODEL:-}" ]] && CLAUDE_CMD="${CLAUDE_CMD} --model ${CLAUDE_MODEL}"
@@ -58,19 +58,29 @@ echo ""
 
 # ── Test runner ─────────────────────────────────────────────────────────────
 
+LAST_ERROR=""
+
 _invoke_claude() {
   local prompt="$1" check_fn="$2"
-  local raw result
+  local raw result stderr_file
 
-  raw=$($CLAUDE_CMD "$prompt" 2>/dev/null) || true
+  stderr_file=$(mktemp)
+  raw=$($CLAUDE_CMD "$prompt" 2>"$stderr_file") || true
+  local stderr_out
+  stderr_out=$(cat "$stderr_file" 2>/dev/null)
+  rm -f "$stderr_file"
 
   # claude --output-format json wraps output in {"type":"result","result":"..."}
   result=$(echo "$raw" | jq -r '.result // .error // empty' 2>/dev/null) || result=""
   [[ -z "$result" ]] && result="$raw"
 
-  # Check for transient errors that should be retried
+  # Stash error info for diagnostics
   local subtype
   subtype=$(echo "$raw" | jq -r '.subtype // empty' 2>/dev/null) || subtype=""
+  LAST_ERROR="subtype=${subtype:-none} result=${result:0:200}"
+  [[ -n "$stderr_out" ]] && LAST_ERROR="${LAST_ERROR} stderr=${stderr_out:0:200}"
+
+  # Check for transient errors that should be retried
   if [[ "$subtype" == "error_during_execution" ]]; then
     return 2  # signal: retryable error
   fi
@@ -84,8 +94,6 @@ _invoke_claude() {
     return 0  # pass
   fi
 
-  # Real failure — print diagnostics
-  echo "  output: ${result:0:300}"
   return 1
 }
 
@@ -110,8 +118,9 @@ run_test() {
       continue
     fi
 
-    # Final failure
+    # Final failure — show diagnostics
     echo "[${num}/${TOTAL}] FAIL  ${name}"
+    echo "  ${LAST_ERROR}"
     FAIL=$((FAIL + 1))
     return
   done
