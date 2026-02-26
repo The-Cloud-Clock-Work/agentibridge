@@ -73,7 +73,16 @@ run_test() {
     PASS=$((PASS + 1))
   else
     echo "[${num}/${TOTAL}] FAIL  ${name}"
-    echo "  output (first 500 chars): ${result:0:500}"
+    # Try to extract error details from claude JSON output
+    local subtype error_detail
+    subtype=$(echo "$raw" | jq -r '.subtype // empty' 2>/dev/null) || subtype=""
+    error_detail=$(echo "$raw" | jq -r '.result // empty' 2>/dev/null) || error_detail=""
+    if [[ -n "$subtype" ]]; then
+      echo "  subtype: ${subtype}"
+      echo "  result:  ${error_detail:0:500}"
+    else
+      echo "  output:  ${result:0:500}"
+    fi
     FAIL=$((FAIL + 1))
   fi
 }
