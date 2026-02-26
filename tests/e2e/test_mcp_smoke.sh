@@ -18,7 +18,7 @@ cd "$(dirname "$0")/../.."
 PASS=0
 FAIL=0
 TOTAL=9
-MAX_RETRIES=${SMOKE_TEST_RETRIES:-2}
+MAX_RETRIES=${SMOKE_TEST_RETRIES:-3}
 
 CLAUDE_CMD="claude -p --dangerously-skip-permissions --output-format json --max-turns 3"
 [[ -n "${CLAUDE_MODEL:-}" ]] && CLAUDE_CMD="${CLAUDE_CMD} --model ${CLAUDE_MODEL}"
@@ -68,10 +68,15 @@ _invoke_claude() {
   result=$(echo "$raw" | jq -r '.result // .error // empty' 2>/dev/null) || result=""
   [[ -z "$result" ]] && result="$raw"
 
-  # Check for transient proxy error (error_during_execution with no result)
+  # Check for transient errors that should be retried
   local subtype
   subtype=$(echo "$raw" | jq -r '.subtype // empty' 2>/dev/null) || subtype=""
   if [[ "$subtype" == "error_during_execution" ]]; then
+    return 2  # signal: retryable error
+  fi
+
+  # LiteLLM key cache can take time to warm — treat auth errors as retryable
+  if echo "$result" | grep -qiE "(401|Authentication Error|Failed to authenticate)"; then
     return 2  # signal: retryable error
   fi
 
