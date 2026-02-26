@@ -70,11 +70,11 @@ run_test() {
 
   if $check_fn "$result" >/dev/null 2>&1; then
     echo "[${num}/${TOTAL}] PASS  ${name}"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "[${num}/${TOTAL}] FAIL  ${name}"
     echo "  output (first 200 chars): ${result:0:200}"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
