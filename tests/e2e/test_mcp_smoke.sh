@@ -64,8 +64,8 @@ run_test() {
   raw=$($CLAUDE_CMD "$prompt" 2>/dev/null) || true
 
   # claude --output-format json wraps output in {"type":"result","result":"..."}
-  # Extract the inner result text, then try to parse as JSON
-  result=$(echo "$raw" | jq -r '.result // empty' 2>/dev/null) || result=""
+  # Extract the inner result text; on error responses, result may be empty
+  result=$(echo "$raw" | jq -r '.result // .error // empty' 2>/dev/null) || result=""
   [[ -z "$result" ]] && result="$raw"
 
   if $check_fn "$result" >/dev/null 2>&1; then
@@ -73,7 +73,7 @@ run_test() {
     PASS=$((PASS + 1))
   else
     echo "[${num}/${TOTAL}] FAIL  ${name}"
-    echo "  output (first 200 chars): ${result:0:200}"
+    echo "  output (first 500 chars): ${result:0:500}"
     FAIL=$((FAIL + 1))
   fi
 }
