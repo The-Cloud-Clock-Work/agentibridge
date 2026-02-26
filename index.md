@@ -38,6 +38,35 @@ It indexes every Claude Code transcript automatically, makes them searchable wit
 
 ---
 
+## AgentiBridge vs Anthropic Remote Control
+
+Anthropic's [Remote Control](https://code.claude.com/docs/en/remote-control) (Feb 2026) continues **one live session** from your phone. AgentiBridge is the **other 90%** of remote agent control:
+
+| | Remote Control | AgentiBridge |
+|---|---|---|
+| **What it does** | Continue one live session from phone/browser | Index all past sessions, search, dispatch new ones |
+| **Session scope** | 1 active session | All sessions across all projects |
+| **Search** | None | Keyword + semantic search |
+| **Memory/Plans** | None | Catalog memory files, plans, history |
+| **Dispatch** | None | Fire-and-forget background task dispatch |
+| **Context restore** | Only the live session | Restore any past session's context |
+| **Multi-client** | claude.ai + Claude app only | Claude Code, claude.ai, ChatGPT, Grok, any MCP client |
+| **Runs where** | Local terminal (must stay open) | MCP server (Docker/stdio), works offline |
+| **Auth** | Pro/Max subscription | Self-hosted, no subscription needed |
+
+**Bottom line:** Remote Control is a "remote desktop for one session." AgentiBridge is a **knowledge base and orchestration layer** across all sessions. They're complementary, not competitive.
+
+---
+
+## See It In Action
+
+![claude.ai using AgentiBridge list_sessions tool](docs/media/examples/claude-ai-list-sessions.jpg){: .d-block .mx-auto .mb-4 }
+
+AgentiBridge works from Claude Code CLI, claude.ai, ChatGPT, and any MCP client. [See more screenshots &rarr;](docs/examples)
+{: .fs-5 .text-center .text-grey-dk-100 .mb-6 }
+
+---
+
 ## Features
 
 <div class="feature-grid">
@@ -275,6 +304,12 @@ No. `pip install agentibridge && agentibridge run` works with zero dependencies 
 <summary><strong>Is my data sent anywhere?</strong></summary>
 
 No. No telemetry, no SaaS dependencies. Cloudflare Tunnel is opt-in, and even then only MCP tool responses traverse the tunnel — your transcripts stay local.
+</details>
+
+<details markdown="block">
+<summary><strong>How is this different from Anthropic's Remote Control?</strong></summary>
+
+Remote Control continues one active Claude Code session from your phone — great for live interaction. AgentiBridge indexes all past sessions, adds semantic search, background dispatch, context restore, and multi-client support. They solve different problems and work great together.
 </details>
 
 <details markdown="block">
