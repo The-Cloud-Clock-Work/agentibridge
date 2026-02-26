@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
-    inputs:
-      mcp_url:
-        description: "Override MCP server URL (leave empty to use MCP_SERVER_URL variable)"
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -68,6 +63,58 @@ jobs:
             echo "api_key=${TOKEN_FALLBACK}" >> "$GITHUB_OUTPUT"
           fi
 
+      # ── Clone test dataset ──────────────────────────────────────────────
+      - name: Clone test dataset
+        uses: actions/checkout@v4
+        with:
+          repository: The-Cloud-Clock-Work/bridge-smoke-dataset
+          token: ${{ secrets.ORG_GITHUB_TOKEN }}
+          path: bridge-smoke-dataset
+
+      # ── Start local Docker stack ────────────────────────────────────────
+      - name: Generate auth key and create .env
+        id: auth
+        run: |
+          MCP_API_KEY=$(openssl rand -hex 16)
+          echo "mcp_api_key=${MCP_API_KEY}" >> "$GITHUB_OUTPUT"
+          cp .env.example .env
+          echo "CLAUDE_DIR=${{ github.workspace }}/bridge-smoke-dataset/.claude" >> .env
+          echo "AGENTIBRIDGE_API_KEYS=${MCP_API_KEY}" >> .env
+
+      - name: Start Docker Compose
+        run: docker compose up --build -d
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 60); do
+            if docker inspect -f '{{.State.Running}}' agentibridge 2>/dev/null | grep -q true; then
+              echo "Container running"
+              break
+            fi
+            sleep 1
+          done
+          for i in $(seq 1 30); do
+            if docker exec agentibridge python3 -c "from agentibridge.redis_client import get_redis; r=get_redis(); print(r.ping())" 2>/dev/null | grep -q True; then
+              echo "Redis connected"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Trigger initial collection
+        run: |
+          docker exec agentibridge python3 -c "
+          import sys; sys.path.insert(0, '/app')
+          import os; os.environ['AGENTIBRIDGE_ENABLED'] = 'false'
+          from agentibridge.collector import SessionCollector
+          from agentibridge.store import SessionStore
+          store = SessionStore()
+          c = SessionCollector(store)
+          stats = c.collect_once()
+          print(f'Collected: {stats}')
+          assert stats['files_scanned'] >= 4, f'Expected >=4 files, got {stats[\"files_scanned\"]}'
+          "
+
       # ── Install Claude CLI ──────────────────────────────────────────────
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
@@ -75,15 +122,9 @@ jobs:
       # ── Generate .mcp.json ──────────────────────────────────────────────
       - name: Generate .mcp.json
         env:
-          MCP_URL: ${{ inputs.mcp_url || vars.MCP_SERVER_URL }}
-          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          MCP_API_KEY: ${{ steps.auth.outputs.mcp_api_key }}
         run: |
-          if [[ -z "$MCP_URL" ]]; then
-            echo "::error::MCP_SERVER_URL variable not set and no mcp_url input provided"
-            exit 1
-          fi
-          echo "MCP server: ${MCP_URL}"
-          jq -n --arg url "$MCP_URL" --arg key "$MCP_API_KEY" \
+          jq -n --arg url "http://localhost:8100/mcp" --arg key "$MCP_API_KEY" \
             '{mcpServers:{"agentibridge":{type:"http",url:$url,headers:{"X-API-Key":$key}}}}' \
             > .mcp.json
 
@@ -99,3 +140,12 @@ jobs:
           echo ""
           chmod +x tests/e2e/test_mcp_smoke.sh
           ./tests/e2e/test_mcp_smoke.sh
+
+      # ── Diagnostics ─────────────────────────────────────────────────────
+      - name: Show container logs
+        if: always()
+        run: docker compose logs --tail=100
+
+      - name: Stop Docker stack
+        if: always()
+        run: docker compose down
