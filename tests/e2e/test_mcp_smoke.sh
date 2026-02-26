@@ -80,6 +80,8 @@ run_test() {
     if [[ -n "$subtype" ]]; then
       echo "  subtype: ${subtype}"
       echo "  result:  ${error_detail:0:500}"
+      # Dump all top-level fields except usage for debugging
+      echo "  raw keys: $(echo "$raw" | jq -c 'del(.usage)' 2>/dev/null)"
     else
       echo "  output:  ${result:0:500}"
     fi
