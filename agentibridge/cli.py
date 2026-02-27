@@ -35,6 +35,7 @@ from pathlib import Path
 DATA_DIR = Path(__file__).parent / "data"
 _DOCKER_ENV = "docker.env"
 _DOCKER_PS_FORMAT = "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+_BRIDGE_LOG_FILE = Path("/tmp/dispatch_bridge.log")
 _CLOUDFLARED_DIR = ".cloudflared"
 _CLOUDFLARED_CONFIG = "config.yml"
 _NOT_SET = "(not set)"
@@ -1495,7 +1496,7 @@ def _read_env_value(key: str, env_file: Path) -> str | None:
 def cmd_bridge(args: argparse.Namespace) -> None:
     """Manage the dispatch bridge (host-side Claude CLI proxy)."""
     action = args.action
-    log_file = Path("/tmp/dispatch_bridge.log")
+    log_file = _BRIDGE_LOG_FILE
 
     if action == "start":
         env_file = _STACK_DIR / _DOCKER_ENV

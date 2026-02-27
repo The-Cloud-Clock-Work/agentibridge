@@ -490,17 +490,9 @@ class TestDispatchBridgeApp:
         )
         payload = json.dumps({"prompt": "Hello", "model": "sonnet", "timeout": 60}).encode()
 
-        mock_result = ClaudeResult(
-            success=True,
-            result="Done!",
-            session_id="s1",
-            exit_code=0,
-            duration_ms=100,
-        )
-
         with (
             patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret"}),
-            patch("agentibridge.dispatch_bridge.run_claude", new_callable=AsyncMock, return_value=mock_result),
+            patch("agentibridge.dispatch_bridge._run_bridge_job", new_callable=AsyncMock),
         ):
             responses = asyncio.run(self._call_app(scope, payload))
 
@@ -976,7 +968,10 @@ class TestResumeSession:
             }
         ).encode()
 
-        mock_result = ClaudeResult(success=True, result="pong", session_id="sess-abc", exit_code=0)
+        captured = {}
+
+        async def capture_bridge_job(job_id, prompt, model, max_seconds, output_format, resume_session_id):
+            captured["resume_session_id"] = resume_session_id
 
         async def run():
             from agentibridge.dispatch_bridge import app
@@ -991,11 +986,7 @@ class TestResumeSession:
 
             with (
                 patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret"}),
-                patch(
-                    "agentibridge.dispatch_bridge.run_claude",
-                    new_callable=AsyncMock,
-                    return_value=mock_result,
-                ),
+                patch("agentibridge.dispatch_bridge._run_bridge_job", side_effect=capture_bridge_job),
             ):
                 await app(scope, receive, send)
                 return responses
@@ -1006,6 +997,7 @@ class TestResumeSession:
         assert status == 202
         assert "job_id" in body
         assert body["status"] == "running"
+        assert captured["resume_session_id"] == "sess-abc"
 
 
 # ===========================================================================
@@ -1206,11 +1198,9 @@ class TestRawDispatchHandler:
         writer = _make_writer()
         body = json.dumps({"prompt": "Hello", "timeout": 60}).encode()
 
-        mock_result = ClaudeResult(success=True, result="ok", exit_code=0)
-
         with (
             patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret"}),
-            patch("agentibridge.dispatch_bridge.run_claude", new_callable=AsyncMock, return_value=mock_result),
+            patch("agentibridge.dispatch_bridge._run_bridge_job", new_callable=AsyncMock),
         ):
             asyncio.run(_handle_dispatch(headers, body, writer))
 

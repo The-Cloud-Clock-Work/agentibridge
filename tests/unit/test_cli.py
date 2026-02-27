@@ -1129,7 +1129,9 @@ class TestCmdBridge:
         output = capsys.readouterr().out
         assert "stopped" in output
 
-    def test_logs_no_file(self, capsys):
+    def test_logs_no_file(self, tmp_path, capsys):
         """logs exits when log file doesn't exist."""
-        with pytest.raises(SystemExit):
-            cmd_bridge(MagicMock(action="logs"))
+        fake_log = tmp_path / "nonexistent_bridge.log"
+        with patch("agentibridge.cli._BRIDGE_LOG_FILE", fake_log):
+            with pytest.raises(SystemExit):
+                cmd_bridge(MagicMock(action="logs"))
