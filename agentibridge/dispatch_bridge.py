@@ -8,11 +8,15 @@ CLI.
 Uses Python's built-in ``asyncio`` HTTP server — no uvicorn or SSL
 required, so it works even when the Python build lacks ``_ssl``.
 
+The bridge is **fire-and-forget**: ``POST /dispatch`` validates the request,
+spawns a background task, and returns HTTP 202 with a ``job_id`` immediately.
+Clients poll ``GET /job/{id}`` for results.
+
 Usage:
-    DISPATCH_BRIDGE_SECRET=mysecret python -m agentibridge.dispatch_bridge
+    DISPATCH_SECRET=mysecret python -m agentibridge.dispatch_bridge
 
 Env vars:
-    DISPATCH_BRIDGE_SECRET  — shared secret (required, refuses to start without it)
+    DISPATCH_SECRET  — shared secret (required, refuses to start without it)
     DISPATCH_BRIDGE_HOST    — bind address (default: 127.0.0.1)
     DISPATCH_BRIDGE_PORT    — listen port (default: 8101)
     CLAUDE_DISPATCH_TIMEOUT — max timeout cap in seconds (default: 600)
@@ -22,6 +26,8 @@ import asyncio
 import json
 import os
 import sys
+import uuid
+from datetime import datetime, timezone
 from http import HTTPStatus
 
 from agentibridge.claude_runner import ClaudeResult, run_claude
@@ -34,7 +40,7 @@ from agentibridge.logging import log
 
 
 def _bridge_secret() -> str:
-    return os.environ.get("DISPATCH_BRIDGE_SECRET", "")
+    return os.environ.get("DISPATCH_SECRET", "")
 
 
 def _bridge_host() -> str:
@@ -47,6 +53,52 @@ def _bridge_port() -> int:
 
 def _max_timeout() -> int:
     return int(os.environ.get("CLAUDE_DISPATCH_TIMEOUT", "600"))
+
+
+# ---------------------------------------------------------------------------
+# In-memory job tracking
+# ---------------------------------------------------------------------------
+
+# bridge_job_id -> {status, started_at, completed_at, result_dict}
+_jobs: dict[str, dict] = {}
+
+# prevent GC of background tasks
+_background_tasks: set = set()
+
+
+async def _run_bridge_job(
+    job_id: str,
+    prompt: str,
+    model: str,
+    timeout: int,
+    output_format: str,
+    resume_session_id: str | None,
+) -> None:
+    """Run Claude CLI in the background and update _jobs on completion."""
+    try:
+        # Clear CLAUDE_DISPATCH_URL so run_claude uses the local subprocess
+        # path, not the HTTP bridge (which would recurse back to us).
+        saved = os.environ.pop("CLAUDE_DISPATCH_URL", None)
+        try:
+            result: ClaudeResult = await run_claude(
+                prompt=prompt,
+                model=model,
+                timeout=timeout,
+                output_format=output_format,
+                resume_session_id=resume_session_id,
+            )
+        finally:
+            if saved is not None:
+                os.environ["CLAUDE_DISPATCH_URL"] = saved
+        _jobs[job_id]["status"] = "completed" if result.success else "failed"
+        _jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+        _jobs[job_id]["result"] = result.to_dict()
+        log("dispatch_bridge: job finished", {"job_id": job_id, "success": result.success})
+    except Exception as e:
+        _jobs[job_id]["status"] = "failed"
+        _jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+        _jobs[job_id]["result"] = {"success": False, "error": str(e)}
+        log("dispatch_bridge: job error", {"job_id": job_id, "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +183,15 @@ async def _handle_connection(reader: asyncio.StreamReader, writer: asyncio.Strea
             await _handle_dispatch(headers, body, writer)
             return
 
+        if path == "/jobs" and method == "GET":
+            await _handle_list_jobs(writer)
+            return
+
+        if path.startswith("/job/") and method == "GET":
+            job_id = path[5:]  # strip "/job/"
+            await _handle_get_job(job_id, writer)
+            return
+
         await _send_response(writer, 404, {"error": "Not found"})
 
     except asyncio.TimeoutError:
@@ -147,7 +208,7 @@ async def _handle_connection(reader: asyncio.StreamReader, writer: asyncio.Strea
 
 
 async def _handle_dispatch(headers: dict, body: bytes, writer: asyncio.StreamWriter) -> None:
-    """Handle POST /dispatch — validate auth, run claude, return result."""
+    """Handle POST /dispatch — validate auth, spawn background job, return 202."""
     secret = _bridge_secret()
 
     # Authenticate
@@ -179,9 +240,20 @@ async def _handle_dispatch(headers: dict, body: bytes, writer: asyncio.StreamWri
     if timeout > max_t:
         timeout = max_t
 
+    # Generate job ID and store initial state
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    _jobs[job_id] = {
+        "status": "running",
+        "started_at": now,
+        "completed_at": None,
+        "result": None,
+    }
+
     log(
         "dispatch_bridge: dispatching",
         {
+            "job_id": job_id,
             "model": model,
             "prompt_len": len(prompt),
             "timeout": timeout,
@@ -189,16 +261,37 @@ async def _handle_dispatch(headers: dict, body: bytes, writer: asyncio.StreamWri
         },
     )
 
-    # Run Claude CLI
-    result: ClaudeResult = await run_claude(
-        prompt=prompt,
-        model=model,
-        timeout=timeout,
-        output_format=output_format,
-        resume_session_id=resume_session_id,
-    )
+    # Spawn background task
+    task = asyncio.create_task(_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
-    await _send_response(writer, 200, result.to_dict())
+    # Return immediately with 202
+    await _send_response(writer, 202, {"job_id": job_id, "status": "running"})
+
+
+async def _handle_get_job(job_id: str, writer: asyncio.StreamWriter) -> None:
+    """Handle GET /job/{id} — return job state."""
+    job = _jobs.get(job_id)
+    if job is None:
+        await _send_response(writer, 404, {"error": f"Job not found: {job_id}"})
+        return
+    await _send_response(writer, 200, {"job_id": job_id, **job})
+
+
+async def _handle_list_jobs(writer: asyncio.StreamWriter) -> None:
+    """Handle GET /jobs — return summary of all jobs."""
+    summaries = []
+    for jid, job in _jobs.items():
+        summaries.append(
+            {
+                "job_id": jid,
+                "status": job["status"],
+                "started_at": job["started_at"],
+                "completed_at": job.get("completed_at"),
+            }
+        )
+    await _send_response(writer, 200, {"jobs": summaries, "count": len(summaries)})
 
 
 # ---------------------------------------------------------------------------
@@ -281,18 +374,55 @@ async def app(scope, receive, send):
         if timeout > max_t:
             timeout = max_t
 
+        # Fire-and-forget: spawn background job and return 202
+        job_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        _jobs[job_id] = {
+            "status": "running",
+            "started_at": now,
+            "completed_at": None,
+            "result": None,
+        }
+
         log(
             "dispatch_bridge: dispatching",
-            {"model": model, "prompt_len": len(prompt), "timeout": timeout, "resume_session_id": resume_session_id},
+            {
+                "job_id": job_id,
+                "model": model,
+                "prompt_len": len(prompt),
+                "timeout": timeout,
+                "resume_session_id": resume_session_id,
+            },
         )
-        result: ClaudeResult = await run_claude(
-            prompt=prompt,
-            model=model,
-            timeout=timeout,
-            output_format=output_format,
-            resume_session_id=resume_session_id,
-        )
-        await _send_json(send, 200, result.to_dict())
+
+        task = asyncio.create_task(_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+        await _send_json(send, 202, {"job_id": job_id, "status": "running"})
+        return
+
+    if path == "/jobs" and method == "GET":
+        summaries = []
+        for jid, job in _jobs.items():
+            summaries.append(
+                {
+                    "job_id": jid,
+                    "status": job["status"],
+                    "started_at": job["started_at"],
+                    "completed_at": job.get("completed_at"),
+                }
+            )
+        await _send_json(send, 200, {"jobs": summaries, "count": len(summaries)})
+        return
+
+    if path.startswith("/job/") and method == "GET":
+        job_id = path[5:]
+        job = _jobs.get(job_id)
+        if job is None:
+            await _send_json(send, 404, {"error": f"Job not found: {job_id}"})
+            return
+        await _send_json(send, 200, {"job_id": job_id, **job})
         return
 
     await _send_json(send, 404, {"error": "Not found"})
@@ -307,9 +437,9 @@ def main():
     """Start the dispatch bridge server."""
     secret = _bridge_secret()
     if not secret:
-        print("ERROR: DISPATCH_BRIDGE_SECRET env var is required.", file=sys.stderr)
+        print("ERROR: DISPATCH_SECRET env var is required.", file=sys.stderr)
         print(
-            "Set it before starting: DISPATCH_BRIDGE_SECRET=mysecret python -m agentibridge.dispatch_bridge",
+            "Set it before starting: DISPATCH_SECRET=mysecret python -m agentibridge.dispatch_bridge",
             file=sys.stderr,
         )
         sys.exit(1)

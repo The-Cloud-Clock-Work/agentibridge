@@ -142,7 +142,7 @@ AGENTIBRIDGE_MAX_PLAN_CONTENT=102400
 CLAUDE_HOOK_LOG_ENABLED=true
 ```
 
-## MCP Tools (16 total)
+## MCP Tools (17 total)
 
 ### Phase 1 — Foundation
 - `list_sessions` — List sessions across all projects
@@ -160,6 +160,7 @@ CLAUDE_HOOK_LOG_ENABLED=true
 - `restore_session` — Load session context for continuation
 - `dispatch_task` — Fire-and-forget background job dispatch (returns job_id immediately)
 - `get_dispatch_job` — Poll a background job for status and output
+- `list_dispatch_jobs` — List dispatch jobs with optional status filter
 
 ### Phase 5 — Knowledge Catalog
 - `list_memory_files` — List memory files across projects

@@ -8,7 +8,7 @@ for new data; all tools work with Redis or filesystem fallback.
 Usage:
     python -m agentibridge
 
-Available tools (16):
+Available tools (17):
     Phase 1 — Foundation:
     - list_sessions       — List sessions across all projects
     - get_session         — Get full session metadata + transcript
@@ -23,6 +23,7 @@ Available tools (16):
     - restore_session     — Load session context for continuation
     - dispatch_task       — Dispatch a task with optional session context
     - get_dispatch_job    — Poll background job status
+    - list_dispatch_jobs  — List dispatch jobs with optional status filter
     Phase 5 — Knowledge Catalog:
     - list_memory_files   — List memory files across projects
     - get_memory_file     — Read a specific memory file
@@ -608,6 +609,31 @@ async def get_dispatch_job(job_id: str) -> str:
     if data is None:
         return json.dumps({"success": False, "error": f"Job not found: {job_id}"})
     return json.dumps({"success": True, **data})
+
+
+@mcp.tool()
+async def list_dispatch_jobs(status: str = "", limit: int = 20) -> str:
+    """List dispatch jobs with optional status filter.
+
+    Returns job summaries (newest first) without the full output field,
+    so the response stays compact even with many jobs.
+
+    Args:
+        status: Filter by status ("running", "completed", "failed"). Empty = all.
+        limit: Maximum number of jobs to return (default: 20)
+
+    Returns:
+        JSON with jobs list and count
+    """
+    try:
+        from agentibridge.dispatch import list_jobs
+
+        jobs = list_jobs(status=status, limit=limit)
+        return json.dumps({"success": True, "count": len(jobs), "jobs": jobs})
+
+    except Exception as e:
+        log("MCP list_dispatch_jobs failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
 
 
 # =============================================================================

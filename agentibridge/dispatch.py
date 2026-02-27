@@ -10,31 +10,88 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from agentibridge.logging import log
+from agentibridge.redis_client import get_redis
 
 # ---------------------------------------------------------------------------
 # Job store (fire-and-forget background tasks)
 # ---------------------------------------------------------------------------
 
 _JOBS_DIR = Path("/tmp/agentibridge_jobs")
+_JOB_TTL = 86400  # 24h — matches session TTL
+_KEY_PREFIX: str = "agentibridge"
 
 # Keep references to running background tasks to prevent GC
 _background_tasks: set = set()
+
+
+def _rkey(suffix: str) -> str:
+    """Build a namespaced Redis key for job storage."""
+    return f"{_KEY_PREFIX}:sb:{suffix}"
 
 
 def _job_path(job_id: str) -> Path:
     return _JOBS_DIR / f"{job_id}.json"
 
 
-def _write_job(job_id: str, data: dict) -> None:
+def _write_file(job_id: str, data: dict) -> None:
+    """Write job state to file (always, as fallback)."""
     _JOBS_DIR.mkdir(parents=True, exist_ok=True)
     _job_path(job_id).write_text(json.dumps(data))
 
 
+def _write_job(job_id: str, data: dict) -> None:
+    """Write job state to Redis (primary) and file (fallback)."""
+    # Always write file as fallback
+    _write_file(job_id, data)
+
+    # Write to Redis if available
+    r = get_redis()
+    if r is not None:
+        try:
+            hash_key = _rkey(f"job:{job_id}")
+            # Store as hash — flatten values to strings
+            flat = {k: json.dumps(v) if not isinstance(v, str) else v for k, v in data.items()}
+            r.hset(hash_key, mapping=flat)
+            r.expire(hash_key, _JOB_TTL)
+            # Add to sorted set index (score = started_at timestamp or now)
+            started = data.get("started_at", "")
+            try:
+                score = datetime.fromisoformat(started).timestamp()
+            except (ValueError, TypeError):
+                score = datetime.now(timezone.utc).timestamp()
+            r.zadd(_rkey("idx:jobs"), {job_id: score})
+        except Exception as e:
+            log("dispatch: Redis write failed, file fallback used", {"job_id": job_id, "error": str(e)})
+
+
+def _read_job_redis(job_id: str) -> Optional[Dict[str, Any]]:
+    """Read job state from Redis hash."""
+    r = get_redis()
+    if r is None:
+        return None
+    try:
+        data = r.hgetall(_rkey(f"job:{job_id}"))
+        if not data:
+            return None
+        # Deserialize JSON-encoded values
+        result = {}
+        for k, v in data.items():
+            try:
+                result[k] = json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                result[k] = v
+        return result
+    except Exception:
+        return None
+
+
 def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     """Read the current state of a background dispatch job.
+
+    Tries Redis first, falls back to file.
 
     Args:
         job_id: Job UUID returned by dispatch_task
@@ -42,6 +99,12 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Dict with status, output, error, etc. or None if not found.
     """
+    # Try Redis first
+    data = _read_job_redis(job_id)
+    if data is not None:
+        return data
+
+    # Fall back to file
     path = _job_path(job_id)
     if not path.exists():
         return None
@@ -49,6 +112,61 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
         return json.loads(path.read_text())
     except Exception:
         return None
+
+
+def list_jobs(status: str = "", limit: int = 20) -> List[Dict[str, Any]]:
+    """List dispatch jobs, newest first.
+
+    Args:
+        status: Filter by status (e.g. "running", "completed", "failed").
+                Empty string means all.
+        limit: Maximum number of jobs to return (default: 20).
+
+    Returns:
+        List of job summary dicts (output field excluded for brevity).
+    """
+    jobs: List[Dict[str, Any]] = []
+
+    # Try Redis first
+    r = get_redis()
+    if r is not None:
+        try:
+            # Read job IDs from sorted set, newest first
+            job_ids = r.zrevrange(_rkey("idx:jobs"), 0, -1)
+            for jid in job_ids:
+                data = _read_job_redis(jid)
+                if data is None:
+                    continue
+                if status and data.get("status") != status:
+                    continue
+                # Exclude output field for listing
+                summary = {k: v for k, v in data.items() if k != "output"}
+                jobs.append(summary)
+                if len(jobs) >= limit:
+                    break
+            return jobs
+        except Exception as e:
+            log("dispatch: Redis list_jobs failed, trying file fallback", {"error": str(e)})
+            jobs = []
+
+    # File fallback: scan job files sorted by mtime (newest first)
+    if not _JOBS_DIR.exists():
+        return []
+
+    files = sorted(_JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for f in files:
+        try:
+            data = json.loads(f.read_text())
+        except Exception:
+            continue
+        if status and data.get("status") != status:
+            continue
+        summary = {k: v for k, v in data.items() if k != "output"}
+        jobs.append(summary)
+        if len(jobs) >= limit:
+            break
+
+    return jobs
 
 
 # ---------------------------------------------------------------------------

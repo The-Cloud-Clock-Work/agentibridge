@@ -1289,11 +1289,114 @@ def _short_digest(digest: str) -> str:
     return digest[:12]
 
 
+_BRIDGE_PLACEHOLDER_SECRET = "changeme-generate-a-random-secret"
+
+
+def _maybe_start_bridge(stack_dir: Path, *, env_file: Path | None = None, allow_placeholder: bool = False) -> None:
+    """Auto-start the dispatch bridge if DISPATCH_SECRET is configured."""
+    env_file = env_file or (stack_dir / _DOCKER_ENV)
+    if not env_file.exists():
+        return
+
+    secret = _read_env_value("DISPATCH_SECRET", env_file)
+    if not secret:
+        return
+    if secret == _BRIDGE_PLACEHOLDER_SECRET and not allow_placeholder:
+        return
+
+    # Check if already running
+    check = subprocess.run(
+        ["pgrep", "-f", "agentibridge.dispatch_bridge"],
+        capture_output=True,
+    )
+    if check.returncode == 0:
+        return
+
+    port = _read_env_value("DISPATCH_BRIDGE_PORT", env_file) or "8101"
+    log_file = Path("/tmp/dispatch_bridge.log")
+
+    try:
+        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port}
+        with open(log_file, "w") as lf:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "agentibridge.dispatch_bridge"],
+                env=env,
+                stdout=lf,
+                stderr=lf,
+                start_new_session=True,
+            )
+        time.sleep(1)
+        if proc.poll() is None:
+            print(f"[bridge] Dispatch bridge auto-started (PID {proc.pid}, port {port})")
+        else:
+            print(f"[bridge] WARNING: Dispatch bridge failed to start — check {log_file}")
+    except Exception as e:
+        print(f"[bridge] WARNING: Could not auto-start dispatch bridge: {e}")
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     if not shutil.which("docker"):
         print("ERROR: docker is not installed or not in PATH.")
         print("Install Docker Desktop or Docker Engine first.")
         sys.exit(1)
+
+    if args.test:
+        # Dev mode: build from local source with fresh config
+        if not Path("Dockerfile").exists() or not Path("docker-compose.yml").exists():
+            print("ERROR: --test must be run from the agentibridge repo root.")
+            sys.exit(1)
+
+        # Backup ~/.agentibridge before reset
+        backup_dir = _STACK_DIR.with_name(f"{_STACK_DIR.name}-backup")
+        if _STACK_DIR.exists():
+            if not backup_dir.exists():
+                shutil.copytree(_STACK_DIR, backup_dir)
+                print(f"[test] Backed up {_STACK_DIR} → {backup_dir}")
+            else:
+                print(f"[test] Backup already exists at {backup_dir} — skipping")
+            shutil.rmtree(_STACK_DIR)
+            print(f"[test] Reset {_STACK_DIR}")
+        _ensure_stack_dir()
+
+        # Ensure repo root .env exists
+        env_path = Path(".env")
+        if not env_path.exists():
+            shutil.copy2(".env.example", ".env")
+            print("[test] Created .env from .env.example")
+
+        # Uncomment DISPATCH_SECRET so the bridge can auto-start
+        env_text = env_path.read_text()
+        if "# DISPATCH_SECRET=" in env_text:
+            env_text = env_text.replace(
+                "# DISPATCH_SECRET=" + _BRIDGE_PLACEHOLDER_SECRET,
+                "DISPATCH_SECRET=" + _BRIDGE_PLACEHOLDER_SECRET,
+            )
+            env_path.write_text(env_text)
+            print("[test] Uncommented DISPATCH_SECRET in .env")
+
+        cmd = [
+            "docker",
+            "compose",
+            "-f",
+            "docker-compose.yml",
+            "--env-file",
+            ".env",
+            "up",
+            "--build",
+            "-d",
+        ]
+        subprocess.run(cmd, check=True)
+
+        _maybe_start_bridge(_STACK_DIR, env_file=env_path.resolve(), allow_placeholder=True)
+
+        print()
+        subprocess.run(
+            ["docker", "ps", "--filter", "name=agentibridge", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"],
+            check=False,
+        )
+        print()
+        print("[test] Stack started from local source. Bridge vars refreshed.")
+        return
 
     stack_dir = _ensure_stack_dir()
 
@@ -1311,6 +1414,9 @@ def cmd_run(args: argparse.Namespace) -> None:
         cmd += ["up", "-d"]
 
     subprocess.run(cmd, check=True)
+
+    # Auto-start dispatch bridge if DISPATCH_SECRET is configured
+    _maybe_start_bridge(stack_dir)
 
     # Explain the CLOUDFLARE_TUNNEL_TOKEN warning if the var is unset
     env_file = stack_dir / _DOCKER_ENV
@@ -1406,7 +1512,7 @@ def cmd_bridge(args: argparse.Namespace) -> None:
             print(f"Dispatch bridge already running (PID {check.stdout.strip().decode()})")
             return
 
-        env = {**os.environ, "DISPATCH_BRIDGE_SECRET": secret, "DISPATCH_BRIDGE_PORT": port}
+        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port}
         with open(log_file, "w") as lf:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "agentibridge.dispatch_bridge"],
@@ -1462,6 +1568,9 @@ def main() -> None:
     # run
     run_parser = subparsers.add_parser("run", help="Start the Docker stack")
     run_parser.add_argument("--rebuild", action="store_true", help="Force pull + rebuild before starting")
+    run_parser.add_argument(
+        "--test", action="store_true", help="Dev mode: reset ~/.agentibridge, build from local source"
+    )
 
     # stop
     subparsers.add_parser("stop", help="Stop the Docker stack")

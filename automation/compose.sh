@@ -112,7 +112,7 @@ start_bridge() {
     port=$(grep -E '^\s*DISPATCH_BRIDGE_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "8101")
 
     info "Starting dispatch bridge on 127.0.0.1:${port}..."
-    DISPATCH_BRIDGE_SECRET="$secret" DISPATCH_BRIDGE_PORT="$port" \
+    DISPATCH_SECRET="$secret" DISPATCH_BRIDGE_PORT="$port" \
         nohup python -m agentibridge.dispatch_bridge > /tmp/dispatch_bridge.log 2>&1 &
     local pid=$!
     sleep 1

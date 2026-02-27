@@ -95,6 +95,7 @@ See [Configuration Reference](docs/reference/configuration.md) for all variables
 |---------|-------------|
 | `agentibridge run` | Start the Docker stack |
 | `agentibridge run --rebuild` | Force rebuild before starting |
+| `agentibridge run --test` | Dev mode: build from local source with fresh config |
 | `agentibridge stop` | Stop the stack |
 | `agentibridge restart` | Restart the stack (does **not** reload `docker.env` — use `stop` + `run` after config changes) |
 | `agentibridge logs` | View recent logs (`--follow` to stream) |
@@ -126,6 +127,7 @@ See [CLI Reference](docs/reference/cli-commands.md) for all commands and flags.
 | `restore_session` | "Load the context from my last session on this project" |
 | `dispatch_task` | "Continue that refactor task in the background" |
 | `get_dispatch_job` | "What's the status of job xyz?" |
+| `list_dispatch_jobs` | "What jobs have I dispatched recently?" |
 | `list_memory_files` | "What memory files exist across my projects?" |
 | `get_memory_file` | "Show me the MEMORY.md for the antoncore project" |
 | `list_plans` | "What plans have I created recently?" |
@@ -310,6 +312,15 @@ See [Cloudflare Tunnel Guide](docs/deployment/cloudflare-tunnel.md) for full det
 
 ```bash
 git clone https://github.com/The-Cloud-Clock-Work/agentibridge
+pip install -e .
+agentibridge run --test
+```
+
+`--test` backs up `~/.agentibridge/` to `~/.agentibridge-backup` then resets it (so env templates pick up new variables), ensures `.env` exists from `.env.example`, and runs `docker compose up --build` from the repo root — building your local source instead of pulling the Hub image. Use this whenever you need to test local changes end-to-end.
+
+For manual control without the CLI wrapper:
+
+```bash
 cp .env.example .env
 docker compose up --build -d
 ```

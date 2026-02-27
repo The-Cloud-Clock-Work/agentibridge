@@ -170,6 +170,32 @@ class TestRunClaude:
         assert result.success is False
         assert result.error == "Bad input"
 
+    def test_docker_without_dispatch_url(self):
+        with (
+            patch("agentibridge.claude_runner._is_docker", return_value=True),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}),
+        ):
+            result = asyncio.run(run_claude("test prompt"))
+
+        assert result.success is False
+        assert "CLAUDE_DISPATCH_URL" in result.error
+        assert "agentibridge bridge start" in result.error
+
+    def test_docker_with_dispatch_url_routes_to_http(self):
+        """When inside Docker with CLAUDE_DISPATCH_URL set, should route to HTTP bridge."""
+        mock_result = ClaudeResult(success=True, result="bridge ok")
+
+        with (
+            patch("agentibridge.claude_runner._is_docker", return_value=True),
+            patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": "http://host.docker.internal:8101"}),
+            patch("agentibridge.claude_runner._run_claude_http", return_value=mock_result) as mock_http,
+        ):
+            result = asyncio.run(run_claude("test prompt"))
+
+        assert result.success is True
+        assert result.result == "bridge ok"
+        mock_http.assert_called_once()
+
 
 @pytest.mark.unit
 class TestRunClaudeSync:

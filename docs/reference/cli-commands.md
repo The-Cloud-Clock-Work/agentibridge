@@ -16,7 +16,7 @@ Complete reference for the `agentibridge` command-line tool.
 Start the Docker stack (AgentiBridge + Redis + Postgres).
 
 ```
-agentibridge run [--rebuild]
+agentibridge run [--rebuild] [--test]
 ```
 
 On first run, copies the bundled `docker-compose.yml` and `docker.env.example` template to
@@ -36,6 +36,33 @@ State detection:
 | Flag | Description |
 |------|-------------|
 | `--rebuild` | Force `--pull always --build` before starting (equivalent to `docker compose up --build --pull always -d`) |
+| `--test` | Dev mode: build from local source with fresh config (see below) |
+
+#### `--test` — Local dev testing mode
+
+For developing AgentiBridge itself. Must be run from the repo root (where `Dockerfile` and
+`docker-compose.yml` exist).
+
+```bash
+cd ~/dev/agentibridge
+pip install -e .
+agentibridge run --test
+```
+
+What it does:
+
+1. **Backs up and resets `~/.agentibridge/`** — copies the directory to `~/.agentibridge-backup`,
+   then wipes it so `_ensure_stack_dir()` recreates it with fresh env templates (picks up any
+   new variables added to the bundled `docker.env.example`). If a backup already exists it is
+   kept as-is (only the first run creates the backup).
+2. **Ensures `.env`** — copies `.env.example` to `.env` at the repo root if it doesn't exist.
+3. **Builds from local source** — runs `docker compose -f docker-compose.yml --env-file .env up --build -d`
+   using the repo root compose file (which has `build: context: .`) instead of the pip-distributed
+   compose file that pulls `tccw/agentibridge:latest` from Docker Hub.
+4. **Auto-starts the dispatch bridge** if `DISPATCH_SECRET` is configured in `~/.agentibridge/docker.env`.
+
+This bypasses the normal `~/.agentibridge/` managed stack entirely for the Docker build, while still
+refreshing the env templates so the bridge and other host-side features pick up new config variables.
 
 ---
 
