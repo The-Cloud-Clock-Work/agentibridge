@@ -8,6 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentibridge.claude_runner import ClaudeResult, _run_claude_http, run_claude
+from agentibridge.dispatch_bridge import (
+    _handle_connection,
+    _handle_dispatch,
+    _handle_get_job,
+    _handle_list_jobs,
+)
 
 
 # ===========================================================================
@@ -1056,3 +1062,244 @@ class TestBridgeHelpers:
         assert _get_header(scope, b"x-api-key") == "secret123"
         assert _get_header(scope, b"X-Api-Key") == "secret123"  # case insensitive
         assert _get_header(scope, b"missing") == ""
+
+
+# ===========================================================================
+# Raw asyncio HTTP handler tests (_handle_connection, _handle_dispatch, etc.)
+# ===========================================================================
+
+
+def _make_reader(data: bytes) -> AsyncMock:
+    """Create a mock StreamReader that returns data then EOF."""
+    reader = AsyncMock(spec=asyncio.StreamReader)
+    chunks = [data, b""]
+    reader.read = AsyncMock(side_effect=chunks)
+    return reader
+
+
+def _make_writer() -> MagicMock:
+    """Create a mock StreamWriter that captures written data."""
+    writer = MagicMock(spec=asyncio.StreamWriter)
+    writer.write = MagicMock()
+    writer.drain = AsyncMock()
+    writer.close = MagicMock()
+    writer.wait_closed = AsyncMock()
+    return writer
+
+
+def _build_http_request(method: str, path: str, headers: dict | None = None, body: bytes = b"") -> bytes:
+    """Build a raw HTTP/1.1 request."""
+    hdrs = headers or {}
+    if body:
+        hdrs["Content-Length"] = str(len(body))
+    header_lines = [f"{method} {path} HTTP/1.1"]
+    for k, v in hdrs.items():
+        header_lines.append(f"{k}: {v}")
+    return ("\r\n".join(header_lines) + "\r\n\r\n").encode() + body
+
+
+def _parse_http_response(writer: MagicMock) -> tuple[int, dict]:
+    """Parse the HTTP response written to a mock writer."""
+    raw = b""
+    for call in writer.write.call_args_list:
+        raw += call[0][0]
+    # Split headers from body
+    header_end = raw.index(b"\r\n\r\n")
+    header_text = raw[:header_end].decode()
+    body = raw[header_end + 4 :]
+    status = int(header_text.split(" ")[1])
+    return status, json.loads(body)
+
+
+@pytest.mark.unit
+class TestRawAsyncioHandler:
+    """Tests for the raw asyncio HTTP connection handler."""
+
+    def test_health_endpoint(self):
+        """GET /health via raw asyncio returns 200."""
+        request = _build_http_request("GET", "/health")
+        reader = _make_reader(request)
+        writer = _make_writer()
+
+        asyncio.run(_handle_connection(reader, writer))
+
+        status, body = _parse_http_response(writer)
+        assert status == 200
+        assert body["status"] == "ok"
+
+    def test_not_found(self):
+        """Unknown path returns 404."""
+        request = _build_http_request("GET", "/unknown")
+        reader = _make_reader(request)
+        writer = _make_writer()
+
+        asyncio.run(_handle_connection(reader, writer))
+
+        status, body = _parse_http_response(writer)
+        assert status == 404
+
+    def test_bad_request_line(self):
+        """Malformed request line returns 400."""
+        reader = _make_reader(b"INVALID\r\n\r\n")
+        writer = _make_writer()
+
+        asyncio.run(_handle_connection(reader, writer))
+
+        status, body = _parse_http_response(writer)
+        assert status == 400
+
+    def test_empty_connection_closes(self):
+        """Empty read (EOF) closes writer without response."""
+        reader = AsyncMock(spec=asyncio.StreamReader)
+        reader.read = AsyncMock(return_value=b"")
+        writer = _make_writer()
+
+        asyncio.run(_handle_connection(reader, writer))
+
+        writer.close.assert_called_once()
+        writer.write.assert_not_called()
+
+
+@pytest.mark.unit
+class TestRawDispatchHandler:
+    """Tests for _handle_dispatch via raw asyncio HTTP handler."""
+
+    def test_auth_failure(self):
+        """Missing secret returns 401."""
+        headers = {"content-length": "0"}
+        writer = _make_writer()
+
+        with patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret"}):
+            asyncio.run(_handle_dispatch(headers, b"{}", writer))
+
+        status, body = _parse_http_response(writer)
+        assert status == 401
+
+    def test_invalid_json(self):
+        """Invalid JSON body returns 400."""
+        headers = {"x-dispatch-secret": "real-secret"}
+        writer = _make_writer()
+
+        with patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret"}):
+            asyncio.run(_handle_dispatch(headers, b"not json", writer))
+
+        status, body = _parse_http_response(writer)
+        assert status == 400
+        assert "Invalid JSON" in body["error"]
+
+    def test_missing_prompt(self):
+        """Missing prompt returns 400."""
+        headers = {"x-dispatch-secret": "real-secret"}
+        writer = _make_writer()
+        body = json.dumps({"model": "sonnet"}).encode()
+
+        with patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret"}):
+            asyncio.run(_handle_dispatch(headers, body, writer))
+
+        status, resp = _parse_http_response(writer)
+        assert status == 400
+        assert "prompt" in resp["error"]
+
+    def test_successful_dispatch_returns_202(self):
+        """Valid dispatch returns 202 with job_id."""
+        headers = {"x-dispatch-secret": "real-secret"}
+        writer = _make_writer()
+        body = json.dumps({"prompt": "Hello", "timeout": 60}).encode()
+
+        mock_result = ClaudeResult(success=True, result="ok", exit_code=0)
+
+        with (
+            patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret"}),
+            patch("agentibridge.dispatch_bridge.run_claude", new_callable=AsyncMock, return_value=mock_result),
+        ):
+            asyncio.run(_handle_dispatch(headers, body, writer))
+
+        status, resp = _parse_http_response(writer)
+        assert status == 202
+        assert "job_id" in resp
+
+    def test_timeout_capped(self):
+        """Timeout is capped to CLAUDE_DISPATCH_TIMEOUT."""
+        headers = {"x-dispatch-secret": "real-secret"}
+        writer = _make_writer()
+        body = json.dumps({"prompt": "Hello", "timeout": 9999}).encode()
+
+        captured = {}
+
+        async def capture_bridge_job(job_id, prompt, model, max_seconds, output_format, resume_session_id):
+            captured["max_seconds"] = max_seconds
+
+        with (
+            patch.dict("os.environ", {"DISPATCH_SECRET": "real-secret", "CLAUDE_DISPATCH_TIMEOUT": "600"}),
+            patch("agentibridge.dispatch_bridge._run_bridge_job", side_effect=capture_bridge_job),
+        ):
+            asyncio.run(_handle_dispatch(headers, body, writer))
+
+        assert captured["max_seconds"] == 600
+
+
+@pytest.mark.unit
+class TestRawGetJob:
+    """Tests for _handle_get_job via raw asyncio handler."""
+
+    def test_job_found(self):
+        """Returns 200 with job data when job exists."""
+        import agentibridge.dispatch_bridge as bridge
+
+        bridge._jobs["raw-j1"] = {"status": "running", "started_at": "t", "completed_at": None, "result": None}
+        writer = _make_writer()
+
+        try:
+            asyncio.run(_handle_get_job("raw-j1", writer))
+            status, body = _parse_http_response(writer)
+            assert status == 200
+            assert body["job_id"] == "raw-j1"
+        finally:
+            bridge._jobs.pop("raw-j1", None)
+
+    def test_job_not_found(self):
+        """Returns 404 when job doesn't exist."""
+        writer = _make_writer()
+        asyncio.run(_handle_get_job("nonexistent", writer))
+        status, body = _parse_http_response(writer)
+        assert status == 404
+
+
+@pytest.mark.unit
+class TestRawListJobs:
+    """Tests for _handle_list_jobs via raw asyncio handler."""
+
+    def test_empty_list(self):
+        """Returns empty list when no jobs."""
+        import agentibridge.dispatch_bridge as bridge
+
+        saved = dict(bridge._jobs)
+        bridge._jobs.clear()
+        writer = _make_writer()
+
+        try:
+            asyncio.run(_handle_list_jobs(writer))
+            status, body = _parse_http_response(writer)
+            assert status == 200
+            assert body["count"] == 0
+        finally:
+            bridge._jobs.update(saved)
+
+    def test_list_with_jobs(self):
+        """Returns job summaries."""
+        import agentibridge.dispatch_bridge as bridge
+
+        saved = dict(bridge._jobs)
+        bridge._jobs.clear()
+        bridge._jobs["rj1"] = {"status": "running", "started_at": "t1", "completed_at": None, "result": None}
+        bridge._jobs["rj2"] = {"status": "completed", "started_at": "t2", "completed_at": "t3", "result": {}}
+        writer = _make_writer()
+
+        try:
+            asyncio.run(_handle_list_jobs(writer))
+            status, body = _parse_http_response(writer)
+            assert status == 200
+            assert body["count"] == 2
+        finally:
+            bridge._jobs.clear()
+            bridge._jobs.update(saved)

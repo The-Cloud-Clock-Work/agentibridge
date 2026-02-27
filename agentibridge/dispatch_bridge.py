@@ -70,7 +70,7 @@ async def _run_bridge_job(
     job_id: str,
     prompt: str,
     model: str,
-    timeout: int,
+    max_seconds: int,
     output_format: str,
     resume_session_id: str | None,
 ) -> None:
@@ -83,7 +83,7 @@ async def _run_bridge_job(
             result: ClaudeResult = await run_claude(
                 prompt=prompt,
                 model=model,
-                timeout=timeout,
+                timeout=max_seconds,
                 output_format=output_format,
                 resume_session_id=resume_session_id,
             )

@@ -17,6 +17,8 @@ from agentibridge.cli import (
     cmd_status,
     cmd_tunnel,
     cmd_update,
+    cmd_run,
+    cmd_bridge,
     _container_health,
     _systemd_active,
     _cloudflared_hostname,
@@ -25,6 +27,9 @@ from agentibridge.cli import (
     _short_digest,
     _validate_env,
     _ensure_stack_dir,
+    _maybe_start_bridge,
+    _read_env_value,
+    _cmd_run_test,
 )
 
 
@@ -871,3 +876,260 @@ class TestEnsureStackDir:
         assert "Migrated" in output
         assert (stack_dir / "docker.env").exists()
         assert result == stack_dir
+
+
+@pytest.mark.unit
+class TestReadEnvValue:
+    """Tests for _read_env_value()."""
+
+    def test_reads_existing_key(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("FOO=bar\nBAZ=qux\n")
+        assert _read_env_value("FOO", env) == "bar"
+        assert _read_env_value("BAZ", env) == "qux"
+
+    def test_returns_none_for_missing_key(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("FOO=bar\n")
+        assert _read_env_value("MISSING", env) is None
+
+    def test_skips_comments(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("# FOO=commented\nFOO=real\n")
+        assert _read_env_value("FOO", env) == "real"
+
+    def test_skips_lines_without_equals(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("no_equals_here\nKEY=value\n")
+        assert _read_env_value("KEY", env) == "value"
+
+
+@pytest.mark.unit
+class TestMaybeStartBridge:
+    """Tests for _maybe_start_bridge()."""
+
+    def test_no_env_file_returns_early(self, tmp_path):
+        """No action when env file doesn't exist."""
+        _maybe_start_bridge(tmp_path, env_file=tmp_path / "nonexistent.env")
+        # Should not raise
+
+    def test_no_secret_returns_early(self, tmp_path):
+        """No action when DISPATCH_SECRET is not set."""
+        env = tmp_path / "docker.env"
+        env.write_text("REDIS_URL=redis://localhost\n")
+        _maybe_start_bridge(tmp_path, env_file=env)
+        # Should not raise
+
+    def test_placeholder_secret_skipped(self, tmp_path):
+        """Placeholder secret is skipped unless allow_placeholder=True."""
+        env = tmp_path / "docker.env"
+        env.write_text("DISPATCH_SECRET=changeme-generate-a-random-secret\n")
+        _maybe_start_bridge(tmp_path, env_file=env)
+        # Should not raise — placeholder is ignored
+
+    def test_already_running_skipped(self, tmp_path):
+        """If bridge process already running, skip start."""
+        env = tmp_path / "docker.env"
+        env.write_text("DISPATCH_SECRET=real-secret\n")
+
+        with patch("agentibridge.cli.subprocess.run", return_value=_ok()) as mock_run:
+            _maybe_start_bridge(tmp_path, env_file=env)
+
+        # pgrep should have been called
+        mock_run.assert_called_once()
+        assert "pgrep" in mock_run.call_args[0][0]
+
+    def test_starts_bridge_successfully(self, tmp_path, capsys):
+        """Starts bridge when secret is set and not already running."""
+        env = tmp_path / "docker.env"
+        env.write_text("DISPATCH_SECRET=real-secret\nDISPATCH_BRIDGE_PORT=9999\n")
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None  # still running
+        mock_proc.pid = 12345
+
+        with (
+            patch("agentibridge.cli.subprocess.run", return_value=_fail()),  # pgrep = not running
+            patch("agentibridge.cli.subprocess.Popen", return_value=mock_proc),
+            patch("agentibridge.cli.time.sleep"),
+        ):
+            _maybe_start_bridge(tmp_path, env_file=env)
+
+        output = capsys.readouterr().out
+        assert "auto-started" in output
+        assert "12345" in output
+
+    def test_bridge_fails_to_start(self, tmp_path, capsys):
+        """Reports warning when bridge process exits immediately."""
+        env = tmp_path / "docker.env"
+        env.write_text("DISPATCH_SECRET=real-secret\n")
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 1  # exited immediately
+
+        with (
+            patch("agentibridge.cli.subprocess.run", return_value=_fail()),
+            patch("agentibridge.cli.subprocess.Popen", return_value=mock_proc),
+            patch("agentibridge.cli.time.sleep"),
+        ):
+            _maybe_start_bridge(tmp_path, env_file=env)
+
+        output = capsys.readouterr().out
+        assert "WARNING" in output
+
+    def test_popen_exception_handled(self, tmp_path, capsys):
+        """Exception during Popen is caught gracefully."""
+        env = tmp_path / "docker.env"
+        env.write_text("DISPATCH_SECRET=real-secret\n")
+
+        with (
+            patch("agentibridge.cli.subprocess.run", return_value=_fail()),
+            patch("agentibridge.cli.subprocess.Popen", side_effect=OSError("No such file")),
+        ):
+            _maybe_start_bridge(tmp_path, env_file=env)
+
+        output = capsys.readouterr().out
+        assert "WARNING" in output
+
+
+@pytest.mark.unit
+class TestCmdRunTest:
+    """Tests for _cmd_run_test() dev mode."""
+
+    def test_exits_if_not_in_repo_root(self, tmp_path):
+        """Exits with error when Dockerfile is missing."""
+        with (
+            patch("os.getcwd", return_value=str(tmp_path)),
+            patch("agentibridge.cli.Path.exists", return_value=False),
+            pytest.raises(SystemExit),
+        ):
+            _cmd_run_test()
+
+    def test_runs_docker_compose_build(self, tmp_path, capsys):
+        """Full test mode: backup, compose up --build, bridge start."""
+        # Create repo-root-like structure
+        (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
+        (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+        (tmp_path / ".env.example").write_text(
+            "REDIS_URL=redis://localhost\n# DISPATCH_SECRET=changeme-generate-a-random-secret\n"
+        )
+
+        stack_dir = tmp_path / "stack"
+        stack_dir.mkdir()
+
+        calls = []
+
+        def se(cmd, **kw):
+            calls.append(list(cmd) if not isinstance(cmd, list) else cmd)
+            return _ok()
+
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli.subprocess.run", side_effect=se),
+            patch("agentibridge.cli._maybe_start_bridge"),
+            patch("agentibridge.cli._ensure_stack_dir", return_value=stack_dir),
+            patch("agentibridge.cli.Path.exists", side_effect=lambda self=None: True),
+            patch("agentibridge.cli.shutil.copytree"),
+            patch("agentibridge.cli.shutil.rmtree"),
+            patch("agentibridge.cli.shutil.copy2"),
+            patch("builtins.open", MagicMock()),
+            patch(
+                "agentibridge.cli.Path.read_text", return_value="# DISPATCH_SECRET=changeme-generate-a-random-secret\n"
+            ),
+            patch("agentibridge.cli.Path.write_text"),
+        ):
+            _cmd_run_test()
+
+        output = capsys.readouterr().out
+        assert "Stack started from local source" in output
+
+
+@pytest.mark.unit
+class TestCmdRun:
+    """Tests for cmd_run()."""
+
+    def test_no_docker_exits(self, capsys):
+        """Exits when docker is not installed."""
+        with (
+            patch("shutil.which", return_value=None),
+            pytest.raises(SystemExit),
+        ):
+            cmd_run(MagicMock(test=False, rebuild=False))
+
+    def test_test_mode_delegates(self):
+        """--test flag delegates to _cmd_run_test."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("agentibridge.cli._cmd_run_test") as mock_test,
+        ):
+            cmd_run(MagicMock(test=True))
+        mock_test.assert_called_once()
+
+
+@pytest.mark.unit
+class TestCmdBridge:
+    """Tests for cmd_bridge() management command."""
+
+    def test_start_no_env_file(self, tmp_path, capsys):
+        """start exits when docker.env doesn't exist."""
+        with (
+            patch("agentibridge.cli._STACK_DIR", tmp_path / "nodir"),
+            pytest.raises(SystemExit),
+        ):
+            cmd_bridge(MagicMock(action="start"))
+
+    def test_start_no_secret(self, tmp_path, capsys):
+        """start exits when DISPATCH_SECRET is not in docker.env."""
+        stack_dir = tmp_path / "stack"
+        stack_dir.mkdir()
+        (stack_dir / "docker.env").write_text("REDIS_URL=redis://localhost\n")
+
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            pytest.raises(SystemExit),
+        ):
+            cmd_bridge(MagicMock(action="start"))
+
+    def test_start_already_running(self, tmp_path, capsys):
+        """start reports already running when pgrep finds process."""
+        stack_dir = tmp_path / "stack"
+        stack_dir.mkdir()
+        (stack_dir / "docker.env").write_text("DISPATCH_SECRET=real-secret\n")
+
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout=b"12345")),
+        ):
+            cmd_bridge(MagicMock(action="start"))
+
+        output = capsys.readouterr().out
+        assert "already running" in output
+
+    def test_stop_no_process(self, capsys):
+        """stop reports no process when pgrep finds nothing."""
+        with patch("agentibridge.cli.subprocess.run", return_value=MagicMock(stdout="", returncode=1)):
+            cmd_bridge(MagicMock(action="stop"))
+
+        output = capsys.readouterr().out
+        assert "No dispatch bridge" in output
+
+    def test_stop_kills_process(self, capsys):
+        """stop kills running bridge processes."""
+        calls = []
+
+        def se(cmd, **kw):
+            calls.append(cmd)
+            if "pgrep" in cmd:
+                return MagicMock(stdout="1234\n5678", returncode=0)
+            return _ok()
+
+        with patch("agentibridge.cli.subprocess.run", side_effect=se):
+            cmd_bridge(MagicMock(action="stop"))
+
+        output = capsys.readouterr().out
+        assert "stopped" in output
+
+    def test_logs_no_file(self, capsys):
+        """logs exits when log file doesn't exist."""
+        with pytest.raises(SystemExit):
+            cmd_bridge(MagicMock(action="logs"))
