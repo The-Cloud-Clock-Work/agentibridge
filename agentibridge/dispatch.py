@@ -114,6 +114,53 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _job_summary(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a job dict with the output field excluded for listing."""
+    return {k: v for k, v in data.items() if k != "output"}
+
+
+def _list_jobs_redis(status: str, limit: int) -> Optional[List[Dict[str, Any]]]:
+    """List jobs from Redis, newest first. Returns None if Redis unavailable."""
+    r = get_redis()
+    if r is None:
+        return None
+    try:
+        jobs: List[Dict[str, Any]] = []
+        job_ids = r.zrevrange(_rkey("idx:jobs"), 0, -1)
+        for jid in job_ids:
+            data = _read_job_redis(jid)
+            if data is None:
+                continue
+            if status and data.get("status") != status:
+                continue
+            jobs.append(_job_summary(data))
+            if len(jobs) >= limit:
+                break
+        return jobs
+    except Exception as e:
+        log("dispatch: Redis list_jobs failed, trying file fallback", {"error": str(e)})
+        return None
+
+
+def _list_jobs_files(status: str, limit: int) -> List[Dict[str, Any]]:
+    """List jobs from file fallback, newest first."""
+    if not _JOBS_DIR.exists():
+        return []
+    jobs: List[Dict[str, Any]] = []
+    files = sorted(_JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for f in files:
+        try:
+            data = json.loads(f.read_text())
+        except Exception:
+            continue
+        if status and data.get("status") != status:
+            continue
+        jobs.append(_job_summary(data))
+        if len(jobs) >= limit:
+            break
+    return jobs
+
+
 def list_jobs(status: str = "", limit: int = 20) -> List[Dict[str, Any]]:
     """List dispatch jobs, newest first.
 
@@ -125,48 +172,10 @@ def list_jobs(status: str = "", limit: int = 20) -> List[Dict[str, Any]]:
     Returns:
         List of job summary dicts (output field excluded for brevity).
     """
-    jobs: List[Dict[str, Any]] = []
-
-    # Try Redis first
-    r = get_redis()
-    if r is not None:
-        try:
-            # Read job IDs from sorted set, newest first
-            job_ids = r.zrevrange(_rkey("idx:jobs"), 0, -1)
-            for jid in job_ids:
-                data = _read_job_redis(jid)
-                if data is None:
-                    continue
-                if status and data.get("status") != status:
-                    continue
-                # Exclude output field for listing
-                summary = {k: v for k, v in data.items() if k != "output"}
-                jobs.append(summary)
-                if len(jobs) >= limit:
-                    break
-            return jobs
-        except Exception as e:
-            log("dispatch: Redis list_jobs failed, trying file fallback", {"error": str(e)})
-            jobs = []
-
-    # File fallback: scan job files sorted by mtime (newest first)
-    if not _JOBS_DIR.exists():
-        return []
-
-    files = sorted(_JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for f in files:
-        try:
-            data = json.loads(f.read_text())
-        except Exception:
-            continue
-        if status and data.get("status") != status:
-            continue
-        summary = {k: v for k, v in data.items() if k != "output"}
-        jobs.append(summary)
-        if len(jobs) >= limit:
-            break
-
-    return jobs
+    result = _list_jobs_redis(status, limit)
+    if result is not None:
+        return result
+    return _list_jobs_files(status, limit)
 
 
 # ---------------------------------------------------------------------------

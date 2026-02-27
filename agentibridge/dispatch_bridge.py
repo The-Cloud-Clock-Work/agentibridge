@@ -334,6 +334,63 @@ def _get_header(scope, name: bytes) -> str:
     return ""
 
 
+async def _handle_dispatch_asgi(scope, receive, send) -> None:
+    """Handle POST /dispatch via ASGI — validate auth, spawn job, return 202."""
+    secret = _bridge_secret()
+    provided = _get_header(scope, b"x-dispatch-secret")
+    if not provided or provided != secret:
+        log("dispatch_bridge: auth failed", {"provided_length": len(provided)})
+        await _send_json(send, 401, {"error": "Unauthorized"})
+        return
+
+    body = await _read_body(receive)
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        await _send_json(send, 400, {"error": "Invalid JSON body"})
+        return
+
+    prompt = data.get("prompt", "")
+    if not prompt:
+        await _send_json(send, 400, {"error": "Missing required field: prompt"})
+        return
+
+    model = data.get("model", "sonnet")
+    output_format = data.get("output_format", "json")
+    timeout = data.get("timeout", _max_timeout())
+    resume_session_id = data.get("resume_session_id", "") or None
+    max_t = _max_timeout()
+    if timeout > max_t:
+        timeout = max_t
+
+    # Fire-and-forget: spawn background job and return 202
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    _jobs[job_id] = {
+        "status": "running",
+        "started_at": now,
+        "completed_at": None,
+        "result": None,
+    }
+
+    log(
+        "dispatch_bridge: dispatching",
+        {
+            "job_id": job_id,
+            "model": model,
+            "prompt_len": len(prompt),
+            "timeout": timeout,
+            "resume_session_id": resume_session_id,
+        },
+    )
+
+    task = asyncio.create_task(_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    await _send_json(send, 202, {"job_id": job_id, "status": "running"})
+
+
 async def app(scope, receive, send):
     """ASGI application for the dispatch bridge (for testing / uvicorn)."""
     if scope["type"] != "http":
@@ -347,59 +404,7 @@ async def app(scope, receive, send):
         return
 
     if path == "/dispatch" and method == "POST":
-        secret = _bridge_secret()
-        provided = _get_header(scope, b"x-dispatch-secret")
-        if not provided or provided != secret:
-            log("dispatch_bridge: auth failed", {"provided_length": len(provided)})
-            await _send_json(send, 401, {"error": "Unauthorized"})
-            return
-
-        body = await _read_body(receive)
-        try:
-            data = json.loads(body)
-        except (json.JSONDecodeError, TypeError):
-            await _send_json(send, 400, {"error": "Invalid JSON body"})
-            return
-
-        prompt = data.get("prompt", "")
-        if not prompt:
-            await _send_json(send, 400, {"error": "Missing required field: prompt"})
-            return
-
-        model = data.get("model", "sonnet")
-        output_format = data.get("output_format", "json")
-        timeout = data.get("timeout", _max_timeout())
-        resume_session_id = data.get("resume_session_id", "") or None
-        max_t = _max_timeout()
-        if timeout > max_t:
-            timeout = max_t
-
-        # Fire-and-forget: spawn background job and return 202
-        job_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
-        _jobs[job_id] = {
-            "status": "running",
-            "started_at": now,
-            "completed_at": None,
-            "result": None,
-        }
-
-        log(
-            "dispatch_bridge: dispatching",
-            {
-                "job_id": job_id,
-                "model": model,
-                "prompt_len": len(prompt),
-                "timeout": timeout,
-                "resume_session_id": resume_session_id,
-            },
-        )
-
-        task = asyncio.create_task(_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id))
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-
-        await _send_json(send, 202, {"job_id": job_id, "status": "running"})
+        await _handle_dispatch_asgi(scope, receive, send)
         return
 
     if path == "/jobs" and method == "GET":
