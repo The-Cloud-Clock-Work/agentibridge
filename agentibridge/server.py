@@ -888,8 +888,17 @@ def search_history(
 
 def main():
     """Run the AgentiBridge MCP server."""
+    from agentibridge.config import AGENTIBRIDGE_REMOVE_TOOLS
+
     print("Starting AgentiBridge MCP server...", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
+
+    for name in AGENTIBRIDGE_REMOVE_TOOLS:
+        try:
+            mcp._tool_manager.remove_tool(name)
+            print(f"  Removed tool: {name}", file=sys.stderr)
+        except Exception:
+            print(f"  Warning: tool '{name}' not found, skipping", file=sys.stderr)
 
     available_tools = mcp._tool_manager.list_tools()
     print(f"Available tools: {len(available_tools)}", file=sys.stderr)

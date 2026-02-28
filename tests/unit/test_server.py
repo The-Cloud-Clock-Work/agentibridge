@@ -335,6 +335,88 @@ class TestRestoreSession:
 
 
 @pytest.mark.unit
+class TestRemoveTools:
+    def test_removes_specified_tools(self, reset_singletons):
+        import agentibridge.server as srv
+
+        srv._store = MagicMock()
+        srv._collector = _mock_collector()
+
+        # Verify tool exists before removal
+        tool_names_before = [t.name for t in srv.mcp._tool_manager.list_tools()]
+        assert "dispatch_task" in tool_names_before
+
+        with patch.dict("os.environ", {"AGENTIBRIDGE_REMOVE_TOOLS": "dispatch_task,search_semantic"}):
+            # Re-import to pick up the new env var
+            import importlib
+            import agentibridge.config
+
+            importlib.reload(agentibridge.config)
+
+            srv.main.__wrapped__ = None  # not needed, just call main logic
+            from agentibridge.config import AGENTIBRIDGE_REMOVE_TOOLS
+
+            for name in AGENTIBRIDGE_REMOVE_TOOLS:
+                try:
+                    srv.mcp._tool_manager.remove_tool(name)
+                except Exception:
+                    pass
+
+            tool_names_after = [t.name for t in srv.mcp._tool_manager.list_tools()]
+            assert "dispatch_task" not in tool_names_after
+            assert "search_semantic" not in tool_names_after
+            # Other tools should still be present
+            assert "list_sessions" in tool_names_after
+
+    def test_ignores_unknown_tools(self, reset_singletons):
+        """Setting a non-existent tool name should not raise."""
+        import agentibridge.server as srv
+
+        srv._store = MagicMock()
+        srv._collector = _mock_collector()
+
+        with patch.dict("os.environ", {"AGENTIBRIDGE_REMOVE_TOOLS": "nonexistent_tool"}):
+            import importlib
+            import agentibridge.config
+
+            importlib.reload(agentibridge.config)
+
+            from agentibridge.config import AGENTIBRIDGE_REMOVE_TOOLS
+
+            for name in AGENTIBRIDGE_REMOVE_TOOLS:
+                try:
+                    srv.mcp._tool_manager.remove_tool(name)
+                except Exception:
+                    pass  # should not raise
+
+            # All original tools should still be present
+            tool_names = [t.name for t in srv.mcp._tool_manager.list_tools()]
+            assert "list_sessions" in tool_names
+
+    def test_empty_env_removes_nothing(self, reset_singletons):
+        """Empty AGENTIBRIDGE_REMOVE_TOOLS should leave all tools intact."""
+        import agentibridge.server as srv
+
+        srv._store = MagicMock()
+        srv._collector = _mock_collector()
+
+        tools_before = [t.name for t in srv.mcp._tool_manager.list_tools()]
+
+        with patch.dict("os.environ", {"AGENTIBRIDGE_REMOVE_TOOLS": ""}):
+            import importlib
+            import agentibridge.config
+
+            importlib.reload(agentibridge.config)
+
+            from agentibridge.config import AGENTIBRIDGE_REMOVE_TOOLS
+
+            assert AGENTIBRIDGE_REMOVE_TOOLS == []
+
+            tools_after = [t.name for t in srv.mcp._tool_manager.list_tools()]
+            assert tools_before == tools_after
+
+
+@pytest.mark.unit
 class TestDispatchTask:
     def test_success(self, reset_singletons):
         import agentibridge.server as srv

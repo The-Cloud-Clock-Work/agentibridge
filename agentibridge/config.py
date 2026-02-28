@@ -105,6 +105,11 @@ AGENTIBRIDGE_HOST = os.getenv("AGENTIBRIDGE_HOST", "127.0.0.1")
 # Comma-separated API keys for remote access auth
 AGENTIBRIDGE_API_KEYS = os.getenv("AGENTIBRIDGE_API_KEYS", "")
 
+# Comma-separated tool names to remove from the server (empty = all tools enabled)
+AGENTIBRIDGE_REMOVE_TOOLS: list[str] = [
+    t.strip() for t in os.getenv("AGENTIBRIDGE_REMOVE_TOOLS", "").split(",") if t.strip()
+]
+
 # =============================================================================
 # AGENTIBRIDGE — OAUTH 2.1 (opt-in)
 # =============================================================================
