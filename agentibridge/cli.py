@@ -1336,6 +1336,24 @@ def _maybe_start_bridge(stack_dir: Path, *, env_file: Path | None = None, allow_
         print(f"[bridge] WARNING: Could not auto-start dispatch bridge: {e}")
 
 
+def _stop_bridge() -> bool:
+    """Stop the dispatch bridge if running.
+
+    Returns True if a process was killed, False if not running.
+    """
+    result = subprocess.run(
+        ["pgrep", "-f", "agentibridge.dispatch_bridge"],
+        capture_output=True,
+        text=True,
+    )
+    if not result.stdout.strip():
+        return False
+    pids = result.stdout.strip().split()
+    subprocess.run(["kill"] + pids)
+    print(f"[bridge] Dispatch bridge stopped (PID {' '.join(pids)})")
+    return True
+
+
 def _cmd_run_test() -> None:
     """Dev mode: build from local source with fresh config (--test flag)."""
     if not Path("Dockerfile").exists() or not Path("docker-compose.yml").exists():
@@ -1453,6 +1471,7 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
     stack_dir = _ensure_stack_dir()
     subprocess.run(_compose_cmd(stack_dir) + ["down"], check=True)
+    _stop_bridge()
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
@@ -1536,17 +1555,8 @@ def cmd_bridge(args: argparse.Namespace) -> None:
             sys.exit(1)
 
     elif action == "stop":
-        result = subprocess.run(
-            ["pgrep", "-f", "agentibridge.dispatch_bridge"],
-            capture_output=True,
-            text=True,
-        )
-        if not result.stdout.strip():
+        if not _stop_bridge():
             print("No dispatch bridge process found.")
-            return
-        pids = result.stdout.strip().split()
-        subprocess.run(["kill"] + pids)
-        print(f"Dispatch bridge stopped (PID {' '.join(pids)})")
 
     elif action == "logs":
         if not log_file.exists():

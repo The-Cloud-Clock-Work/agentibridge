@@ -15,6 +15,7 @@ from agentibridge.cli import (
     cmd_connect,
     cmd_config,
     cmd_status,
+    cmd_stop,
     cmd_tunnel,
     cmd_update,
     cmd_run,
@@ -25,6 +26,7 @@ from agentibridge.cli import (
     _parse_cloudflared_config,
     _extract_tunnel_url,
     _short_digest,
+    _stop_bridge,
     _validate_env,
     _ensure_stack_dir,
     _maybe_start_bridge,
@@ -1135,3 +1137,66 @@ class TestCmdBridge:
         with patch("agentibridge.cli._BRIDGE_LOG_FILE", fake_log):
             with pytest.raises(SystemExit):
                 cmd_bridge(MagicMock(action="logs"))
+
+
+@pytest.mark.unit
+class TestStopBridge:
+    """Tests for _stop_bridge() helper."""
+
+    def test_returns_false_when_not_running(self, capsys):
+        """Returns False and prints nothing when no bridge process found."""
+        with patch(
+            "agentibridge.cli.subprocess.run",
+            return_value=MagicMock(stdout="", returncode=1),
+        ):
+            result = _stop_bridge()
+
+        assert result is False
+        assert capsys.readouterr().out == ""
+
+    def test_returns_true_and_kills(self, capsys):
+        """Returns True, kills PIDs, and prints message."""
+        calls = []
+
+        def se(cmd, **kw):
+            calls.append(cmd)
+            if "pgrep" in cmd:
+                return MagicMock(stdout="1234\n5678", returncode=0)
+            return _ok()
+
+        with patch("agentibridge.cli.subprocess.run", side_effect=se):
+            result = _stop_bridge()
+
+        assert result is True
+        output = capsys.readouterr().out
+        assert "[bridge]" in output
+        assert "1234" in output
+        # Verify kill was called with the PIDs
+        assert ["kill", "1234", "5678"] in calls
+
+
+@pytest.mark.unit
+class TestCmdStop:
+    """Tests for cmd_stop() command."""
+
+    def test_no_docker_exits(self):
+        """Exits when docker is not installed."""
+        with (
+            patch("shutil.which", return_value=None),
+            pytest.raises(SystemExit),
+        ):
+            cmd_stop(MagicMock())
+
+    def test_runs_compose_down_and_stops_bridge(self):
+        """Calls docker compose down, then stops the bridge."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("agentibridge.cli._ensure_stack_dir", return_value=Path("/tmp/stack")),
+            patch("agentibridge.cli._compose_cmd", return_value=["docker", "compose"]),
+            patch("agentibridge.cli.subprocess.run") as mock_run,
+            patch("agentibridge.cli._stop_bridge") as mock_bridge,
+        ):
+            cmd_stop(MagicMock())
+
+        mock_run.assert_called_once_with(["docker", "compose", "down"], check=True)
+        mock_bridge.assert_called_once()
