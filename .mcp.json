@@ -2,7 +2,7 @@
   "mcpServers": {
     "agentibridge": {
       "type": "http",
-      "url": "http://localhost:8100/mcp",
+      "url": "${AGENTIBRIDGE_MCP_URL}",
       "headers": {
         "X-API-Key": "${AGENTIBRIDGE_API_KEYS}"
       }

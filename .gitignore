@@ -14,3 +14,4 @@ _site/
 .jekyll-cache/
 Gemfile.lock
 .vscode
+CLAUDE.local.md
