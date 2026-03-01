@@ -1,0 +1,17 @@
+apiVersion: v2
+name: agentibridge
+description: MCP session indexer — watches Claude Code transcripts, query active workers
+type: application
+version: 0.0.0  # replaced by CI during helm package
+appVersion: "0.0.0"  # replaced by CI during helm package
+keywords:
+  - claude
+  - mcp
+  - sessions
+  - agents
+home: https://github.com/The-Cloud-Clock-Work/agentibridge
+sources:
+  - https://github.com/The-Cloud-Clock-Work/agentibridge
+maintainers:
+  - name: The Cloud Clock Work
+    url: https://github.com/The-Cloud-Clock-Work

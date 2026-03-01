@@ -1,0 +1,83 @@
+# Agentibridge Helm Chart — Default Values
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# Image
+# -----------------------------------------------------------------------------
+image:
+  repository: tccw/agentibridge
+  tag: "0.2.12"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# -----------------------------------------------------------------------------
+# Replicas — stateless MCP server
+# -----------------------------------------------------------------------------
+replicas: 1
+
+# -----------------------------------------------------------------------------
+# Application configuration
+# -----------------------------------------------------------------------------
+config:
+  transport: sse
+  host: "0.0.0.0"
+  port: 8100
+  # Paths inside the container (mounted from shared PVC)
+  projectsDir: "/claude/.claude/projects"
+  plansDir: "/claude/.claude/plans"
+  historyFile: "/claude/.claude/history.jsonl"
+  pollInterval: "60"
+
+# -----------------------------------------------------------------------------
+# Shared volume — reference to existing PVC (read-only mount)
+# -----------------------------------------------------------------------------
+# Name of an existing PVC to mount at /claude (read-only).
+# Agentibridge reads Claude Code session transcripts from this volume.
+sharedPvcName: agenticore-shared
+
+# -----------------------------------------------------------------------------
+# Secret reference
+# -----------------------------------------------------------------------------
+# Name of the K8s Secret containing sensitive values.
+# Created by ExternalSecret from AWS anton/k8s/agentibridge.
+# Expected keys: redis-url, api-key
+secretName: agentibridge-secrets
+
+# -----------------------------------------------------------------------------
+# Service
+# -----------------------------------------------------------------------------
+service:
+  type: LoadBalancer
+  port: 8100
+  # Optional: pin MetalLB IP
+  # loadBalancerIP: ""
+  annotations: {}
+
+# -----------------------------------------------------------------------------
+# Resource requests and limits
+# -----------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# -----------------------------------------------------------------------------
+# Extra environment variables
+# -----------------------------------------------------------------------------
+extraEnv: []
+
+# -----------------------------------------------------------------------------
+# Pod settings
+# -----------------------------------------------------------------------------
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

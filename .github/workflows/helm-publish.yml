@@ -1,0 +1,26 @@
+name: Publish Helm chart
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  # Gate job: only runs on manual dispatch, requires release environment approval.
+  # Skipped automatically on tag pushes — downstream job proceeds without waiting.
+  gate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: echo "Manual dispatch approved"
+
+  publish:
+    needs: gate
+    if: always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
+    uses: The-Cloud-Clock-Work/.github/.github/workflows/helm-publish-reusable.yml@main
+    with:
+      chart_path: charts/agentibridge
+    permissions:
+      contents: read
+      packages: write
