@@ -99,6 +99,9 @@ AGENTIBRIDGE_HOST=0.0.0.0
 AGENTIBRIDGE_PORT=8100
 AGENTIBRIDGE_API_KEYS=          # comma-separated, empty = no auth
 
+# Claude Code home directory (all paths derive from this)
+CLAUDE_CODE_HOME_DIR=~/.claude       # default; projects, plans, history, memory all under here
+
 # Collector
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
@@ -131,9 +134,7 @@ DISPATCH_BRIDGE_PORT=8101       # port the dispatch bridge listens on
 # Cloudflare Tunnel (optional — use docker compose --profile tunnel)
 CLOUDFLARE_TUNNEL_TOKEN=        # set for named tunnel; leave empty for quick tunnel
 
-# Knowledge Catalog (Phase 5)
-AGENTIBRIDGE_PLANS_DIR=~/.claude/plans
-AGENTIBRIDGE_HISTORY_FILE=~/.claude/history.jsonl
+# Knowledge Catalog (Phase 5) — paths derived from CLAUDE_CODE_HOME_DIR
 AGENTIBRIDGE_MAX_HISTORY_ENTRIES=5000
 AGENTIBRIDGE_MAX_MEMORY_CONTENT=51200
 AGENTIBRIDGE_MAX_PLAN_CONTENT=102400

@@ -59,7 +59,7 @@ AgentiBridge has two run modes that can run simultaneously without conflict:
 |----------|---------|-------------|
 | `AGENTIBRIDGE_POLL_INTERVAL` | `60` | How often the collector scans for new transcript data (seconds). Minimum: 5 |
 | `AGENTIBRIDGE_MAX_ENTRIES` | `500` | Maximum transcript entries to store per session in Redis. `0` = unlimited (use with caution) |
-| `AGENTIBRIDGE_PROJECTS_DIR` | `~/.claude/projects` | Directory where Claude Code stores session transcripts |
+| `CLAUDE_CODE_HOME_DIR` | `~/.claude` | Claude Code home directory. All paths (projects, plans, history, memory) derive from this |
 
 ### Storage — Postgres + pgvector (semantic search)
 
@@ -116,8 +116,6 @@ When OAuth is enabled, `AGENTIBRIDGE_API_KEYS` still works as a fallback — Bea
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTIBRIDGE_PLANS_DIR` | `~/.claude/plans` | Directory containing plan markdown files. Defaults to sibling of projects dir |
-| `AGENTIBRIDGE_HISTORY_FILE` | `~/.claude/history.jsonl` | Path to Claude Code global prompt history file |
 | `AGENTIBRIDGE_MAX_HISTORY_ENTRIES` | `5000` | Maximum history entries to store in Redis. `0` = unlimited |
 | `AGENTIBRIDGE_MAX_MEMORY_CONTENT` | `51200` | Maximum bytes to read from a single memory file (50KB) |
 | `AGENTIBRIDGE_MAX_PLAN_CONTENT` | `102400` | Maximum bytes to read from a single plan file (100KB) |

@@ -240,12 +240,8 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     # --- Transcripts ---
     print("\n[Transcripts]")
-    projects_dir = Path(
-        os.getenv(
-            "AGENTIBRIDGE_PROJECTS_DIR",
-            str(Path.home() / ".claude" / "projects"),
-        )
-    )
+    claude_home = Path(os.getenv("CLAUDE_CODE_HOME_DIR", str(Path.home() / ".claude")))
+    projects_dir = claude_home / "projects"
     if projects_dir.exists():
         jsonl_count = sum(1 for _ in projects_dir.rglob("*.jsonl"))
         print(f"  directory: {projects_dir}")
@@ -301,7 +297,7 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("  AGENTIBRIDGE_API_KEYS           Comma-separated API keys")
     print("  AGENTIBRIDGE_POLL_INTERVAL      Poll interval in seconds (default: 60)")
     print("  AGENTIBRIDGE_MAX_ENTRIES        Max entries per session (default: 500)")
-    print("  AGENTIBRIDGE_PROJECTS_DIR       Claude projects directory")
+    print("  CLAUDE_CODE_HOME_DIR            Claude Code home directory (~/.claude)")
     print("  POSTGRES_URL                    Postgres connection URL (pgvector)")
     print("  PGVECTOR_DIMENSIONS             Embedding vector dimensions (default: 1536)")
     print("  LLM_API_BASE                    OpenAI-compatible API base URL")
@@ -732,7 +728,7 @@ def cmd_config(args: argparse.Namespace) -> None:
         ("AGENTIBRIDGE_API_KEYS", ""),
         ("AGENTIBRIDGE_POLL_INTERVAL", "60"),
         ("AGENTIBRIDGE_MAX_ENTRIES", "500"),
-        ("AGENTIBRIDGE_PROJECTS_DIR", str(Path.home() / ".claude" / "projects")),
+        ("CLAUDE_CODE_HOME_DIR", str(Path.home() / ".claude")),
         ("AGENTIBRIDGE_ENABLED", "true"),
         ("POSTGRES_URL", ""),
         ("PGVECTOR_DIMENSIONS", "1536"),
@@ -777,7 +773,7 @@ AGENTIBRIDGE_PORT=8100
 # Collector
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
-# AGENTIBRIDGE_PROJECTS_DIR=~/.claude/projects
+# CLAUDE_CODE_HOME_DIR=~/.claude
 
 # Postgres + pgvector (required for semantic search vector storage)
 # POSTGRES_URL=postgresql://DB_USER:DB_PASSWORD@localhost:5432/agentibridge
