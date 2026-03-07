@@ -198,9 +198,7 @@ CLAUDE_BINARY=/usr/local/bin/claude
 CLAUDE_DISPATCH_MODEL=sonnet
 CLAUDE_DISPATCH_TIMEOUT=600
 
-# Knowledge Catalog (Phase 5 — defaults work out of the box)
-# AGENTIBRIDGE_PLANS_DIR=~/.claude/plans
-# AGENTIBRIDGE_HISTORY_FILE=~/.claude/history.jsonl
+# Knowledge Catalog (Phase 5 — paths derived from CLAUDE_CODE_HOME_DIR)
 # AGENTIBRIDGE_MAX_HISTORY_ENTRIES=5000
 
 # Logging
