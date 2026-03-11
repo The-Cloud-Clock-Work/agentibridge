@@ -60,16 +60,10 @@ class SessionStore:
     def __init__(self) -> None:
         self._redis = None
         self._redis_checked = False
-        self._projects_dir = Path(
-            os.getenv(
-                "AGENTIBRIDGE_PROJECTS_DIR",
-                str(Path.home() / ".claude" / "projects"),
-            )
-        )
-        self._plans_dir = Path(os.getenv("AGENTIBRIDGE_PLANS_DIR", str(Path.home() / ".claude" / "plans")))
-        self._history_file = Path(
-            os.getenv("AGENTIBRIDGE_HISTORY_FILE", str(Path.home() / ".claude" / "history.jsonl"))
-        )
+        _home = Path(os.getenv("CLAUDE_CODE_HOME_DIR", str(Path.home() / ".claude")))
+        self._projects_dir = _home / "projects"
+        self._plans_dir = _home / "plans"
+        self._history_file = _home / "history.jsonl"
 
     # ------------------------------------------------------------------
     # Redis connection (lazy, fail-safe)

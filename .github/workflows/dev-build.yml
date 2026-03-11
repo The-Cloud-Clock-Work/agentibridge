@@ -1,0 +1,66 @@
+name: Dev Build
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or ref to build from"
+        required: false
+        default: "dev"
+        type: string
+      tag:
+        description: "Image tag"
+        required: false
+        default: "dev"
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REPO_LC: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lowercase image name
+        run: echo "REPO_LC=${REPO_LC,,}" >> "$GITHUB_ENV"
+
+      - name: Compute tags
+        id: tags
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            SHORT_SHA="${GITHUB_SHA::7}"
+            echo "image=ghcr.io/${REPO_LC,,}:dev,ghcr.io/${REPO_LC,,}:dev-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            TAG="${{ inputs.tag }}"
+            echo "image=ghcr.io/${REPO_LC,,}:${TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.ref }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push agentibridge
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

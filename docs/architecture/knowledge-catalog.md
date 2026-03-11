@@ -105,13 +105,10 @@ When Redis is unavailable, all operations fall back to direct filesystem reads:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTIBRIDGE_PLANS_DIR` | `~/.claude/plans` | Plans directory path |
-| `AGENTIBRIDGE_HISTORY_FILE` | `~/.claude/history.jsonl` | History file path |
+| `CLAUDE_CODE_HOME_DIR` | `~/.claude` | Claude Code home directory. All paths derive from this: `{home}/projects/`, `{home}/plans/`, `{home}/history.jsonl`, `{home}/projects/{project}/memory/` |
 | `AGENTIBRIDGE_MAX_HISTORY_ENTRIES` | `5000` | Max history entries in Redis |
 | `AGENTIBRIDGE_MAX_MEMORY_CONTENT` | `51200` | Max bytes per memory file (50KB) |
 | `AGENTIBRIDGE_MAX_PLAN_CONTENT` | `102400` | Max bytes per plan file (100KB) |
-
-Defaults derive from `AGENTIBRIDGE_PROJECTS_DIR`'s parent directory, so if you change the projects dir, plans and history paths adjust automatically.
 
 ## Docker
 

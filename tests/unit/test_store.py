@@ -860,10 +860,12 @@ class TestSessionStoreInit:
         expected = Path.home() / ".claude" / "projects"
         assert store._projects_dir == expected
 
-    def test_custom_projects_dir_via_env(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("AGENTIBRIDGE_PROJECTS_DIR", str(tmp_path))
+    def test_custom_home_dir_via_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODE_HOME_DIR", str(tmp_path))
         store = SessionStore()
-        assert store._projects_dir == tmp_path
+        assert store._projects_dir == tmp_path / "projects"
+        assert store._plans_dir == tmp_path / "plans"
+        assert store._history_file == tmp_path / "history.jsonl"
 
     def test_lazy_redis_not_checked_on_init(self):
         store = SessionStore()

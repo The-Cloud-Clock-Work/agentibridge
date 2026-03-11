@@ -49,12 +49,8 @@ spec:
               value: {{ .Values.config.host | quote }}
             - name: AGENTIBRIDGE_PORT
               value: {{ .Values.config.port | quote }}
-            - name: AGENTIBRIDGE_PROJECTS_DIR
-              value: {{ .Values.config.projectsDir | quote }}
-            - name: AGENTIBRIDGE_PLANS_DIR
-              value: {{ .Values.config.plansDir | quote }}
-            - name: AGENTIBRIDGE_HISTORY_FILE
-              value: {{ .Values.config.historyFile | quote }}
+            - name: CLAUDE_CODE_HOME_DIR
+              value: {{ .Values.config.claudeHomeDir | quote }}
             - name: AGENTIBRIDGE_POLL_INTERVAL
               value: {{ .Values.config.pollInterval | quote }}
             - name: REDIS_URL

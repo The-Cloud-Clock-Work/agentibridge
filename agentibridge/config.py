@@ -67,11 +67,14 @@ AGENTIBRIDGE_ENABLED = _env_bool("AGENTIBRIDGE_ENABLED", "true")
 # Polling interval in seconds (minimum 5s)
 AGENTIBRIDGE_POLL_INTERVAL = _env_int("AGENTIBRIDGE_POLL_INTERVAL", "60", min_val=5)
 
-# Base directory for Claude transcript files
-AGENTIBRIDGE_PROJECTS_DIR = os.getenv(
-    "AGENTIBRIDGE_PROJECTS_DIR",
-    str(Path.home() / ".claude" / "projects"),
+# Claude Code home directory — single root for all paths
+CLAUDE_CODE_HOME_DIR = os.getenv(
+    "CLAUDE_CODE_HOME_DIR",
+    str(Path.home() / ".claude"),
 )
+
+# Derived paths — all relative to CLAUDE_CODE_HOME_DIR
+AGENTIBRIDGE_PROJECTS_DIR = str(Path(CLAUDE_CODE_HOME_DIR) / "projects")
 
 # Maximum entries to store per session in Redis (0 = unlimited)
 AGENTIBRIDGE_MAX_ENTRIES = _env_int("AGENTIBRIDGE_MAX_ENTRIES", "500", min_val=0)
@@ -134,12 +137,9 @@ OAUTH_ALLOWED_SCOPES = os.getenv("OAUTH_ALLOWED_SCOPES", "")
 # AGENTIBRIDGE — KNOWLEDGE CATALOG (Phase 5)
 # =============================================================================
 
-# Derive defaults from the projects dir parent (~/.claude)
-_CLAUDE_BASE_DIR = str(Path(AGENTIBRIDGE_PROJECTS_DIR).parent)
+AGENTIBRIDGE_PLANS_DIR = str(Path(CLAUDE_CODE_HOME_DIR) / "plans")
 
-AGENTIBRIDGE_PLANS_DIR = os.getenv("AGENTIBRIDGE_PLANS_DIR", str(Path(_CLAUDE_BASE_DIR) / "plans"))
-
-AGENTIBRIDGE_HISTORY_FILE = os.getenv("AGENTIBRIDGE_HISTORY_FILE", str(Path(_CLAUDE_BASE_DIR) / "history.jsonl"))
+AGENTIBRIDGE_HISTORY_FILE = str(Path(CLAUDE_CODE_HOME_DIR) / "history.jsonl")
 
 AGENTIBRIDGE_MAX_HISTORY_ENTRIES = _env_int("AGENTIBRIDGE_MAX_HISTORY_ENTRIES", "5000", min_val=0)
 

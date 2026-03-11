@@ -23,8 +23,8 @@ services:
     ports:
       - "8100:8100"
     volumes:
-      # Mount host Claude CLI transcripts (read-only)
-      - ${CLAUDE_PROJECTS_DIR:-~/.claude/projects}:/home/appuser/.claude/projects:ro
+      # Mount host Claude Code home directory (read-only)
+      - ${CLAUDE_DIR:-~/.claude}:/home/appuser/.claude:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file: docker.env
