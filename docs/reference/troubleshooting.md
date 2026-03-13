@@ -117,7 +117,20 @@ See [Connecting Clients — Troubleshooting](../getting-started/connecting-clien
 {"success": true, "results": [], "total": 0}
 ```
 
-**Cause:** Sessions haven't been embedded yet. Embedding happens during the collector poll cycle.
+**Cause:** Sessions haven't been embedded yet. Embedding happens automatically during each collector poll cycle when `AGENTIBRIDGE_EMBEDDING_ENABLED=true` is set.
+
+**Diagnose with the CLI:**
+
+```bash
+agentibridge embeddings              # shows config, chunk counts, coverage
+agentibridge embeddings --check-llm  # also tests LLM endpoint connectivity
+```
+
+**Common reasons for 0 chunks:**
+- Collector hasn't completed its first cycle yet (wait ~60s after startup)
+- `AGENTIBRIDGE_EMBEDDING_ENABLED` is not set to `true`
+- LLM endpoint is unreachable from the container (see "LLM endpoint unreachable" above)
+- Using `agentibridge run --test` but embedding config is only in `docker.env` (not the repo root `.env`) — see the [env file table](cli-commands.md#--test--local-dev-testing-mode)
 
 **Fix:** Trigger an immediate collection:
 
@@ -128,7 +141,7 @@ collect_now
 # Or wait for the next poll cycle (default: 60 seconds)
 ```
 
-Check the chunk count:
+Check the chunk count directly:
 
 ```bash
 docker exec agentibridge-postgres psql -U agentibridge \

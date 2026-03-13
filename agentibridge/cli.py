@@ -1600,17 +1600,12 @@ def _cmd_run_test() -> None:
         print("ERROR: --test must be run from the agentibridge repo root.")
         sys.exit(1)
 
-    # Backup ~/.agentibridge before reset
-    backup_dir = _STACK_DIR.with_name(f"{_STACK_DIR.name}-backup")
+    # Ensure ~/.agentibridge exists — never remove or overwrite it
     if _STACK_DIR.exists():
-        if not backup_dir.exists():
-            shutil.copytree(_STACK_DIR, backup_dir)
-            print(f"[test] Backed up {_STACK_DIR} → {backup_dir}")
-        else:
-            print(f"[test] Backup already exists at {backup_dir} — skipping")
-        shutil.rmtree(_STACK_DIR)
-        print(f"[test] Reset {_STACK_DIR}")
-    _ensure_stack_dir()
+        print(f"[test] Using existing {_STACK_DIR}")
+    else:
+        _ensure_stack_dir()
+        print(f"[test] Created {_STACK_DIR} from templates")
 
     # Ensure repo root .env exists
     env_path = Path(".env")

@@ -1009,7 +1009,7 @@ class TestCmdRunTest:
             _cmd_run_test()
 
     def test_runs_docker_compose_build(self, tmp_path, capsys):
-        """Full test mode: backup, compose up --build, bridge start."""
+        """Full test mode: compose up --build, bridge start."""
         # Create repo-root-like structure
         (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
         (tmp_path / "docker-compose.yml").write_text("services: {}\n")
@@ -1030,10 +1030,7 @@ class TestCmdRunTest:
             patch("agentibridge.cli._STACK_DIR", stack_dir),
             patch("agentibridge.cli.subprocess.run", side_effect=se),
             patch("agentibridge.cli._maybe_start_bridge"),
-            patch("agentibridge.cli._ensure_stack_dir", return_value=stack_dir),
             patch("agentibridge.cli.Path.exists", side_effect=lambda self=None: True),
-            patch("agentibridge.cli.shutil.copytree"),
-            patch("agentibridge.cli.shutil.rmtree"),
             patch("agentibridge.cli.shutil.copy2"),
             patch("builtins.open", MagicMock()),
             patch(
@@ -1044,6 +1041,7 @@ class TestCmdRunTest:
             _cmd_run_test()
 
         output = capsys.readouterr().out
+        assert "Using existing" in output
         assert "Stack started from local source" in output
 
 

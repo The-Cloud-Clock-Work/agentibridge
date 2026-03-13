@@ -111,7 +111,7 @@ Requires:
 - `AGENTIBRIDGE_EMBEDDING_ENABLED=true` (opt-in flag, defaults to `false`)
 - LLM API configured (`LLM_API_BASE` + `LLM_EMBED_MODEL` env vars)
 - Postgres with pgvector (`POSTGRES_URL`)
-- Sessions embedded via `embed_session()`
+- Sessions must be embedded (happens automatically — see below)
 
 ### `generate_summary`
 
@@ -121,6 +121,30 @@ Returns: JSON with AI-generated summary
 ```
 
 Uses Claude Sonnet to produce 2-3 sentence session summaries.
+
+## Automatic Embedding
+
+The collector automatically embeds sessions when `AGENTIBRIDGE_EMBEDDING_ENABLED=true` is set. No manual embedding step is needed.
+
+**How it works:**
+
+1. The collector starts immediately on server boot (not lazily on first tool call)
+2. Each poll cycle (default: 60s), the collector indexes new transcript entries into Redis
+3. After indexing, sessions that received new entries are embedded into Postgres via the LLM API
+4. Only updated sessions are embedded each cycle — not the entire corpus
+
+**Embedding is resilient:**
+- If the LLM API is down, embedding is skipped for that cycle (collection still works)
+- If one session fails to embed, the collector continues with the next
+- `ON CONFLICT DO UPDATE` makes re-embedding safe (idempotent)
+- Each conversation turn becomes one chunk (~50 chunks per long session)
+
+**Monitor progress with the CLI:**
+
+```bash
+agentibridge embeddings              # config, chunk counts, coverage %
+agentibridge embeddings --check-llm  # also test LLM endpoint connectivity
+```
 
 ## Configuration
 
