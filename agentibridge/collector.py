@@ -27,8 +27,9 @@ from agentibridge.store import SessionStore
 class SessionCollector:
     """Incremental transcript collector with background polling."""
 
-    def __init__(self, store: SessionStore) -> None:
+    def __init__(self, store: SessionStore, embedder=None) -> None:
         self._store = store
+        self._embedder = embedder
         self._interval = int(os.getenv("AGENTIBRIDGE_POLL_INTERVAL", "60"))
         _home = Path(os.getenv("CLAUDE_CODE_HOME_DIR", str(Path.home() / ".claude")))
         self._projects_dir = _home / "projects"
@@ -63,6 +64,7 @@ class SessionCollector:
         files_scanned = 0
         sessions_updated = 0
         entries_added = 0
+        updated_session_ids: list[str] = []
 
         try:
             all_files = scan_projects_dir(self._projects_dir)
@@ -74,6 +76,7 @@ class SessionCollector:
                     if result["updated"]:
                         sessions_updated += 1
                         entries_added += result["entries_added"]
+                        updated_session_ids.append(session_id)
                 except Exception as e:
                     log(
                         "Collector: file scan error",
@@ -92,6 +95,11 @@ class SessionCollector:
         plans_count = self._scan_plans()
         history_count = self._scan_history()
 
+        # Phase 2: embed updated sessions (if embedder is available)
+        embedded_count = 0
+        if self._embedder and updated_session_ids:
+            embedded_count = self._embed_sessions(updated_session_ids)
+
         duration_ms = int((time() - start) * 1000)
 
         return {
@@ -101,6 +109,7 @@ class SessionCollector:
             "memory_files_indexed": memory_count,
             "plans_indexed": plans_count,
             "history_entries_added": history_count,
+            "sessions_embedded": embedded_count,
             "duration_ms": duration_ms,
         }
 
@@ -109,10 +118,12 @@ class SessionCollector:
         # Initial collection
         try:
             stats = self.collect_once()
+            embedded = stats.get("sessions_embedded", 0)
+            embed_msg = f", {embedded} embedded" if embedded else ""
             print(
                 f"Initial collection: {stats['files_scanned']} files, "
                 f"{stats['sessions_updated']} updated, "
-                f"{stats['entries_added']} entries, "
+                f"{stats['entries_added']} entries{embed_msg}, "
                 f"{stats['duration_ms']}ms",
                 file=sys.stderr,
             )
@@ -171,6 +182,25 @@ class SessionCollector:
         except Exception:
             pass
         return ""
+
+    # ------------------------------------------------------------------
+    # Phase 2: Embedding pass
+    # ------------------------------------------------------------------
+
+    def _embed_sessions(self, session_ids: list[str]) -> int:
+        """Embed recently-updated sessions. Returns count of sessions embedded."""
+        if not self._embedder.is_available():
+            return 0
+        count = 0
+        for sid in session_ids:
+            try:
+                chunks = self._embedder.embed_session(sid)
+                if chunks > 0:
+                    count += 1
+            except Exception as e:
+                log("Collector: embedding error", {"session_id": sid, "error": str(e)})
+                continue
+        return count
 
     # ------------------------------------------------------------------
     # Phase 5: Knowledge catalog scan passes

@@ -106,6 +106,7 @@ See [Configuration Reference](docs/reference/configuration.md) for all variables
 | `agentibridge connect` | Ready-to-paste client configs |
 | `agentibridge tunnel` | Tunnel status and URL |
 | `agentibridge tunnel setup` | Interactive tunnel wizard |
+| `agentibridge embeddings` | Embedding pipeline status (config, LLM, Postgres, coverage) |
 | `agentibridge help` | Full reference |
 
 See [CLI Reference](docs/reference/cli-commands.md) for all commands and flags.
@@ -342,6 +343,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for testing, linting, and CI details.
 - [Releases & CI/CD](docs/deployment/releases.md) — Release process and automation
 - [Internal Architecture](docs/architecture/internals.md) — Key modules and design patterns
 - [Knowledge Catalog](docs/architecture/knowledge-catalog.md) — Memory files, plans, and prompt history
+- [Troubleshooting](docs/reference/troubleshooting.md) — Common issues and solutions
 - [Contributing](CONTRIBUTING.md)
 
 ---

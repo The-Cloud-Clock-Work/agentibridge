@@ -190,3 +190,11 @@ Raw transcripts live in `~/.claude/projects/{path-encoded}/` as `.jsonl` files:
 - **Path encoding**: `/home/user/dev/project` -> `-home-user-dev-project`
 - **Entry types**: `user`, `assistant`, `summary`, `system`
 - **Filtered types**: `queue-operation`, `file-history-snapshot`, `progress`
+
+## Troubleshooting
+
+See [docs/reference/troubleshooting.md](docs/reference/troubleshooting.md) for common issues. Key gotchas:
+
+- **`AGENTIBRIDGE_EMBEDDING_ENABLED=true`** must be set explicitly to enable semantic search (defaults to `false`)
+- **`POSTGRES_PASSWORD`** only takes effect on first volume init — changing it in `docker.env` later requires `ALTER USER` inside Postgres or deleting the volume
+- **`agentibridge restart`** does not reload `docker.env` — use `agentibridge stop && agentibridge run` to recreate containers

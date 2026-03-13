@@ -17,7 +17,8 @@ cd "$(dirname "$0")/../.."
 
 PASS=0
 FAIL=0
-TOTAL=9
+SKIP=0
+TOTAL=13
 MAX_RETRIES=${SMOKE_TEST_RETRIES:-2}
 
 CLAUDE_CMD="claude -p --dangerously-skip-permissions --output-format json --max-turns 3"
@@ -174,6 +175,26 @@ check_search_history() {
   echo "$result" | grep -qiE "(history|entry|display|result)" || return 1
 }
 
+check_get_session_segment() {
+  local result="$1"
+  echo "$result" | grep -qiE "(entries|segment|message|transcript)" || return 1
+}
+
+check_search_semantic() {
+  local result="$1"
+  echo "$result" | grep -qiE "(result|match|score|session|semantic|success)" || return 1
+}
+
+check_generate_summary() {
+  local result="$1"
+  echo "$result" | grep -qiE "(summary|session|transcript)" || return 1
+}
+
+check_get_memory_file() {
+  local result="$1"
+  echo "$result" | grep -qiE "(content|memory|file)" || return 1
+}
+
 # ── Test cases ──────────────────────────────────────────────────────────────
 
 echo "Running ${TOTAL} MCP smoke tests (max_retries=${MAX_RETRIES})..."
@@ -215,11 +236,48 @@ run_test 9 "search_history" \
   "Use the search_history MCP tool with query='test' and limit=3. Show the raw result." \
   check_search_history
 
+run_test 10 "get_session_segment" \
+  "First call list_sessions with limit=1 to get a session_id, then call get_session_segment with that session_id and last_n=3. Show the result." \
+  check_get_session_segment
+
+run_test 11 "get_memory_file" \
+  "First call list_memory_files to get a file path, then call get_memory_file with that project and file_path. Show the result." \
+  check_get_memory_file
+
+# ── Phase 2: Semantic search (requires embeddings) ────────────────────────
+
+CHUNK_COUNT=$(docker exec agentibridge-postgres psql -U agentibridge -tAc \
+  "SELECT COUNT(*) FROM transcript_chunks" 2>/dev/null || echo "0")
+CHUNK_COUNT=$(echo "$CHUNK_COUNT" | tr -d '[:space:]')
+EMBEDDING_AVAILABLE=false
+[[ "$CHUNK_COUNT" -gt 0 ]] && EMBEDDING_AVAILABLE=true
+
+if [[ "$EMBEDDING_AVAILABLE" == "true" ]]; then
+  echo ""
+  echo "Embeddings available (${CHUNK_COUNT} chunks) — running Phase 2 tests"
+
+  run_test 12 "search_semantic" \
+    "Use the search_semantic MCP tool with query='Docker' and limit=3. Show the raw result." \
+    check_search_semantic
+
+  run_test 13 "generate_summary" \
+    "First call list_sessions with limit=1 to get a session_id, then call generate_summary with that session_id. Show the result." \
+    check_generate_summary
+else
+  echo ""
+  echo "No embeddings available — skipping Phase 2 tests"
+  echo "[12/${TOTAL}] SKIP  search_semantic  (no embeddings)"
+  echo "[13/${TOTAL}] SKIP  generate_summary  (no embeddings)"
+  SKIP=$((SKIP + 2))
+  TOTAL=$((TOTAL - 2))
+fi
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "${PASS}/${TOTAL} passed"
+[[ $SKIP -gt 0 ]] && echo "${SKIP} test(s) skipped"
 [[ $FAIL -eq 0 ]] && echo "All tests passed!" || echo "${FAIL} test(s) failed"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 

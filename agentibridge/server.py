@@ -123,10 +123,11 @@ def _get_store():
 def _get_collector():
     global _collector
     if _collector is None:
-        from agentibridge.config import AGENTIBRIDGE_ENABLED
+        from agentibridge.config import AGENTIBRIDGE_ENABLED, AGENTIBRIDGE_EMBEDDING_ENABLED
         from agentibridge.collector import SessionCollector
 
-        _collector = SessionCollector(_get_store())
+        embedder = _get_embedder() if AGENTIBRIDGE_EMBEDDING_ENABLED else None
+        _collector = SessionCollector(_get_store(), embedder=embedder)
         if AGENTIBRIDGE_ENABLED:
             _collector.start()
     return _collector

@@ -354,6 +354,31 @@ Sections:
 
 ---
 
+### `agentibridge embeddings`
+
+Show the full embedding pipeline status: configuration, LLM backend connectivity, Postgres vector storage stats, and embedding coverage.
+
+```
+agentibridge embeddings [--check-llm]
+```
+
+Sections:
+
+| Section | Content |
+|---------|---------|
+| `[Config]` | `AGENTIBRIDGE_EMBEDDING_ENABLED`, `LLM_API_BASE`, `LLM_API_KEY` (redacted), `LLM_EMBED_MODEL`, `PGVECTOR_DIMENSIONS` |
+| `[LLM Backend]` | Whether the LLM endpoint is configured; with `--check-llm`, sends a test embedding request |
+| `[Postgres]` | Connection status, `transcript_chunks` table existence, total chunks, sessions embedded, table size, last embedded timestamp |
+| `[Coverage]` | Total sessions in Redis vs sessions with embeddings, with a coverage percentage |
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--check-llm` | Send a real (tiny) embedding request to the LLM endpoint to verify connectivity. Off by default to avoid API costs/latency |
+
+---
+
 ## `docker.env` Required Variables
 
 The following variables are validated by `_validate_env` before every
