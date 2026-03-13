@@ -20,6 +20,7 @@ from agentibridge.cli import (
     cmd_update,
     cmd_run,
     cmd_bridge,
+    cmd_embeddings,
     _container_health,
     _systemd_active,
     _cloudflared_hostname,
@@ -1200,3 +1201,299 @@ class TestCmdStop:
 
         mock_run.assert_called_once_with(["docker", "compose", "down"], check=True)
         mock_bridge.assert_called_once()
+
+
+@pytest.mark.unit
+class TestCmdEmbeddings:
+    """Tests for agentibridge embeddings command."""
+
+    def _make_args(self, check_llm=False):
+        args = MagicMock()
+        args.check_llm = check_llm
+        return args
+
+    def _mock_redis(self, return_value=None):
+        mock_mod = MagicMock(get_redis=MagicMock(return_value=return_value))
+        return patch.dict("sys.modules", {"agentibridge.redis_client": mock_mod})
+
+    def _mock_pg(self, return_value=None):
+        mock_mod = MagicMock(get_pg=MagicMock(return_value=return_value))
+        return patch.dict("sys.modules", {"agentibridge.pg_client": mock_mod})
+
+    def _mock_llm(self, embed_text=None, side_effect=None):
+        mock_mod = MagicMock()
+        if side_effect:
+            mock_mod.embed_text.side_effect = side_effect
+        elif embed_text is not None:
+            mock_mod.embed_text.return_value = embed_text
+        return patch.dict("sys.modules", {"agentibridge.llm_client": mock_mod})
+
+    def _native_mode(self):
+        """Patch _is_stack_running to return False (native/non-Docker mode)."""
+        return patch("agentibridge.cli._is_stack_running", return_value=False)
+
+    # ── Native mode tests ──────────────────────────────────────────────
+
+    def test_no_env_vars(self, capsys):
+        """Shows 'not configured' when no env vars are set."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+            "AGENTIBRIDGE_EMBEDDING_ENABLED": "false",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "Embedding Status" in output
+        assert "source: env" in output
+        assert "AGENTIBRIDGE_EMBEDDING_ENABLED: false" in output
+        assert "LLM_API_BASE: (not set)" in output
+        assert "LLM_API_KEY: (not set)" in output
+        assert "not configured (LLM_API_BASE and LLM_API_KEY required)" in output
+        assert "not configured (POSTGRES_URL not set)" in output
+
+    def test_config_values_shown(self, capsys):
+        """Shows config values when env vars are set."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "sk-test-key-abcdef123456",
+            "LLM_EMBED_MODEL": "text-embedding-3-small",
+            "PGVECTOR_DIMENSIONS": "1536",
+            "AGENTIBRIDGE_EMBEDDING_ENABLED": "true",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "AGENTIBRIDGE_EMBEDDING_ENABLED: true" in output
+        assert "LLM_API_BASE: https://llm.example.com/v1" in output
+        assert "sk-tes...3456" in output
+        assert "text-embedding-3-small" in output
+        assert "configured (use --check-llm to test connectivity)" in output
+
+    def test_api_key_redacted_short(self, capsys):
+        """Short API keys are fully masked."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "shortkey",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "LLM_API_KEY: ***" in output
+
+    def test_check_llm_reachable(self, capsys):
+        """--check-llm calls embed_text and shows vector dim in native mode."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "sk-test-key-abcdef123456",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_llm(embed_text=[0.1] * 1536),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args(check_llm=True))
+        output = capsys.readouterr().out
+        assert "reachable (returned 1536-dim vector)" in output
+
+    def test_check_llm_error(self, capsys):
+        """--check-llm shows error when endpoint fails."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "sk-test-key-abcdef123456",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_llm(side_effect=RuntimeError("connection refused")),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args(check_llm=True))
+        output = capsys.readouterr().out
+        assert "status: error (connection refused)" in output
+
+    def test_postgres_stats(self, capsys):
+        """Shows chunk/session counts from Postgres in native mode."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "postgresql://localhost:5432/test",
+        }
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.side_effect = [
+            (True,),       # table exists
+            (150, 10),     # count, distinct sessions
+            ("48 kB",),    # table size
+            ("2026-03-13 14:00:00+00:00",),  # last embedded
+        ]
+        mock_pool = MagicMock()
+        mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_pg(mock_pool),
+            self._mock_redis(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "status: connected" in output
+        assert "total chunks: 150" in output
+        assert "sessions embedded: 10" in output
+        assert "table size: 48 kB" in output
+        assert "last embedded: 2026-03-13 14:00:00+00:00" in output
+
+    def test_postgres_no_table(self, capsys):
+        """Shows 'table not created yet' when transcript_chunks doesn't exist."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "postgresql://localhost:5432/test",
+        }
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = (False,)
+        mock_pool = MagicMock()
+        mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_pg(mock_pool),
+            self._mock_redis(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "connected (table not created yet)" in output
+
+    def test_coverage_with_redis(self, capsys):
+        """Shows coverage percentage when Redis is available in native mode."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+            "REDIS_KEY_PREFIX": "agentibridge",
+        }
+        mock_redis = MagicMock()
+        mock_redis.zcard.return_value = 100
+
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(mock_redis),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "total sessions in Redis: 100" in output
+        assert "sessions with embeddings: 0" in output
+        assert "coverage: 0.0%" in output
+
+    # ── Docker mode tests ──────────────────────────────────────────────
+
+    def test_docker_reads_from_docker_env(self, capsys, tmp_path):
+        """In Docker mode, config values come from docker.env, not shell env."""
+        env_file = tmp_path / "docker.env"
+        env_file.write_text(
+            "AGENTIBRIDGE_EMBEDDING_ENABLED=true\n"
+            "LLM_API_BASE=https://llm.docker.test/v1\n"
+            "LLM_API_KEY=sk-docker-secret-key-1234\n"
+            "LLM_EMBED_MODEL=nomic-embed-text\n"
+            "PGVECTOR_DIMENSIONS=768\n"
+            "REDIS_KEY_PREFIX=agentibridge\n"
+        )
+        with (
+            patch("agentibridge.cli._is_stack_running", return_value=True),
+            patch("agentibridge.cli._STACK_DIR", tmp_path),
+            patch("agentibridge.cli._container_health", return_value=None),
+            patch("agentibridge.cli._docker_exec_redis", return_value=None),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "source: docker.env" in output
+        assert "AGENTIBRIDGE_EMBEDDING_ENABLED: true" in output
+        assert "LLM_API_BASE: https://llm.docker.test/v1" in output
+        assert "sk-doc...1234" in output
+        assert "nomic-embed-text" in output
+        assert "768" in output
+
+    def test_docker_postgres_stats(self, capsys, tmp_path):
+        """Docker mode queries Postgres via docker exec."""
+        env_file = tmp_path / "docker.env"
+        env_file.write_text(
+            "LLM_API_BASE=\n"
+            "LLM_API_KEY=\n"
+            "POSTGRES_USER=agentibridge\n"
+            "REDIS_KEY_PREFIX=agentibridge\n"
+        )
+        with (
+            patch("agentibridge.cli._is_stack_running", return_value=True),
+            patch("agentibridge.cli._STACK_DIR", tmp_path),
+            patch("agentibridge.cli._container_health", return_value="healthy (running)"),
+            patch("agentibridge.cli._docker_exec_query") as mock_query,
+            patch("agentibridge.cli._docker_exec_redis", return_value="50"),
+        ):
+            mock_query.side_effect = [
+                "t",         # table exists
+                "200|15",    # chunks|sessions
+                "96 kB",     # table size
+                "2026-03-13 10:00:00+00:00",  # last embedded
+            ]
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "total chunks: 200" in output
+        assert "sessions embedded: 15" in output
+        assert "table size: 96 kB" in output
+        assert "last embedded: 2026-03-13 10:00:00+00:00" in output
+        assert "total sessions in Redis: 50" in output
+        assert "coverage: 30.0%" in output
+
+    def test_docker_check_llm_via_exec(self, capsys, tmp_path):
+        """--check-llm in Docker mode uses docker exec into agentibridge container."""
+        env_file = tmp_path / "docker.env"
+        env_file.write_text(
+            "LLM_API_BASE=https://llm.docker.test/v1\n"
+            "LLM_API_KEY=sk-docker-secret-key-1234\n"
+            "REDIS_KEY_PREFIX=agentibridge\n"
+        )
+        with (
+            patch("agentibridge.cli._is_stack_running", return_value=True),
+            patch("agentibridge.cli._STACK_DIR", tmp_path),
+            patch("agentibridge.cli._container_health", return_value=None),
+            patch("agentibridge.cli._docker_exec_redis", return_value=None),
+            patch("agentibridge.cli.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="1536\n", stderr="")
+            cmd_embeddings(self._make_args(check_llm=True))
+        output = capsys.readouterr().out
+        assert "reachable (returned 1536-dim vector)" in output

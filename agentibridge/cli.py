@@ -268,7 +268,7 @@ def cmd_help(args: argparse.Namespace) -> None:
     print(f"AgentiBridge v{_version()} — Claude CLI Transcript MCP Server")
     print("=" * 60)
     print()
-    print("MCP TOOLS (10 total)")
+    print("MCP TOOLS (17 total)")
     print("-" * 60)
     print()
     print("Phase 1 — Foundation:")
@@ -286,11 +286,21 @@ def cmd_help(args: argparse.Namespace) -> None:
     print("Phase 4 — Write-back & Dispatch:")
     print("  restore_session      Load session context for continuation")
     print("  dispatch_task        Dispatch task with session context")
+    print("  get_dispatch_job     Poll a dispatch job for status/output")
+    print("  list_dispatch_jobs   List dispatch jobs with status filter")
+    print()
+    print("Phase 5 — Knowledge Catalog:")
+    print("  list_memory_files    List memory files across projects")
+    print("  get_memory_file      Read a specific memory file")
+    print("  list_plans           List plans sorted by recency")
+    print("  get_plan             Read a plan by codename")
+    print("  search_history       Search the global prompt history")
     print()
     print("CONFIGURATION")
     print("-" * 60)
     print()
     print("  REDIS_URL                       Redis connection URL")
+    print("  AGENTIBRIDGE_EMBEDDING_ENABLED  Enable semantic search (default: false)")
     print("  AGENTIBRIDGE_TRANSPORT          stdio or sse (default: stdio)")
     print("  AGENTIBRIDGE_HOST               Bind address (default: 127.0.0.1)")
     print("  AGENTIBRIDGE_PORT               HTTP port (default: 8100)")
@@ -1041,6 +1051,240 @@ def cmd_locks(args: argparse.Namespace) -> None:
         print("  Done. Next collection cycle will re-index from scratch.")
 
 
+def _docker_exec_query(container: str, query: str, db_user: str = "agentibridge") -> str | None:
+    """Run a psql query inside a Docker container, return stdout or None."""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "psql", "-U", db_user, "-tAc", query],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _docker_exec_redis(container: str, *redis_args: str) -> str | None:
+    """Run a redis-cli command inside a Docker container, return stdout or None."""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "redis-cli", *redis_args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def cmd_embeddings(args: argparse.Namespace) -> None:
+    """Show embedding pipeline status: config, LLM backend, Postgres vectors."""
+    print(f"AgentiBridge v{_version()} — Embedding Status")
+    print("=" * 60)
+
+    docker_mode = _is_stack_running()
+    env_file = _STACK_DIR / _DOCKER_ENV if docker_mode else None
+
+    # ── Helper to read a value from docker.env or shell env ────────────
+    def _env(key: str, default: str = "") -> str:
+        if docker_mode and env_file and env_file.exists():
+            return _read_env_value(key, env_file) or default
+        return os.getenv(key, default)
+
+    # ── Config ─────────────────────────────────────────────────────────
+    print("\n[Config]")
+    source = "docker.env" if docker_mode else "env"
+    embed_enabled = _env("AGENTIBRIDGE_EMBEDDING_ENABLED", "false")
+    llm_base = _env("LLM_API_BASE")
+    llm_key = _env("LLM_API_KEY")
+    llm_model = _env("LLM_EMBED_MODEL", "text-embedding-3-small")
+    pg_dims = _env("PGVECTOR_DIMENSIONS", "1536")
+
+    print(f"  source: {source}")
+    print(f"  AGENTIBRIDGE_EMBEDDING_ENABLED: {embed_enabled}")
+    print(f"  LLM_API_BASE: {llm_base or _NOT_SET}")
+    if llm_key:
+        redacted = llm_key[:6] + "..." + llm_key[-4:] if len(llm_key) > 12 else "***"
+        print(f"  LLM_API_KEY: {redacted}")
+    else:
+        print(f"  LLM_API_KEY: {_NOT_SET}")
+    print(f"  LLM_EMBED_MODEL: {llm_model}")
+    print(f"  PGVECTOR_DIMENSIONS: {pg_dims}")
+
+    # ── LLM Backend ────────────────────────────────────────────────────
+    print("\n[LLM Backend]")
+    if not llm_base or not llm_key:
+        print("  status: not configured (LLM_API_BASE and LLM_API_KEY required)")
+    elif args.check_llm:
+        if docker_mode:
+            # Test from inside the agentibridge container (has the env + network)
+            try:
+                result = subprocess.run(
+                    [
+                        "docker", "exec", "agentibridge", "python", "-c",
+                        "from agentibridge.llm_client import embed_text; "
+                        "v = embed_text('test'); print(len(v))",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if result.returncode == 0:
+                    dims = result.stdout.strip()
+                    print(f"  status: reachable (returned {dims}-dim vector)")
+                else:
+                    err = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown error"
+                    print(f"  status: error ({err})")
+            except Exception as e:
+                print(f"  status: error ({e})")
+        else:
+            try:
+                from agentibridge.llm_client import embed_text
+
+                vec = embed_text("test")
+                print(f"  status: reachable (returned {len(vec)}-dim vector)")
+            except Exception as e:
+                print(f"  status: error ({e})")
+    else:
+        print("  status: configured (use --check-llm to test connectivity)")
+
+    # ── Postgres ───────────────────────────────────────────────────────
+    print("\n[Postgres]")
+    sessions_with_embeddings = 0
+    if docker_mode:
+        health = _container_health("agentibridge-postgres")
+        if health is None or health in ("exited", "dead", "created"):
+            print(f"  container: {health or 'not found'}")
+        else:
+            print(f"  container: {health}")
+            pg_user = _env("POSTGRES_USER", "agentibridge")
+
+            # Check table exists
+            table_check = _docker_exec_query(
+                "agentibridge-postgres",
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                "WHERE table_name = 'transcript_chunks')",
+                pg_user,
+            )
+            if table_check == "f":
+                print("  table: transcript_chunks (not created yet)")
+            elif table_check == "t":
+                stats = _docker_exec_query(
+                    "agentibridge-postgres",
+                    "SELECT COUNT(*) || '|' || COUNT(DISTINCT session_id) FROM transcript_chunks",
+                    pg_user,
+                )
+                if stats and "|" in stats:
+                    total_chunks, embedded = stats.split("|")
+                    sessions_with_embeddings = int(embedded)
+                    print(f"  total chunks: {int(total_chunks):,}")
+                    print(f"  sessions embedded: {sessions_with_embeddings:,}")
+
+                size = _docker_exec_query(
+                    "agentibridge-postgres",
+                    "SELECT pg_size_pretty(pg_total_relation_size('transcript_chunks'))",
+                    pg_user,
+                )
+                if size:
+                    print(f"  table size: {size}")
+
+                last = _docker_exec_query(
+                    "agentibridge-postgres",
+                    "SELECT MAX(created_at) FROM transcript_chunks",
+                    pg_user,
+                )
+                if last:
+                    print(f"  last embedded: {last}")
+                else:
+                    print("  last embedded: (none)")
+            else:
+                print("  status: query failed (could not check table)")
+    else:
+        pg_url = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", ""))
+        if not pg_url:
+            print("  status: not configured (POSTGRES_URL not set)")
+        else:
+            try:
+                from agentibridge.pg_client import get_pg
+
+                pool = get_pg()
+                if pool is None:
+                    print("  status: connection failed")
+                else:
+                    with pool.connection() as conn:
+                        row = conn.execute(
+                            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                            "WHERE table_name = 'transcript_chunks')"
+                        ).fetchone()
+                        if not row[0]:
+                            print("  status: connected (table not created yet)")
+                        else:
+                            stats = conn.execute(
+                                "SELECT COUNT(*), COUNT(DISTINCT session_id) "
+                                "FROM transcript_chunks"
+                            ).fetchone()
+                            total_chunks = stats[0]
+                            sessions_with_embeddings = stats[1]
+                            print("  status: connected")
+                            print(f"  total chunks: {total_chunks:,}")
+                            print(f"  sessions embedded: {sessions_with_embeddings:,}")
+
+                            size_row = conn.execute(
+                                "SELECT pg_size_pretty(pg_total_relation_size('transcript_chunks'))"
+                            ).fetchone()
+                            print(f"  table size: {size_row[0]}")
+
+                            last_row = conn.execute("SELECT MAX(created_at) FROM transcript_chunks").fetchone()
+                            if last_row[0]:
+                                print(f"  last embedded: {last_row[0]}")
+                            else:
+                                print("  last embedded: (none)")
+            except Exception as e:
+                print(f"  status: error ({e})")
+
+    # ── Coverage ───────────────────────────────────────────────────────
+    print("\n[Coverage]")
+    if docker_mode:
+        prefix = _env("REDIS_KEY_PREFIX", "agentibridge")
+        total_raw = _docker_exec_redis("agentibridge-redis", "ZCARD", f"{prefix}:sb:idx:all")
+        if total_raw is not None:
+            total_sessions = int(total_raw)
+            print(f"  total sessions in Redis: {total_sessions:,}")
+            print(f"  sessions with embeddings: {sessions_with_embeddings:,}")
+            if total_sessions > 0:
+                pct = (sessions_with_embeddings / total_sessions) * 100
+                print(f"  coverage: {pct:.1f}%")
+            else:
+                print("  coverage: N/A (no sessions indexed)")
+        else:
+            print("  Redis: unavailable (container not reachable)")
+    else:
+        try:
+            from agentibridge.redis_client import get_redis
+
+            r = get_redis()
+            if r is not None:
+                prefix = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
+                total_sessions = r.zcard(f"{prefix}:sb:idx:all")
+                print(f"  total sessions in Redis: {total_sessions:,}")
+                print(f"  sessions with embeddings: {sessions_with_embeddings:,}")
+                if total_sessions > 0:
+                    pct = (sessions_with_embeddings / total_sessions) * 100
+                    print(f"  coverage: {pct:.1f}%")
+                else:
+                    print("  coverage: N/A (no sessions indexed)")
+            else:
+                print("  Redis: unavailable (cannot compute coverage)")
+        except Exception as e:
+            print(f"  Redis error: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Docker stack commands
 # ---------------------------------------------------------------------------
@@ -1640,6 +1884,12 @@ def main() -> None:
     locks_parser = subparsers.add_parser("locks", help="Show Redis keys, file locks, and bridge resource state")
     locks_parser.add_argument("--clear", action="store_true", help="Clear all position locks (forces re-index)")
 
+    # embeddings
+    embeddings_parser = subparsers.add_parser("embeddings", help="Show embedding pipeline status")
+    embeddings_parser.add_argument(
+        "--check-llm", action="store_true", help="Test LLM endpoint with a real embedding request"
+    )
+
     args = parser.parse_args()
 
     commands = {
@@ -1658,6 +1908,7 @@ def main() -> None:
         "install": cmd_install,
         "uninstall": cmd_uninstall,
         "locks": cmd_locks,
+        "embeddings": cmd_embeddings,
     }
 
     if args.command in commands:

@@ -74,12 +74,23 @@ jobs:
       # ── Start local Docker stack ────────────────────────────────────────
       - name: Generate auth key and create .env
         id: auth
+        env:
+          LLM_API_BASE: ${{ steps.anthropic.outputs.url }}/v1
+          LLM_API_KEY: ${{ steps.resolve_key.outputs.api_key }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           MCP_API_KEY=$(openssl rand -hex 16)
           echo "mcp_api_key=${MCP_API_KEY}" >> "$GITHUB_OUTPUT"
           cp .env.example .env
           echo "CLAUDE_DIR=${{ github.workspace }}/bridge-smoke-dataset/.claude" >> .env
           echo "AGENTIBRIDGE_API_KEYS=${MCP_API_KEY}" >> .env
+          echo "AGENTIBRIDGE_EMBEDDING_ENABLED=true" >> .env
+          echo "LLM_API_BASE=${LLM_API_BASE}" >> .env
+          echo "LLM_API_KEY=${LLM_API_KEY}" >> .env
+          echo "LLM_EMBED_MODEL=text-embedding-3-small" >> .env
+          echo "CF_ACCESS_CLIENT_ID=${CF_ACCESS_CLIENT_ID}" >> .env
+          echo "CF_ACCESS_CLIENT_SECRET=${CF_ACCESS_CLIENT_SECRET}" >> .env
 
       - name: Start Docker Compose
         run: docker compose up --build -d
@@ -114,6 +125,21 @@ jobs:
           print(f'Collected: {stats}')
           assert stats['files_scanned'] >= 4, f'Expected >=4 files, got {stats[\"files_scanned\"]}'
           "
+
+      - name: Wait for embeddings
+        run: |
+          echo "Waiting for embedding generation..."
+          for i in $(seq 1 12); do
+            COUNT=$(docker exec agentibridge-postgres psql -U agentibridge -tAc \
+              "SELECT COUNT(*) FROM transcript_chunks" 2>/dev/null || echo "0")
+            COUNT=$(echo "$COUNT" | tr -d '[:space:]')
+            echo "  attempt ${i}: ${COUNT} chunks"
+            if [[ "$COUNT" -gt 0 ]]; then
+              echo "Embeddings generated!"
+              break
+            fi
+            sleep 10
+          done
 
       # ── Install Claude CLI ──────────────────────────────────────────────
       - name: Install Claude CLI
