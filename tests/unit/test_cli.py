@@ -1347,9 +1347,9 @@ class TestCmdEmbeddings:
         }
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchone.side_effect = [
-            (True,),       # table exists
-            (150, 10),     # count, distinct sessions
-            ("48 kB",),    # table size
+            (True,),  # table exists
+            (150, 10),  # count, distinct sessions
+            ("48 kB",),  # table size
             ("2026-03-13 14:00:00+00:00",),  # last embedded
         ]
         mock_pool = MagicMock()
@@ -1448,12 +1448,7 @@ class TestCmdEmbeddings:
     def test_docker_postgres_stats(self, capsys, tmp_path):
         """Docker mode queries Postgres via docker exec."""
         env_file = tmp_path / "docker.env"
-        env_file.write_text(
-            "LLM_API_BASE=\n"
-            "LLM_API_KEY=\n"
-            "POSTGRES_USER=agentibridge\n"
-            "REDIS_KEY_PREFIX=agentibridge\n"
-        )
+        env_file.write_text("LLM_API_BASE=\nLLM_API_KEY=\nPOSTGRES_USER=agentibridge\nREDIS_KEY_PREFIX=agentibridge\n")
         with (
             patch("agentibridge.cli._is_stack_running", return_value=True),
             patch("agentibridge.cli._STACK_DIR", tmp_path),
@@ -1462,9 +1457,9 @@ class TestCmdEmbeddings:
             patch("agentibridge.cli._docker_exec_redis", return_value="50"),
         ):
             mock_query.side_effect = [
-                "t",         # table exists
-                "200|15",    # chunks|sessions
-                "96 kB",     # table size
+                "t",  # table exists
+                "200|15",  # chunks|sessions
+                "96 kB",  # table size
                 "2026-03-13 10:00:00+00:00",  # last embedded
             ]
             cmd_embeddings(self._make_args())

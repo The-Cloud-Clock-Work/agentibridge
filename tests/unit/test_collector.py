@@ -232,9 +232,11 @@ class TestCollectorEmbedding:
     def test_no_updated_sessions_no_embedding(self, temp_projects_dir):
         """When all sessions are up to date, embedder is not called."""
         store = MagicMock(spec=SessionStore)
+
         # Position matches file size — nothing new
         def fake_position(filepath):
             return Path(filepath).stat().st_size
+
         store.get_file_position.side_effect = fake_position
 
         embedder = MagicMock()

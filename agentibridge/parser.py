@@ -97,9 +97,7 @@ def scan_projects_dir(base_dir: Optional[Path] = None) -> List[Tuple[str, str, P
     Only includes main session files (not subagent files).
     """
     if base_dir is None:
-        base_dir = Path(
-            os.getenv("CLAUDE_CODE_HOME_DIR", str(Path.home() / ".claude"))
-        ) / "projects"
+        base_dir = Path(os.getenv("CLAUDE_CODE_HOME_DIR", str(Path.home() / ".claude"))) / "projects"
     else:
         base_dir = Path(base_dir)
 

@@ -1127,9 +1127,12 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
             try:
                 result = subprocess.run(
                     [
-                        "docker", "exec", "agentibridge", "python", "-c",
-                        "from agentibridge.llm_client import embed_text; "
-                        "v = embed_text('test'); print(len(v))",
+                        "docker",
+                        "exec",
+                        "agentibridge",
+                        "python",
+                        "-c",
+                        "from agentibridge.llm_client import embed_text; v = embed_text('test'); print(len(v))",
                     ],
                     capture_output=True,
                     text=True,
@@ -1168,8 +1171,7 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
             # Check table exists
             table_check = _docker_exec_query(
                 "agentibridge-postgres",
-                "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
-                "WHERE table_name = 'transcript_chunks')",
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'transcript_chunks')",
                 pg_user,
             )
             if table_check == "f":
@@ -1226,8 +1228,7 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
                             print("  status: connected (table not created yet)")
                         else:
                             stats = conn.execute(
-                                "SELECT COUNT(*), COUNT(DISTINCT session_id) "
-                                "FROM transcript_chunks"
+                                "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks"
                             ).fetchone()
                             total_chunks = stats[0]
                             sessions_with_embeddings = stats[1]
