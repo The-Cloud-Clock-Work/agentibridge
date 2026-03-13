@@ -36,7 +36,7 @@ Your Claude Code sessions disappear when the terminal closes. AgentiBridge index
 
 - 🔒 **Security-first** — OAuth 2.1 with PKCE, API key auth, Cloudflare Tunnel with zero inbound ports. Your data never leaves your infrastructure.
 - 🔍 **AI-powered search** — Semantic search with pgvector embeddings. Ask natural language questions across all your past sessions.
-- ⚙️ **Automatic indexing** — Background collector watches `~/.claude/projects/` and incrementally indexes new transcripts. No manual exports.
+- ⚙️ **Automatic indexing & embedding** — Background collector watches `~/.claude/projects/`, incrementally indexes new transcripts, and auto-embeds them for semantic search. No manual exports or embedding steps.
 - 🌐 **Multi-client** — Works with Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client.
 - 🏠 **Fully self-hosted** — Postgres, Redis, and your data stay on your machine. No SaaS, no vendor lock-in.
 - 🚀 **Background dispatch** — Fire-and-forget task dispatch with session restore. Resume work where you left off.
@@ -135,7 +135,7 @@ See [CLI Reference](docs/reference/cli-commands.md) for all commands and flags.
 | `get_plan` | "Show me the plan called moonlit-rolling-reddy" |
 | `search_history` | "Find prompts where I mentioned docker" |
 
-> **Note:** `search_semantic` and `generate_summary` require embeddings + LLM — see [Semantic Search](docs/architecture/semantic-search.md). `dispatch_task` and `restore_session` require the dispatch bridge — see [Session Dispatch](docs/architecture/session-dispatch.md). Knowledge catalog tools (`list_memory_files`, `get_memory_file`, `list_plans`, `get_plan`, `search_history`) expose Claude Code's memory files, plans, and prompt history.
+> **Note:** `search_semantic` and `generate_summary` require `AGENTIBRIDGE_EMBEDDING_ENABLED=true` + LLM config. Sessions are embedded automatically by the collector — see [Semantic Search](docs/architecture/semantic-search.md). Use `agentibridge embeddings` to check pipeline status. `dispatch_task` and `restore_session` require the dispatch bridge — see [Session Dispatch](docs/architecture/session-dispatch.md). Knowledge catalog tools (`list_memory_files`, `get_memory_file`, `list_plans`, `get_plan`, `search_history`) expose Claude Code's memory files, plans, and prompt history.
 
 ---
 
@@ -317,7 +317,14 @@ pip install -e .
 agentibridge run --test
 ```
 
-`--test` backs up `~/.agentibridge/` to `~/.agentibridge-backup` then resets it (so env templates pick up new variables), ensures `.env` exists from `.env.example`, and runs `docker compose up --build` from the repo root — building your local source instead of pulling the Hub image. Use this whenever you need to test local changes end-to-end.
+`--test` builds from local source instead of pulling the Hub image. Use this whenever you need to test local changes end-to-end. It uses the repo root `.env`, not `~/.agentibridge/docker.env`.
+
+| Mode | Compose file | Env file | Image |
+|------|-------------|----------|-------|
+| `agentibridge run` | `~/.agentibridge/docker-compose.yml` | `~/.agentibridge/docker.env` | Pulls from Docker Hub |
+| `agentibridge run --test` | `./docker-compose.yml` (repo root) | `./.env` (repo root) | Builds from local Dockerfile |
+
+> **Important:** Each mode reads a different env file. If you configure embedding or auth vars in `docker.env`, those won't be seen by `--test` unless you also set them in the repo root `.env` (and vice versa).
 
 For manual control without the CLI wrapper:
 

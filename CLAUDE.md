@@ -102,11 +102,11 @@ AGENTIBRIDGE_API_KEYS=          # comma-separated, empty = no auth
 # Claude Code home directory (all paths derive from this)
 CLAUDE_CODE_HOME_DIR=~/.claude       # default; projects, plans, history, memory all under here
 
-# Collector
+# Collector (starts eagerly on server boot, not lazily on first tool call)
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
 
-# Semantic search (Phase 2)
+# Semantic search (Phase 2) — collector auto-embeds updated sessions each cycle
 AGENTIBRIDGE_EMBEDDING_ENABLED=false  # set to "true" to enable (requires POSTGRES_URL + LLM config)
 
 # Postgres + pgvector (vector storage for semantic search)

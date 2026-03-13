@@ -49,20 +49,23 @@ pip install -e .
 agentibridge run --test
 ```
 
+**Which files each mode uses:**
+
+| Mode | Compose file | Env file | Image |
+|------|-------------|----------|-------|
+| `agentibridge run` | `~/.agentibridge/docker-compose.yml` | `~/.agentibridge/docker.env` | Pulls from Docker Hub |
+| `agentibridge run --test` | `./docker-compose.yml` (repo root) | `./.env` (repo root) | Builds from local Dockerfile |
+
+> **Important:** Each mode reads a different env file. If you configure embedding or auth vars in `docker.env`, those won't be seen by `--test` unless you also set them in the repo root `.env` (and vice versa).
+
 What it does:
 
-1. **Backs up and resets `~/.agentibridge/`** — copies the directory to `~/.agentibridge-backup`,
-   then wipes it so `_ensure_stack_dir()` recreates it with fresh env templates (picks up any
-   new variables added to the bundled `docker.env.example`). If a backup already exists it is
-   kept as-is (only the first run creates the backup).
+1. **Ensures `~/.agentibridge/` exists** — creates it from templates if missing. Never removes or overwrites an existing directory.
 2. **Ensures `.env`** — copies `.env.example` to `.env` at the repo root if it doesn't exist.
 3. **Builds from local source** — runs `docker compose -f docker-compose.yml --env-file .env up --build -d`
    using the repo root compose file (which has `build: context: .`) instead of the pip-distributed
    compose file that pulls `tccw/agentibridge:latest` from Docker Hub.
-4. **Auto-starts the dispatch bridge** if `DISPATCH_SECRET` is configured in `~/.agentibridge/docker.env`.
-
-This bypasses the normal `~/.agentibridge/` managed stack entirely for the Docker build, while still
-refreshing the env templates so the bridge and other host-side features pick up new config variables.
+4. **Auto-starts the dispatch bridge** if `DISPATCH_SECRET` is configured in the repo root `.env`.
 
 ---
 

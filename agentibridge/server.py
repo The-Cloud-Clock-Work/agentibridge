@@ -908,6 +908,9 @@ def main():
 
     print("=" * 60, file=sys.stderr)
 
+    # Start collector eagerly so indexing + embedding begin immediately
+    _get_collector()
+
     transport = os.getenv("AGENTIBRIDGE_TRANSPORT", "stdio")
     if transport == "sse":
         from agentibridge.transport import run_sse_server
