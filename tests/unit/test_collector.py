@@ -263,3 +263,95 @@ class TestCollectorEmbedding:
         store = MagicMock(spec=SessionStore)
         collector = SessionCollector(store)
         assert collector._embedder is None
+
+    def test_backfill_embeds_unembedded_sessions(self, temp_projects_dir):
+        """Backfill embeds sessions in Redis that have no chunks in Postgres."""
+        store = MagicMock(spec=SessionStore)
+
+        # All sessions already indexed (no new entries)
+        def fake_position(filepath):
+            return Path(filepath).stat().st_size
+
+        store.get_file_position.side_effect = fake_position
+        store.list_session_ids.return_value = ["s1", "s2", "s3"]
+
+        embedder = MagicMock()
+        embedder.is_available.return_value = True
+        embedder.embed_session.return_value = 5
+
+        collector = SessionCollector(store, embedder=embedder)
+        collector._projects_dir = temp_projects_dir
+
+        # Mock Postgres to say no sessions are embedded yet
+        mock_pool = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = []
+        mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch("agentibridge.pg_client.get_pg", return_value=mock_pool):
+            stats = collector.collect_once()
+
+        assert stats["sessions_updated"] == 0
+        assert stats["sessions_embedded"] == 3
+        assert embedder.embed_session.call_count == 3
+
+    def test_backfill_skips_already_embedded(self, temp_projects_dir):
+        """Backfill doesn't re-embed sessions already in Postgres."""
+        store = MagicMock(spec=SessionStore)
+
+        def fake_position(filepath):
+            return Path(filepath).stat().st_size
+
+        store.get_file_position.side_effect = fake_position
+        store.list_session_ids.return_value = ["s1", "s2", "s3"]
+
+        embedder = MagicMock()
+        embedder.is_available.return_value = True
+        embedder.embed_session.return_value = 5
+
+        collector = SessionCollector(store, embedder=embedder)
+        collector._projects_dir = temp_projects_dir
+
+        # s1 and s2 already embedded
+        mock_pool = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = [("s1",), ("s2",)]
+        mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch("agentibridge.pg_client.get_pg", return_value=mock_pool):
+            stats = collector.collect_once()
+
+        # Only s3 should be embedded
+        assert stats["sessions_embedded"] == 1
+        embedder.embed_session.assert_called_once_with("s3")
+
+    def test_backfill_respects_batch_limit(self, temp_projects_dir):
+        """Backfill processes at most _BACKFILL_BATCH per cycle."""
+        store = MagicMock(spec=SessionStore)
+
+        def fake_position(filepath):
+            return Path(filepath).stat().st_size
+
+        store.get_file_position.side_effect = fake_position
+        store.list_session_ids.return_value = [f"s{i}" for i in range(50)]
+
+        embedder = MagicMock()
+        embedder.is_available.return_value = True
+        embedder.embed_session.return_value = 3
+
+        collector = SessionCollector(store, embedder=embedder)
+        collector._projects_dir = temp_projects_dir
+
+        mock_pool = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = []
+        mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch("agentibridge.pg_client.get_pg", return_value=mock_pool):
+            stats = collector.collect_once()
+
+        assert stats["sessions_embedded"] == SessionCollector._BACKFILL_BATCH
+        assert embedder.embed_session.call_count == SessionCollector._BACKFILL_BATCH

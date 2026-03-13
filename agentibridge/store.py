@@ -116,6 +116,16 @@ class SessionStore:
             return self._redis_get_entries(r, session_id, offset, limit)
         return self._file_get_entries(session_id, offset, limit)
 
+    def list_session_ids(self) -> List[str]:
+        """Return all session IDs from the index (lightweight, no metadata)."""
+        r = self._get_redis()
+        if r is not None:
+            return r.zrevrange(_rkey("idx:all"), 0, -1)
+        # File fallback: scan project dirs for session IDs
+        from agentibridge.parser import scan_projects_dir
+
+        return [sid for sid, _, _ in scan_projects_dir(self._projects_dir)]
+
     def list_sessions(
         self,
         project: Optional[str] = None,
