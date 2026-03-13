@@ -41,7 +41,7 @@ jobs:
             echo "image=ghcr.io/${REPO_LC,,}:${TAG}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'push' && github.ref || inputs.ref }}
 
