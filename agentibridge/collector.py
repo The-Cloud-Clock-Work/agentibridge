@@ -95,10 +95,14 @@ class SessionCollector:
         plans_count = self._scan_plans()
         history_count = self._scan_history()
 
-        # Phase 2: embed updated sessions (if embedder is available)
+        # Phase 2: embed updated sessions + backfill un-embedded
         embedded_count = 0
-        if self._embedder and updated_session_ids:
-            embedded_count = self._embed_sessions(updated_session_ids)
+        if self._embedder:
+            if updated_session_ids:
+                embedded_count = self._embed_sessions(updated_session_ids)
+            embedded_count += self._backfill_embeddings(
+                exclude=set(updated_session_ids),
+            )
 
         duration_ms = int((time() - start) * 1000)
 
@@ -187,6 +191,8 @@ class SessionCollector:
     # Phase 2: Embedding pass
     # ------------------------------------------------------------------
 
+    _BACKFILL_BATCH = 10  # max sessions to backfill per cycle
+
     def _embed_sessions(self, session_ids: list[str]) -> int:
         """Embed recently-updated sessions. Returns count of sessions embedded."""
         if not self._embedder.is_available():
@@ -201,6 +207,50 @@ class SessionCollector:
                 log("Collector: embedding error", {"session_id": sid, "error": str(e)})
                 continue
         return count
+
+    def _backfill_embeddings(self, exclude: set[str] | None = None) -> int:
+        """Embed sessions in Redis that have no chunks in Postgres yet.
+
+        Processes up to _BACKFILL_BATCH per cycle to avoid overwhelming the
+        LLM API. Returns count of sessions embedded.
+        """
+        if not self._embedder.is_available():
+            return 0
+
+        try:
+            # Get all session IDs from Redis
+            all_ids = self._store.list_session_ids()
+            if not all_ids:
+                return 0
+
+            # Get session IDs that already have embeddings
+            embedded_ids = self._get_embedded_session_ids()
+
+            # Find un-embedded sessions, excluding ones just processed
+            exclude = exclude or set()
+            candidates = [sid for sid in all_ids if sid not in embedded_ids and sid not in exclude]
+            if not candidates:
+                return 0
+
+            batch = candidates[: self._BACKFILL_BATCH]
+            return self._embed_sessions(batch)
+        except Exception as e:
+            log("Collector: backfill error", {"error": str(e)})
+            return 0
+
+    def _get_embedded_session_ids(self) -> set[str]:
+        """Return set of session IDs that already have chunks in Postgres."""
+        try:
+            from agentibridge.pg_client import get_pg
+
+            pool = get_pg()
+            if pool is None:
+                return set()
+            with pool.connection() as conn:
+                rows = conn.execute("SELECT DISTINCT session_id FROM transcript_chunks").fetchall()
+                return {row[0] for row in rows}
+        except Exception:
+            return set()
 
     # ------------------------------------------------------------------
     # Phase 5: Knowledge catalog scan passes
