@@ -73,6 +73,9 @@ async def _run_bridge_job(
     max_seconds: int,
     output_format: str,
     resume_session_id: str | None,
+    allowed_tools: str | None = None,
+    max_turns: int | None = None,
+    permission_mode: str | None = None,
 ) -> None:
     """Run Claude CLI in the background and update _jobs on completion."""
     try:
@@ -86,6 +89,9 @@ async def _run_bridge_job(
                 timeout=max_seconds,
                 output_format=output_format,
                 resume_session_id=resume_session_id,
+                allowed_tools=allowed_tools,
+                max_turns=max_turns,
+                permission_mode=permission_mode,
             )
         finally:
             if saved is not None:
@@ -234,6 +240,9 @@ async def _handle_dispatch(headers: dict, body: bytes, writer: asyncio.StreamWri
     output_format = data.get("output_format", "json")
     timeout = data.get("timeout", _max_timeout())
     resume_session_id = data.get("resume_session_id", "") or None
+    allowed_tools = data.get("allowed_tools", "") or None
+    max_turns = data.get("max_turns") or None
+    permission_mode = data.get("permission_mode", "") or None
 
     # Cap timeout
     max_t = _max_timeout()
@@ -262,7 +271,19 @@ async def _handle_dispatch(headers: dict, body: bytes, writer: asyncio.StreamWri
     )
 
     # Spawn background task
-    task = asyncio.create_task(_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id))
+    task = asyncio.create_task(
+        _run_bridge_job(
+            job_id,
+            prompt,
+            model,
+            timeout,
+            output_format,
+            resume_session_id,
+            allowed_tools=allowed_tools,
+            max_turns=max_turns,
+            permission_mode=permission_mode,
+        )
+    )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -359,6 +380,9 @@ async def _handle_dispatch_asgi(scope, receive, send) -> None:
     output_format = data.get("output_format", "json")
     timeout = data.get("timeout", _max_timeout())
     resume_session_id = data.get("resume_session_id", "") or None
+    allowed_tools = data.get("allowed_tools", "") or None
+    max_turns = data.get("max_turns") or None
+    permission_mode = data.get("permission_mode", "") or None
     max_t = _max_timeout()
     if timeout > max_t:
         timeout = max_t
@@ -384,7 +408,19 @@ async def _handle_dispatch_asgi(scope, receive, send) -> None:
         },
     )
 
-    task = asyncio.create_task(_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id))
+    task = asyncio.create_task(
+        _run_bridge_job(
+            job_id,
+            prompt,
+            model,
+            timeout,
+            output_format,
+            resume_session_id,
+            allowed_tools=allowed_tools,
+            max_turns=max_turns,
+            permission_mode=permission_mode,
+        )
+    )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 

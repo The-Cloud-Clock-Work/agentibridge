@@ -638,6 +638,122 @@ async def list_dispatch_jobs(status: str = "", limit: int = 20) -> str:
 
 
 # =============================================================================
+# PHASE 4b — DISPATCH PLANS (plan-then-execute workflow)
+# =============================================================================
+
+
+@mcp.tool()
+async def plan_task(
+    task: str,
+    repo_url: str = "",
+    wait: bool = False,
+) -> str:
+    """Create an implementation plan without executing it.
+
+    Runs Claude in read-only mode (Read, Glob, Grep only) to analyse the
+    codebase and produce a markdown plan. The plan can later be executed
+    with execute_plan.
+
+    Args:
+        task: What to plan (same format as dispatch_task)
+        repo_url: Repo to analyse (optional)
+        wait: Block until plan is ready (default: false)
+
+    Returns:
+        JSON with plan_id, job_id, status, and (if wait=true) the plan content
+    """
+    try:
+        from agentibridge.plans import submit_plan
+
+        result = await submit_plan(task=task, repo_url=repo_url, wait=wait)
+        return json.dumps({"success": True, **result})
+
+    except Exception as e:
+        log("MCP plan_task failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def get_dispatch_plan(plan_id: str) -> str:
+    """Get a plan by ID, including its markdown content once ready.
+
+    Args:
+        plan_id: Plan UUID returned by plan_task
+
+    Returns:
+        JSON with plan details including status and content
+    """
+    try:
+        from agentibridge.plans import get_plan_status
+
+        data = get_plan_status(plan_id)
+        if data is None:
+            return json.dumps({"success": False, "error": f"Plan not found: {plan_id}"})
+        return json.dumps({"success": True, **data})
+
+    except Exception as e:
+        log("MCP get_dispatch_plan failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def list_dispatch_plans(status: str = "", limit: int = 20) -> str:
+    """List dispatch plans with optional status filter.
+
+    Returns plan summaries (newest first) without the content field,
+    so the response stays compact even with many plans.
+
+    Args:
+        status: Filter by status (planning/ready/failed/executing/completed). Empty = all.
+        limit: Maximum number of plans to return (default: 20)
+
+    Returns:
+        JSON with plans list and count
+    """
+    try:
+        from agentibridge.plans import list_plans as list_dispatch_plans_fn
+
+        plans = list_dispatch_plans_fn(status=status, limit=limit)
+        return json.dumps({"success": True, "count": len(plans), "plans": plans})
+
+    except Exception as e:
+        log("MCP list_dispatch_plans failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def execute_plan(
+    plan_id: str,
+    repo_url: str = "",
+    wait: bool = False,
+) -> str:
+    """Execute a ready plan by ID.
+
+    Submits a normal coding job with the plan injected as context.
+
+    Args:
+        plan_id: Plan ID returned by plan_task
+        repo_url: Override repo URL (defaults to the one used when planning)
+        wait: Block until execution completes
+
+    Returns:
+        JSON with job_id and status
+    """
+    try:
+        from agentibridge.plans import execute_plan as execute_plan_fn
+
+        result = await execute_plan_fn(plan_id=plan_id, repo_url=repo_url, wait=wait)
+        return json.dumps({"success": True, **result})
+
+    except ValueError as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+    except Exception as e:
+        log("MCP execute_plan failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# =============================================================================
 # PHASE 5 — KNOWLEDGE CATALOG (Memory, Plans, History)
 # =============================================================================
 

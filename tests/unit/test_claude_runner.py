@@ -217,3 +217,86 @@ class TestRunClaudeSync:
 
         assert result.success is True
         assert result.result == "sync ok"
+
+
+# ---------------------------------------------------------------------------
+# Plan mode parameter tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestRunClaudePlanMode:
+    """Tests for allowed_tools, max_turns, permission_mode parameters."""
+
+    def test_allowed_tools_in_command(self):
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+                mock_proc = AsyncMock()
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b'{"result": "plan output"}', b""))
+                mock_exec.return_value = mock_proc
+
+                with patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}, clear=False):
+                    await run_claude(
+                        "create a plan",
+                        allowed_tools="Read,Glob,Grep",
+                        output_format="text",
+                    )
+
+                cmd = mock_exec.call_args[0]
+                assert "--allowedTools" in cmd
+                assert "Read,Glob,Grep" in cmd
+
+        asyncio.run(_run())
+
+    def test_max_turns_in_command(self):
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+                mock_proc = AsyncMock()
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b'{"result": "ok"}', b""))
+                mock_exec.return_value = mock_proc
+
+                with patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}, clear=False):
+                    await run_claude("plan it", max_turns=15)
+
+                cmd = mock_exec.call_args[0]
+                assert "--max-turns" in cmd
+                assert "15" in cmd
+
+        asyncio.run(_run())
+
+    def test_permission_mode_replaces_dangerously_skip(self):
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+                mock_proc = AsyncMock()
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b'{"result": "ok"}', b""))
+                mock_exec.return_value = mock_proc
+
+                with patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}, clear=False):
+                    await run_claude("plan it", permission_mode="bypassPermissions")
+
+                cmd = mock_exec.call_args[0]
+                assert "--permission-mode" in cmd
+                assert "bypassPermissions" in cmd
+                assert "--dangerously-skip-permissions" not in cmd
+
+        asyncio.run(_run())
+
+    def test_default_uses_dangerously_skip(self):
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+                mock_proc = AsyncMock()
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b'{"result": "ok"}', b""))
+                mock_exec.return_value = mock_proc
+
+                with patch.dict("os.environ", {"CLAUDE_DISPATCH_URL": ""}, clear=False):
+                    await run_claude("normal dispatch")
+
+                cmd = mock_exec.call_args[0]
+                assert "--dangerously-skip-permissions" in cmd
+                assert "--permission-mode" not in cmd
+
+        asyncio.run(_run())

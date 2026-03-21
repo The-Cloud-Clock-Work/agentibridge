@@ -143,7 +143,7 @@ AGENTIBRIDGE_MAX_PLAN_CONTENT=102400
 CLAUDE_HOOK_LOG_ENABLED=true
 ```
 
-## MCP Tools (17 total)
+## MCP Tools (21 total)
 
 ### Phase 1 — Foundation
 - `list_sessions` — List sessions across all projects
@@ -162,6 +162,10 @@ CLAUDE_HOOK_LOG_ENABLED=true
 - `dispatch_task` — Fire-and-forget background job dispatch (returns job_id immediately)
 - `get_dispatch_job` — Poll a background job for status and output
 - `list_dispatch_jobs` — List dispatch jobs with optional status filter
+- `plan_task` — Create implementation plan (read-only Claude analysis)
+- `get_dispatch_plan` — Get plan details by ID
+- `list_dispatch_plans` — List dispatch plans with optional status filter
+- `execute_plan` — Execute a ready plan
 
 ### Phase 5 — Knowledge Catalog
 - `list_memory_files` — List memory files across projects

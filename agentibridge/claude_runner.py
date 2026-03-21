@@ -123,6 +123,9 @@ async def _run_claude_http(
     timeout: int,
     output_format: str,
     resume_session_id: Optional[str] = None,
+    allowed_tools: Optional[str] = None,
+    max_turns: Optional[int] = None,
+    permission_mode: Optional[str] = None,
 ) -> ClaudeResult:
     """Submit a dispatch request and poll for results.
 
@@ -138,6 +141,9 @@ async def _run_claude_http(
         timeout: Timeout in seconds for the Claude CLI execution.
         output_format: CLI output format.
         resume_session_id: Optional session ID to resume.
+        allowed_tools: Comma-separated tool names (e.g. "Read,Glob,Grep").
+        max_turns: Maximum conversation turns.
+        permission_mode: Permission mode (e.g. "bypassPermissions").
 
     Returns:
         ClaudeResult with parsed output.
@@ -154,15 +160,23 @@ async def _run_claude_http(
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             # Phase 1: Submit
+            payload = {
+                "prompt": prompt,
+                "model": model,
+                "timeout": timeout,
+                "output_format": output_format,
+                "resume_session_id": resume_session_id or "",
+            }
+            if allowed_tools:
+                payload["allowed_tools"] = allowed_tools
+            if max_turns:
+                payload["max_turns"] = max_turns
+            if permission_mode:
+                payload["permission_mode"] = permission_mode
+
             resp = await client.post(
                 submit_url,
-                json={
-                    "prompt": prompt,
-                    "model": model,
-                    "timeout": timeout,
-                    "output_format": output_format,
-                    "resume_session_id": resume_session_id or "",
-                },
+                json=payload,
                 headers={"X-Dispatch-Secret": secret},
             )
 
@@ -257,6 +271,9 @@ async def run_claude(
     cwd: Optional[str] = None,
     output_format: str = "json",
     resume_session_id: Optional[str] = None,
+    allowed_tools: Optional[str] = None,
+    max_turns: Optional[int] = None,
+    permission_mode: Optional[str] = None,
 ) -> ClaudeResult:
     """Run the ``claude`` CLI and return the parsed result.
 
@@ -269,6 +286,10 @@ async def run_claude(
         timeout: Timeout in seconds (default: CLAUDE_DISPATCH_TIMEOUT or 300).
         cwd: Working directory for the subprocess.
         output_format: CLI output format (default: "json").
+        resume_session_id: Optional session ID to resume.
+        allowed_tools: Comma-separated tool names (e.g. "Read,Glob,Grep").
+        max_turns: Maximum conversation turns.
+        permission_mode: Permission mode (e.g. "bypassPermissions").
 
     Returns:
         ClaudeResult with parsed output.
@@ -279,7 +300,17 @@ async def run_claude(
     # Route to HTTP bridge if configured
     dispatch_url = _dispatch_url()
     if dispatch_url:
-        return await _run_claude_http(dispatch_url, prompt, model, timeout, output_format, resume_session_id)
+        return await _run_claude_http(
+            dispatch_url,
+            prompt,
+            model,
+            timeout,
+            output_format,
+            resume_session_id,
+            allowed_tools=allowed_tools,
+            max_turns=max_turns,
+            permission_mode=permission_mode,
+        )
 
     # Fail fast inside Docker without bridge config
     if _is_docker():
@@ -295,30 +326,24 @@ async def run_claude(
 
     # Local subprocess mode
     binary = _claude_binary()
-    if resume_session_id:
-        cmd = [
-            binary,
-            "--dangerously-skip-permissions",
-            "--model",
-            model,
-            "--output-format",
-            output_format,
-            "--resume",
-            resume_session_id,
-            "--print",
-            prompt,
-        ]
+
+    # Build permission flags
+    if permission_mode:
+        perm_flags = ["--permission-mode", permission_mode]
     else:
-        cmd = [
-            binary,
-            "--dangerously-skip-permissions",
-            "--model",
-            model,
-            "--output-format",
-            output_format,
-            "-p",
-            prompt,
-        ]
+        perm_flags = ["--dangerously-skip-permissions"]
+
+    cmd = [binary] + perm_flags + ["--model", model, "--output-format", output_format]
+
+    if allowed_tools:
+        cmd.extend(["--allowedTools", allowed_tools])
+    if max_turns:
+        cmd.extend(["--max-turns", str(max_turns)])
+
+    if resume_session_id:
+        cmd.extend(["--resume", resume_session_id, "--print", prompt])
+    else:
+        cmd.extend(["-p", prompt])
 
     log("claude_runner: starting", {"model": model, "prompt_len": len(prompt)})
 

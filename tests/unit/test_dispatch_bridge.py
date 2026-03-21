@@ -516,7 +516,7 @@ class TestDispatchBridgeApp:
         # We check that the run_claude call gets the capped timeout
         captured_kwargs = {}
 
-        async def capture_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id):
+        async def capture_run_bridge_job(job_id, prompt, model, timeout, output_format, resume_session_id, **kwargs):
             captured_kwargs["timeout"] = timeout
 
         with (
@@ -970,7 +970,7 @@ class TestResumeSession:
 
         captured = {}
 
-        async def capture_bridge_job(job_id, prompt, model, max_seconds, output_format, resume_session_id):
+        async def capture_bridge_job(job_id, prompt, model, max_seconds, output_format, resume_session_id, **kwargs):
             captured["resume_session_id"] = resume_session_id
 
         async def run():
@@ -1216,7 +1216,7 @@ class TestRawDispatchHandler:
 
         captured = {}
 
-        async def capture_bridge_job(job_id, prompt, model, max_seconds, output_format, resume_session_id):
+        async def capture_bridge_job(job_id, prompt, model, max_seconds, output_format, resume_session_id, **kwargs):
             captured["max_seconds"] = max_seconds
 
         with (
