@@ -1559,7 +1559,7 @@ def _maybe_start_bridge(stack_dir: Path, *, env_file: Path | None = None, allow_
     log_file = Path("/tmp/dispatch_bridge.log")
 
     try:
-        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port}
+        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port, "PYTHONUNBUFFERED": "1"}
         with open(log_file, "w") as lf:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "agentibridge.dispatch_bridge"],
@@ -1773,7 +1773,7 @@ def cmd_bridge(args: argparse.Namespace) -> None:
             print(f"Dispatch bridge already running (PID {check.stdout.strip().decode()})")
             return
 
-        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port}
+        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port, "PYTHONUNBUFFERED": "1"}
         with open(log_file, "w") as lf:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "agentibridge.dispatch_bridge"],
