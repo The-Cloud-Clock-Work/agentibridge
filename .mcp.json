@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "agentibridge": {
+    "agentibridge-development": {
       "type": "http",
       "url": "${AGENTIBRIDGE_MCP_URL}",
       "headers": {

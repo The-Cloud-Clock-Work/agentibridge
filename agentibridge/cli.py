@@ -1345,11 +1345,6 @@ def _ensure_stack_dir() -> Path:
         if re.search(r"^\s*REDIS_URL=redis://redis", old_text, re.MULTILINE):
             shutil.move(str(old_env), str(env_dest))
             print(f"Migrated {old_env} → {env_dest}")
-            # Scaffold a fresh native .env from the bundled template
-            if not old_env.exists():
-                bundled = DATA_DIR / ".env.example"
-                if bundled.exists():
-                    shutil.copy2(str(bundled), str(old_env))
 
     if not env_dest.exists():
         shutil.copy2(DATA_DIR / "docker.env.example", env_dest)
