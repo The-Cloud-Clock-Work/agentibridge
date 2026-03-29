@@ -195,6 +195,36 @@ Raw transcripts live in `~/.claude/projects/{path-encoded}/` as `.jsonl` files:
 - **Entry types**: `user`, `assistant`, `summary`, `system`
 - **Filtered types**: `queue-operation`, `file-history-snapshot`, `progress`
 
+## Dispatch Bridge (Critical Architecture)
+
+AgentiBridge runs inside a Docker container that has **no Claude CLI binary**. To execute dispatch/plan jobs, it must reach a host binary (e.g., `claude`) via the dispatch bridge.
+
+```
+┌─────────────────────┐       HTTP POST        ┌──────────────────────┐
+│  AgentiBridge        │ ───────────────────────▶│  Dispatch Bridge     │
+│  (Docker container)  │  host.docker.internal   │  (host, port 8101)  │
+│  No claude binary    │       :8101             │  Has claude binary   │
+│  No credentials      │                         │  Has credentials     │
+└─────────────────────┘                          └──────────┬───────────┘
+                                                            │
+                                                  runs claude CLI locally
+```
+
+### How it works
+- Docker compose sets `extra_hosts: - "host.docker.internal:host-gateway"` so the container can resolve the host IP
+- Container uses `CLAUDE_DISPATCH_URL=http://host.docker.internal:8101` (set in `.env`)
+- Bridge runs on the host: `agentibridge bridge` (or `agentibridge bridge start` for background)
+- Bridge receives HTTP requests and executes `claude` as a local subprocess
+
+### The two-process trap (IMPORTANT)
+
+Claude Code's `home_remote` MCP is a **stdio process** (`python3 -m agentibridge`) running on the host. If `CLAUDE_DISPATCH_URL` leaks into the shell environment, this process inherits `host.docker.internal:8101` — which **does not resolve on the host** (only inside Docker). Result: dispatch fails with "Name or service not known".
+
+**Rules:**
+- `.env` file: `CLAUDE_DISPATCH_URL=http://host.docker.internal:8101` — **for Docker only** (compose reads it)
+- Shell environment: must **NOT** export `CLAUDE_DISPATCH_URL` — the stdio process calls `claude` directly
+- After changing env, restart Claude Code entirely (not just `/mcp`) — stdio processes keep inherited env
+
 ## Troubleshooting
 
 See [docs/reference/troubleshooting.md](docs/reference/troubleshooting.md) for common issues. Key gotchas:
