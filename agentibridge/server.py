@@ -647,6 +647,7 @@ async def plan_task(
     task: str,
     repo_url: str = "",
     wait: bool = False,
+    timeout: int = 0,
 ) -> str:
     """Create an implementation plan without executing it.
 
@@ -658,6 +659,7 @@ async def plan_task(
         task: What to plan (same format as dispatch_task)
         repo_url: Repo to analyse (optional)
         wait: Block until plan is ready (default: false)
+        timeout: Timeout in seconds (0 = use default from env)
 
     Returns:
         JSON with plan_id, job_id, status, and (if wait=true) the plan content
@@ -665,7 +667,7 @@ async def plan_task(
     try:
         from agentibridge.plans import submit_plan
 
-        result = await submit_plan(task=task, repo_url=repo_url, wait=wait)
+        result = await submit_plan(task=task, repo_url=repo_url, wait=wait, timeout=timeout)
         return json.dumps({"success": True, **result})
 
     except Exception as e:
@@ -726,6 +728,7 @@ async def execute_plan(
     plan_id: str,
     repo_url: str = "",
     wait: bool = False,
+    timeout: int = 0,
 ) -> str:
     """Execute a ready plan by ID.
 
@@ -735,6 +738,7 @@ async def execute_plan(
         plan_id: Plan ID returned by plan_task
         repo_url: Override repo URL (defaults to the one used when planning)
         wait: Block until execution completes
+        timeout: Timeout in seconds (0 = use default from env)
 
     Returns:
         JSON with job_id and status
@@ -742,7 +746,7 @@ async def execute_plan(
     try:
         from agentibridge.plans import execute_plan as execute_plan_fn
 
-        result = await execute_plan_fn(plan_id=plan_id, repo_url=repo_url, wait=wait)
+        result = await execute_plan_fn(plan_id=plan_id, repo_url=repo_url, wait=wait, timeout=timeout)
         return json.dumps({"success": True, **result})
 
     except ValueError as e:

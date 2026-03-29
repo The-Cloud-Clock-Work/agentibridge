@@ -218,21 +218,25 @@ def list_plans(status: str = "", limit: int = 20) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-async def _run_plan_background(plan_id: str, task: str, repo_url: str) -> None:
+async def _run_plan_background(plan_id: str, task: str, repo_url: str, timeout: int = 0) -> None:
     """Background task: run Claude CLI in read-only mode, update plan on completion."""
     from agentibridge.claude_runner import run_claude
 
     repo_context = f"\nRepository: {repo_url}" if repo_url else ""
     prompt = _PLAN_PROMPT.format(task=task, repo_context=repo_context)
 
-    result = await run_claude(
-        prompt=prompt,
-        model="sonnet",
-        output_format="text",
-        allowed_tools="Read,Glob,Grep",
-        max_turns=15,
-        permission_mode="bypassPermissions",
-    )
+    kwargs: Dict[str, Any] = {
+        "prompt": prompt,
+        "model": "sonnet",
+        "output_format": "text",
+        "allowed_tools": "Read,Glob,Grep",
+        "max_turns": 15,
+        "permission_mode": "bypassPermissions",
+    }
+    if timeout > 0:
+        kwargs["timeout"] = timeout
+
+    result = await run_claude(**kwargs)
 
     current = get_plan_status(plan_id)
     if current is None:
@@ -263,17 +267,21 @@ async def _run_plan_background(plan_id: str, task: str, repo_url: str) -> None:
     _write_plan(plan_id, current)
 
 
-async def _run_execution_background(plan_id: str, content: str, repo_url: str) -> None:
+async def _run_execution_background(plan_id: str, content: str, repo_url: str, timeout: int = 0) -> None:
     """Background task: run Claude CLI with plan content, update plan on completion."""
     from agentibridge.claude_runner import run_claude
 
     prompt = _EXECUTE_PROMPT.format(content=content)
 
-    result = await run_claude(
-        prompt=prompt,
-        model="sonnet",
-        output_format="json",
-    )
+    kwargs: Dict[str, Any] = {
+        "prompt": prompt,
+        "model": "sonnet",
+        "output_format": "json",
+    }
+    if timeout > 0:
+        kwargs["timeout"] = timeout
+
+    result = await run_claude(**kwargs)
 
     current = get_plan_status(plan_id)
     if current is None:
@@ -281,6 +289,8 @@ async def _run_execution_background(plan_id: str, content: str, repo_url: str) -
         return
 
     now = _now_iso()
+    execution_id = current.get("execution_job_id", "")
+
     if result.success:
         current.update(
             {
@@ -302,6 +312,28 @@ async def _run_execution_background(plan_id: str, content: str, repo_url: str) -
 
     _write_plan(plan_id, current)
 
+    # Update dispatch job store so get_dispatch_job reflects final state
+    if execution_id:
+        from agentibridge.dispatch import _write_job
+
+        _write_job(
+            execution_id,
+            {
+                "job_id": execution_id,
+                "status": "completed" if result.success else "failed",
+                "started_at": current.get("created_at", now),
+                "completed_at": now,
+                "task": f"[plan:{plan_id}] Execute plan",
+                "project": "",
+                "output": result.result,
+                "error": result.error,
+                "exit_code": result.exit_code,
+                "duration_ms": result.duration_ms,
+                "timed_out": result.timed_out,
+                "claude_session_id": result.session_id,
+            },
+        )
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -312,6 +344,7 @@ async def submit_plan(
     task: str,
     repo_url: str = "",
     wait: bool = False,
+    timeout: int = 0,
 ) -> Dict[str, Any]:
     """Create a plan by running Claude in read-only mode.
 
@@ -322,6 +355,7 @@ async def submit_plan(
         task: What to plan (same format as dispatch_task).
         repo_url: Optional repo to analyze.
         wait: If True, block until plan is ready (default: False).
+        timeout: Timeout in seconds (0 = use default from env).
 
     Returns:
         Dict with plan_id, status, and optionally content (if wait=True).
@@ -346,7 +380,12 @@ async def submit_plan(
     log("plans: submitting plan", {"plan_id": plan_id, "task_len": len(task), "wait": wait})
 
     if wait:
-        await _run_plan_background(plan_id, task, repo_url)
+        try:
+            await _run_plan_background(plan_id, task, repo_url, timeout=timeout)
+        except Exception as e:
+            log("plans: wait=true planning failed", {"plan_id": plan_id, "error": str(e)})
+            plan_data.update({"status": "failed", "error": str(e), "completed_at": _now_iso()})
+            _write_plan(plan_id, plan_data)
         final = get_plan_status(plan_id) or plan_data
         return {
             "plan_id": plan_id,
@@ -355,7 +394,7 @@ async def submit_plan(
             "error": final.get("error"),
         }
 
-    task_obj = asyncio.create_task(_run_plan_background(plan_id, task, repo_url))
+    task_obj = asyncio.create_task(_run_plan_background(plan_id, task, repo_url, timeout=timeout))
     _background_tasks.add(task_obj)
     task_obj.add_done_callback(_background_tasks.discard)
 
@@ -369,6 +408,7 @@ async def execute_plan(
     plan_id: str,
     repo_url: str = "",
     wait: bool = False,
+    timeout: int = 0,
 ) -> Dict[str, Any]:
     """Execute a ready plan.
 
@@ -379,6 +419,7 @@ async def execute_plan(
         plan_id: Plan UUID returned by submit_plan.
         repo_url: Override repo URL (defaults to the one used when planning).
         wait: If True, block until execution completes (default: False).
+        timeout: Timeout in seconds (0 = use default from env).
 
     Returns:
         Dict with plan_id, execution_job_id, status.
@@ -407,10 +448,38 @@ async def execute_plan(
     )
     _write_plan(plan_id, plan)
 
+    # Register in dispatch job store so get_dispatch_job can find it
+    from agentibridge.dispatch import _write_job
+
+    _write_job(
+        execution_id,
+        {
+            "job_id": execution_id,
+            "status": "running",
+            "started_at": _now_iso(),
+            "task": f"[plan:{plan_id}] Execute plan",
+            "project": "",
+            "context_session": None,
+            "resumed_session": None,
+            "prompt_length": len(content),
+            "output": None,
+            "error": None,
+            "exit_code": None,
+            "duration_ms": None,
+            "completed_at": None,
+            "claude_session_id": None,
+        },
+    )
+
     log("plans: executing plan", {"plan_id": plan_id, "execution_id": execution_id})
 
     if wait:
-        await _run_execution_background(plan_id, content, effective_repo)
+        try:
+            await _run_execution_background(plan_id, content, effective_repo, timeout=timeout)
+        except Exception as e:
+            log("plans: wait=true execution failed", {"plan_id": plan_id, "error": str(e)})
+            plan.update({"status": "failed", "error": str(e), "completed_at": _now_iso()})
+            _write_plan(plan_id, plan)
         final = get_plan_status(plan_id) or plan
         return {
             "plan_id": plan_id,
@@ -419,7 +488,7 @@ async def execute_plan(
             "error": final.get("error"),
         }
 
-    task_obj = asyncio.create_task(_run_execution_background(plan_id, content, effective_repo))
+    task_obj = asyncio.create_task(_run_execution_background(plan_id, content, effective_repo, timeout=timeout))
     _background_tasks.add(task_obj)
     task_obj.add_done_callback(_background_tasks.discard)
 

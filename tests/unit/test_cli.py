@@ -1055,7 +1055,7 @@ class TestCmdRun:
             patch("shutil.which", return_value=None),
             pytest.raises(SystemExit),
         ):
-            cmd_run(MagicMock(test=False, rebuild=False))
+            cmd_run(MagicMock(test=False, dev=False, rebuild=False, source_path=None))
 
     def test_test_mode_delegates(self):
         """--test flag delegates to _cmd_run_test."""
@@ -1063,8 +1063,33 @@ class TestCmdRun:
             patch("shutil.which", return_value="/usr/bin/docker"),
             patch("agentibridge.cli._cmd_run_test") as mock_test,
         ):
-            cmd_run(MagicMock(test=True))
+            cmd_run(MagicMock(test=True, dev=False, source_path=None))
         mock_test.assert_called_once()
+
+    def test_dev_mode_delegates(self):
+        """--dev flag delegates to _cmd_run_dev."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("agentibridge.cli._cmd_run_dev") as mock_dev,
+        ):
+            cmd_run(MagicMock(test=False, dev=True, source_path=None, rebuild=False))
+        mock_dev.assert_called_once_with(source_path=None, rebuild=False)
+
+    def test_test_and_dev_mutually_exclusive(self):
+        """--test and --dev together exits with error."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            pytest.raises(SystemExit),
+        ):
+            cmd_run(MagicMock(test=True, dev=True, source_path=None))
+
+    def test_source_path_requires_dev(self):
+        """--source-path without --dev exits with error."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            pytest.raises(SystemExit),
+        ):
+            cmd_run(MagicMock(test=False, dev=False, source_path="/tmp", rebuild=False))
 
 
 @pytest.mark.unit
