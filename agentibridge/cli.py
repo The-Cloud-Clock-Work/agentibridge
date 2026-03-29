@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -1291,6 +1292,7 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 _STACK_DIR = Path.home() / ".agentibridge"
+_STATE_FILE = _STACK_DIR / "state.json"
 _LEGACY_STACK_DIR = Path.home() / ".config" / "agentibridge"
 _GITHUB_REPO_URL = "https://github.com/The-Cloud-Clock-Work/agentibridge"
 
@@ -1643,14 +1645,107 @@ def _cmd_run_test() -> None:
     print("[test] Stack started from local source. Bridge vars refreshed.")
 
 
+_DEV_REQUIRED_FILES = ["Dockerfile", "docker-compose.yml"]
+
+
+def _resolve_source_path(explicit_path: str | None) -> Path:
+    """Resolve the source code directory for --dev mode.
+
+    Resolution order:
+    1. Explicit --source-path flag
+    2. Current working directory (if it has Dockerfile + docker-compose.yml)
+    3. Saved path from state.json
+    4. Fail with helpful error
+    """
+
+    def _has_required(p: Path) -> bool:
+        return all((p / f).exists() for f in _DEV_REQUIRED_FILES)
+
+    # 1. Explicit path
+    if explicit_path:
+        p = Path(explicit_path).resolve()
+        if not p.is_dir():
+            print(f"ERROR: --source-path {explicit_path} is not a directory")
+            sys.exit(1)
+        if not _has_required(p):
+            print(f"ERROR: --source-path {p} missing Dockerfile or docker-compose.yml")
+            sys.exit(1)
+        _save_state({"source_path": str(p)})
+        return p
+
+    # 2. CWD
+    cwd = Path.cwd()
+    if _has_required(cwd):
+        _save_state({"source_path": str(cwd)})
+        return cwd
+
+    # 3. Saved state
+    state = _load_state()
+    saved = state.get("source_path")
+    if saved:
+        sp = Path(saved)
+        if _has_required(sp):
+            print(f"[dev] Using saved source path: {saved}")
+            return sp
+        print(f"[dev] Warning: saved source path {saved} no longer valid, ignoring")
+
+    # 4. Fail
+    print("Cannot find source code for --dev mode.")
+    print("Either:")
+    print("  1. Run from the repo root (containing Dockerfile + docker-compose.yml)")
+    print("  2. Use --source-path /path/to/repo")
+    sys.exit(1)
+
+
+def _cmd_run_dev(source_path: str | None, rebuild: bool) -> None:
+    """Dev mode: build from local source with production secrets."""
+    stack_dir = _ensure_stack_dir()
+    source = _resolve_source_path(source_path)
+
+    env_file = stack_dir / _DOCKER_ENV
+    compose_file = source / "docker-compose.yml"
+
+    print(f"[dev] Building from source: {source}")
+    print(f"[dev] Using production secrets: {env_file}")
+
+    cmd = ["docker", "compose", "-f", str(compose_file), "--env-file", str(env_file)]
+
+    if rebuild:
+        subprocess.run([*cmd, "pull"], check=False, cwd=str(source))
+
+    subprocess.run([*cmd, "up", "--build", "-d"], check=True, cwd=str(source))
+
+    _maybe_start_bridge(stack_dir, env_file=env_file, allow_placeholder=False)
+
+    print()
+    subprocess.run(
+        ["docker", "ps", "--filter", "name=agentibridge", "--format", _DOCKER_PS_FORMAT],
+        check=False,
+    )
+    print()
+    print("[dev] Stack started from local source with production secrets.")
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     if not shutil.which("docker"):
         print("ERROR: docker is not installed or not in PATH.")
         print("Install Docker Desktop or Docker Engine first.")
         sys.exit(1)
 
+    if args.test and args.dev:
+        print("ERROR: --test and --dev are mutually exclusive")
+        sys.exit(1)
+
+    if getattr(args, "source_path", None) and not args.dev:
+        print("ERROR: --source-path can only be used with --dev")
+        sys.exit(1)
+
     if args.test:
         _cmd_run_test()
+        return
+
+    if args.dev:
+        _cmd_run_dev(source_path=getattr(args, "source_path", None), rebuild=args.rebuild)
         return
 
     stack_dir = _ensure_stack_dir()
@@ -1743,6 +1838,30 @@ def _read_env_value(key: str, env_file: Path) -> str | None:
     return None
 
 
+def _load_state() -> dict:
+    """Read persistent state from ~/.agentibridge/state.json."""
+    try:
+        return json.loads(_STATE_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_state(data: dict) -> None:
+    """Atomically merge *data* into ~/.agentibridge/state.json."""
+    _STACK_DIR.mkdir(parents=True, exist_ok=True)
+    state = _load_state()
+    state.update(data)
+    state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    fd, tmp = tempfile.mkstemp(dir=str(_STACK_DIR), suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f, indent=2)
+        os.rename(tmp, str(_STATE_FILE))
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
 def cmd_bridge(args: argparse.Namespace) -> None:
     """Manage the dispatch bridge (host-side Claude CLI proxy)."""
     action = args.action
@@ -1818,6 +1937,8 @@ def main() -> None:
     run_parser.add_argument(
         "--test", action="store_true", help="Dev mode: reset ~/.agentibridge, build from local source"
     )
+    run_parser.add_argument("--dev", action="store_true", help="Build from local source with production secrets")
+    run_parser.add_argument("--source-path", type=str, default=None, help="Path to source repo (used with --dev)")
 
     # stop
     subparsers.add_parser("stop", help="Stop the Docker stack")
