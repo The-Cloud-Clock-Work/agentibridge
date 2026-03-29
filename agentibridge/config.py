@@ -1,29 +1,18 @@
 """Configuration for agentibridge."""
 
 import os
-import shutil
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
 
-# Scaffold ~/.agentibridge/.env on first run (from bundled template)
 _home_dir = Path.home() / ".agentibridge"
-_home_env = _home_dir / ".env"
 
-if not _home_env.exists():
-    _home_dir.mkdir(parents=True, exist_ok=True)
-    _bundled = Path(__file__).parent / "data" / ".env.example"
-    if _bundled.exists():
-        shutil.copy2(str(_bundled), str(_home_env))
-
-# Load .env files (first found wins; explicit env vars always take precedence)
+# Load .env from current working directory if present (dev mode)
 _cwd_env = Path.cwd() / ".env"
 
 if _cwd_env.exists():
     load_dotenv(_cwd_env, override=False)
-if _home_env.exists():
-    load_dotenv(_home_env, override=False)
 
 
 def _env_bool(key: str, default: str = "false") -> bool:
