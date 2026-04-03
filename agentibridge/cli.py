@@ -36,7 +36,7 @@ from pathlib import Path
 DATA_DIR = Path(__file__).parent / "data"
 _DOCKER_ENV = "docker.env"
 _DOCKER_PS_FORMAT = "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-_BRIDGE_LOG_FILE = Path("/tmp/dispatch_bridge.log")
+_BRIDGE_LOG_FILE = Path.home() / ".agentibridge" / "logs" / "dispatch_bridge.log"
 _CLOUDFLARED_DIR = ".cloudflared"
 _CLOUDFLARED_CONFIG = "config.yml"
 _NOT_SET = "(not set)"
@@ -52,6 +52,45 @@ def _version() -> str:
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    """Initialize ~/.agentibridge/ state directory and verify prerequisites."""
+    import json
+    from datetime import datetime, timezone
+
+    state_dir = Path.home() / ".agentibridge"
+    logs_dir = state_dir / "logs"
+    state_file = state_dir / "state.json"
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Read or create state.json
+    state = {}
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text())
+        except Exception:
+            pass
+
+    state["source"] = str(Path(__file__).resolve().parent.parent)
+    state["version"] = _version()
+    state["installed_at"] = datetime.now(timezone.utc).isoformat()
+    state_file.write_text(json.dumps(state, indent=2))
+
+    print(f"State directory: {state_dir}")
+    print(f"Version: {state['version']}")
+
+    # Check Docker
+    docker_ok = shutil.which("docker") is not None
+    compose_ok = shutil.which("docker") is not None  # docker compose is a subcommand
+    print(f"Docker: {'available' if docker_ok else 'NOT FOUND'}")
+
+    if not docker_ok:
+        print("Warning: Docker is required for agentibridge run/stop/restart")
+
+    print("Done.")
 
 
 def cmd_version(args: argparse.Namespace) -> None:
@@ -1553,7 +1592,7 @@ def _maybe_start_bridge(stack_dir: Path, *, env_file: Path | None = None, allow_
         return
 
     port = _read_env_value("DISPATCH_BRIDGE_PORT", env_file) or "8101"
-    log_file = Path("/tmp/dispatch_bridge.log")
+    log_file = Path.home() / ".agentibridge" / "logs" / "dispatch_bridge.log"
 
     try:
         env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port, "PYTHONUNBUFFERED": "1"}
@@ -1927,6 +1966,9 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="command")
 
+    # init
+    subparsers.add_parser("init", help="Initialize ~/.agentibridge/ and verify prerequisites")
+
     # update
     update_parser = subparsers.add_parser("update", help="Update agentibridge to the latest version")
     update_parser.add_argument("--docker", action="store_true", help="Also update Docker stack even if not running")
@@ -2010,6 +2052,7 @@ def main() -> None:
         "stop": cmd_stop,
         "restart": cmd_restart,
         "logs": cmd_logs,
+        "init": cmd_init,
         "version": cmd_version,
         "status": cmd_status,
         "help": cmd_help,
