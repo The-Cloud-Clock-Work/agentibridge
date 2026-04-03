@@ -84,7 +84,6 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     # Check Docker
     docker_ok = shutil.which("docker") is not None
-    compose_ok = shutil.which("docker") is not None  # docker compose is a subcommand
     print(f"Docker: {'available' if docker_ok else 'NOT FOUND'}")
 
     if not docker_ok:
