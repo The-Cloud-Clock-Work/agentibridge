@@ -1592,6 +1592,7 @@ def _maybe_start_bridge(stack_dir: Path, *, env_file: Path | None = None, allow_
 
     port = _read_env_value("DISPATCH_BRIDGE_PORT", env_file) or "8101"
     log_file = Path.home() / ".agentibridge" / "logs" / "dispatch_bridge.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port, "PYTHONUNBUFFERED": "1"}
