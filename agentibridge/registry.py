@@ -210,6 +210,9 @@ def register_agent(
     metadata: Optional[dict] = None,
     heartbeat_ttl: int = _DEFAULT_HEARTBEAT_TTL,
 ) -> dict:
+    if not agent_id or not agent_id.strip():
+        raise ValueError("agent_id is required and cannot be empty")
+    agent_id = agent_id.strip()
     caps = capabilities or []
     meta = metadata or {}
     now = _now_iso()

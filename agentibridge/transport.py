@@ -271,7 +271,10 @@ async def _read_json_body(receive) -> dict:
             break
     if not body:
         return {}
-    return json.loads(body)
+    try:
+        return json.loads(body)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ValueError(f"Invalid JSON body: {e}") from e
 
 
 async def _json_response(send, data: dict, status: int = 200):
@@ -312,7 +315,7 @@ async def _handle_agents_request(scope, receive, send):
             return
 
         # POST /agents/{agent_id}/heartbeat
-        if "/heartbeat" in path and method == "POST":
+        if path.endswith("/heartbeat") and method == "POST":
             parts = path.strip("/").split("/")
             # agents / {agent_id} / heartbeat
             if len(parts) >= 3:
@@ -414,7 +417,7 @@ class CORSMiddleware:
                     "status": 204,
                     "headers": [
                         [b"access-control-allow-origin", b"*"],
-                        [b"access-control-allow-methods", b"GET, POST, OPTIONS"],
+                        [b"access-control-allow-methods", b"GET, POST, DELETE, OPTIONS"],
                         [b"access-control-allow-headers", b"content-type, x-api-key, authorization"],
                         [b"access-control-max-age", b"86400"],
                     ],
