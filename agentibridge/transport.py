@@ -314,6 +314,39 @@ async def _handle_agents_request(scope, receive, send):
             await _json_response(send, {"success": True, **result})
             return
 
+        # POST /agents/dispatch — capability-based routing
+        if path == "/agents/dispatch" and method == "POST":
+            body = await _read_json_body(receive)
+            result = await registry.route_by_capability(
+                capability=body.get("capability", ""),
+                task=body.get("task", ""),
+                profile=body.get("profile", ""),
+                repo_url=body.get("repo_url", ""),
+                wait=body.get("wait", False),
+                file_path=body.get("file_path", ""),
+            )
+            status = 503 if result.get("retry") else (200 if result.get("success") else 400)
+            await _json_response(send, result, status)
+            return
+
+        # POST /agents/{agent_id}/run — direct dispatch
+        if path.endswith("/run") and method == "POST":
+            parts = path.strip("/").split("/")
+            if len(parts) >= 3:
+                agent_id = parts[1]
+                body = await _read_json_body(receive)
+                result = await registry.route_to_agent(
+                    agent_id=agent_id,
+                    task=body.get("task", ""),
+                    profile=body.get("profile", ""),
+                    repo_url=body.get("repo_url", ""),
+                    wait=body.get("wait", False),
+                    file_path=body.get("file_path", ""),
+                )
+                status = 503 if result.get("retry") else (200 if result.get("success") else 400)
+                await _json_response(send, result, status)
+                return
+
         # POST /agents/{agent_id}/heartbeat
         if path.endswith("/heartbeat") and method == "POST":
             parts = path.strip("/").split("/")

@@ -351,3 +351,95 @@ def list_agents(
 
 def find_agents(capability: str) -> List[dict]:
     return list_agents(capability=capability)
+
+
+# ---------------------------------------------------------------------------
+# Agent routing — forward tasks to discovered agents
+# ---------------------------------------------------------------------------
+
+
+async def route_to_agent(
+    agent_id: str,
+    task: str,
+    profile: str = "",
+    repo_url: str = "",
+    wait: bool = False,
+    file_path: str = "",
+) -> dict:
+    """Forward a task to a specific agent's REST API."""
+    import httpx
+
+    agent = get_agent(agent_id)
+    if agent is None:
+        return {"success": False, "error": f"agent not found: {agent_id}"}
+    if agent.get("effective_status") != "online":
+        return {"success": False, "error": f"agent offline: {agent_id}"}
+
+    meta = agent.get("metadata", {})
+    capacity = meta.get("available_capacity", 1)
+    if capacity <= 0:
+        return {"success": False, "error": "agent at capacity", "retry": True, "agent_id": agent_id}
+
+    endpoint = agent.get("endpoint", "")
+    if not endpoint:
+        return {"success": False, "error": f"agent has no endpoint: {agent_id}"}
+
+    body: Dict[str, Any] = {"task": task, "wait": wait}
+    if profile:
+        body["profile"] = profile
+    if repo_url:
+        body["repo_url"] = repo_url
+    if file_path:
+        body["file_path"] = file_path
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{endpoint}/jobs", json=body)
+            if resp.status_code == 503:
+                return {"success": False, "error": "agent at capacity", "retry": True, "agent_id": agent_id}
+            resp.raise_for_status()
+            data = resp.json()
+            log("registry: routed task to agent", {"agent_id": agent_id, "job_id": data.get("job", {}).get("id", "")})
+            return {"success": True, "agent_id": agent_id, "endpoint": endpoint, **data}
+    except httpx.ConnectError:
+        return {"success": False, "error": f"agent unreachable: {endpoint}", "agent_id": agent_id}
+    except httpx.TimeoutException:
+        return {"success": False, "error": f"agent timeout: {endpoint}", "agent_id": agent_id}
+    except Exception as e:
+        return {"success": False, "error": str(e), "agent_id": agent_id}
+
+
+async def route_by_capability(
+    capability: str,
+    task: str,
+    profile: str = "",
+    repo_url: str = "",
+    wait: bool = False,
+    file_path: str = "",
+) -> dict:
+    """Find best agent for a capability and forward the task."""
+    agents = find_agents(capability)
+
+    # Filter online, sort by capacity
+    online = [a for a in agents if a.get("effective_status") == "online"]
+    if not online:
+        return {"success": False, "error": f"no online agents with capability: {capability}", "retry": True}
+
+    online.sort(key=lambda a: a.get("metadata", {}).get("available_capacity", 0), reverse=True)
+
+    best = online[0]
+    capacity = best.get("metadata", {}).get("available_capacity", 0)
+    if capacity <= 0:
+        return {"success": False, "error": "all agents at capacity", "retry": True}
+
+    result = await route_to_agent(
+        agent_id=best["agent_id"],
+        task=task,
+        profile=profile,
+        repo_url=repo_url,
+        wait=wait,
+        file_path=file_path,
+    )
+    result["routed_by"] = "capability"
+    result["capability"] = capability
+    return result

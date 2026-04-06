@@ -1184,6 +1184,83 @@ def find_agents(capability: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+@mcp.tool()
+async def run_agent(
+    agent_id: str,
+    task: str,
+    profile: str = "",
+    repo_url: str = "",
+    wait: bool = False,
+    file_path: str = "",
+) -> str:
+    """Route a task to a specific registered agent.
+
+    Looks up the agent in the registry, checks it's online and has capacity,
+    then forwards the task to its REST API. Returns job_id from the target agent.
+
+    Args:
+        agent_id: Target agent identifier (e.g., "agenticore-0", "publishing-agent-0")
+        task: What the agent should do
+        profile: Execution profile (optional — agent uses its default if omitted)
+        repo_url: GitHub repo URL (optional)
+        wait: If true, block until job completes (default: false)
+        file_path: Path to .mcp.json on shared FS (optional)
+
+    Returns:
+        JSON with success, agent_id, job details, or error with retry flag
+    """
+    try:
+        from agentibridge.registry import route_to_agent
+
+        result = await route_to_agent(
+            agent_id=agent_id, task=task, profile=profile,
+            repo_url=repo_url, wait=wait, file_path=file_path,
+        )
+        return json.dumps(result)
+    except Exception as e:
+        log("MCP run_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def dispatch_to_agent(
+    capability: str,
+    task: str,
+    profile: str = "",
+    repo_url: str = "",
+    wait: bool = False,
+    file_path: str = "",
+) -> str:
+    """Route a task to the best available agent with a specific capability.
+
+    Finds all online agents with the capability, picks the one with most
+    available capacity, and forwards the task. Returns job_id from the
+    selected agent.
+
+    Args:
+        capability: Required capability (e.g., "profile:coding", "agent:publishing", "agent_mode")
+        task: What the agent should do
+        profile: Execution profile (optional)
+        repo_url: GitHub repo URL (optional)
+        wait: If true, block until job completes (default: false)
+        file_path: Path to .mcp.json on shared FS (optional)
+
+    Returns:
+        JSON with success, agent_id, routed_by, job details, or error with retry flag
+    """
+    try:
+        from agentibridge.registry import route_by_capability
+
+        result = await route_by_capability(
+            capability=capability, task=task, profile=profile,
+            repo_url=repo_url, wait=wait, file_path=file_path,
+        )
+        return json.dumps(result)
+    except Exception as e:
+        log("MCP dispatch_to_agent failed", {"capability": capability, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
