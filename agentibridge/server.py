@@ -1003,6 +1003,188 @@ def search_history(
 
 
 # =============================================================================
+# PHASE 6 — AGENT REGISTRY (A2A Discovery)
+# =============================================================================
+
+
+@mcp.tool()
+def register_agent(
+    agent_id: str,
+    agent_name: str = "",
+    agent_type: str = "",
+    capabilities: str = "[]",
+    endpoint: str = "",
+    metadata: str = "{}",
+    heartbeat_ttl: int = 300,
+) -> str:
+    """Register an agent for A2A discovery.
+
+    Agents call this on boot to announce themselves. Idempotent — safe to
+    call repeatedly (upsert). Capabilities and metadata are JSON strings.
+
+    Args:
+        agent_id: Unique agent identifier (e.g., "agenticore-dev-0")
+        agent_name: Human-readable name
+        agent_type: Category (e.g., "executor", "observer", "specialist")
+        capabilities: JSON array of capability strings
+        endpoint: How to reach this agent (URL)
+        metadata: JSON object with arbitrary key-value pairs
+        heartbeat_ttl: Seconds before agent is considered offline (default: 300)
+
+    Returns:
+        JSON with registration result
+    """
+    try:
+        from agentibridge.registry import register_agent as _register
+
+        caps = json.loads(capabilities) if capabilities else []
+        meta = json.loads(metadata) if metadata else {}
+        result = _register(
+            agent_id=agent_id,
+            agent_name=agent_name,
+            agent_type=agent_type,
+            capabilities=caps,
+            endpoint=endpoint,
+            metadata=meta,
+            heartbeat_ttl=heartbeat_ttl,
+        )
+        return json.dumps({"success": True, **result})
+    except Exception as e:
+        log("MCP register_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def deregister_agent(agent_id: str) -> str:
+    """Remove an agent from the registry.
+
+    Args:
+        agent_id: Agent identifier to remove
+
+    Returns:
+        JSON with deletion result
+    """
+    try:
+        from agentibridge.registry import deregister_agent as _deregister
+
+        result = _deregister(agent_id)
+        return json.dumps({"success": True, **result})
+    except Exception as e:
+        log("MCP deregister_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def heartbeat_agent(
+    agent_id: str,
+    status: str = "online",
+    metadata: str = "{}",
+) -> str:
+    """Update agent heartbeat timestamp and status.
+
+    Agents call this periodically to signal liveness. If no heartbeat
+    is received within heartbeat_ttl, the agent is reported as offline.
+
+    Args:
+        agent_id: Agent identifier
+        status: Current status ("online", "degraded")
+        metadata: JSON object merged into existing metadata
+
+    Returns:
+        JSON with heartbeat result
+    """
+    try:
+        from agentibridge.registry import heartbeat_agent as _heartbeat
+
+        meta = json.loads(metadata) if metadata else {}
+        result = _heartbeat(agent_id=agent_id, status=status, metadata=meta)
+        return json.dumps({"success": True, **result})
+    except Exception as e:
+        log("MCP heartbeat_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def list_agents(
+    agent_type: str = "",
+    capability: str = "",
+    status: str = "",
+    limit: int = 50,
+) -> str:
+    """List registered agents with optional filters.
+
+    Args:
+        agent_type: Filter by agent type (e.g., "executor")
+        capability: Filter by capability (e.g., "profile:coding")
+        status: Filter by effective status ("online", "offline", "degraded")
+        limit: Maximum agents to return (default: 50)
+
+    Returns:
+        JSON with agents list and count
+    """
+    try:
+        from agentibridge.registry import list_agents as _list
+
+        agents = _list(
+            agent_type=agent_type,
+            capability=capability,
+            status=status,
+            limit=limit,
+        )
+        return json.dumps({"success": True, "count": len(agents), "agents": agents})
+    except Exception as e:
+        log("MCP list_agents failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def get_agent(agent_id: str) -> str:
+    """Get full details of a registered agent.
+
+    Args:
+        agent_id: Agent identifier
+
+    Returns:
+        JSON with agent record including effective_status
+    """
+    try:
+        from agentibridge.registry import get_agent as _get
+
+        agent = _get(agent_id)
+        if agent is None:
+            return json.dumps({"success": False, "error": f"Agent not found: {agent_id}"})
+        return json.dumps({"success": True, "agent": agent})
+    except Exception as e:
+        log("MCP get_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def find_agents(capability: str) -> str:
+    """Find agents that have a specific capability.
+
+    Args:
+        capability: Capability string (e.g., "run_task", "profile:coding", "agent_mode")
+
+    Returns:
+        JSON with matching agents
+    """
+    try:
+        from agentibridge.registry import find_agents as _find
+
+        agents = _find(capability)
+        return json.dumps({
+            "success": True,
+            "capability": capability,
+            "count": len(agents),
+            "agents": agents,
+        })
+    except Exception as e:
+        log("MCP find_agents failed", {"capability": capability, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
