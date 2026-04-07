@@ -257,6 +257,170 @@ class HealthRouter:
 
 
 # =============================================================================
+# AGENT REGISTRY REST ENDPOINTS
+# =============================================================================
+
+
+async def _read_json_body(receive) -> dict:
+    """Read and parse JSON body from ASGI receive."""
+    body = b""
+    while True:
+        message = await receive()
+        body += message.get("body", b"")
+        if not message.get("more_body", False):
+            break
+    if not body:
+        return {}
+    try:
+        return json.loads(body)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ValueError(f"Invalid JSON body: {e}") from e
+
+
+async def _json_response(send, data: dict, status: int = 200):
+    """Send a JSON response via ASGI."""
+    body = json.dumps(data).encode()
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [
+            [b"content-type", b"application/json"],
+            [b"content-length", str(len(body)).encode()],
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+async def _handle_agents_request(scope, receive, send):
+    """Handle /agents/* REST requests for service-to-service A2A calls."""
+    from agentibridge import registry
+
+    path = scope.get("path", "")
+    method = scope.get("method", "GET")
+
+    try:
+        # POST /agents/register
+        if path == "/agents/register" and method == "POST":
+            body = await _read_json_body(receive)
+            result = registry.register_agent(
+                agent_id=body.get("agent_id", ""),
+                agent_name=body.get("agent_name", ""),
+                agent_type=body.get("agent_type", ""),
+                capabilities=body.get("capabilities", []),
+                endpoint=body.get("endpoint", ""),
+                metadata=body.get("metadata", {}),
+                heartbeat_ttl=body.get("heartbeat_ttl", 300),
+            )
+            await _json_response(send, {"success": True, **result})
+            return
+
+        # POST /agents/dispatch — capability-based routing
+        if path == "/agents/dispatch" and method == "POST":
+            body = await _read_json_body(receive)
+            result = await registry.route_by_capability(
+                capability=body.get("capability", ""),
+                task=body.get("task", ""),
+                profile=body.get("profile", ""),
+                repo_url=body.get("repo_url", ""),
+                wait=body.get("wait", False),
+                file_path=body.get("file_path", ""),
+            )
+            status = 503 if result.get("retry") else (200 if result.get("success") else 400)
+            await _json_response(send, result, status)
+            return
+
+        # POST /agents/{agent_id}/run — direct dispatch
+        if path.endswith("/run") and method == "POST":
+            parts = path.strip("/").split("/")
+            if len(parts) >= 3:
+                agent_id = parts[1]
+                body = await _read_json_body(receive)
+                result = await registry.route_to_agent(
+                    agent_id=agent_id,
+                    task=body.get("task", ""),
+                    profile=body.get("profile", ""),
+                    repo_url=body.get("repo_url", ""),
+                    wait=body.get("wait", False),
+                    file_path=body.get("file_path", ""),
+                )
+                status = 503 if result.get("retry") else (200 if result.get("success") else 400)
+                await _json_response(send, result, status)
+                return
+
+        # POST /agents/{agent_id}/heartbeat
+        if path.endswith("/heartbeat") and method == "POST":
+            parts = path.strip("/").split("/")
+            # agents / {agent_id} / heartbeat
+            if len(parts) >= 3:
+                agent_id = parts[1]
+                body = await _read_json_body(receive)
+                result = registry.heartbeat_agent(
+                    agent_id=agent_id,
+                    status=body.get("status", "online"),
+                    metadata=body.get("metadata"),
+                )
+                await _json_response(send, {"success": True, **result})
+                return
+
+        # DELETE /agents/{agent_id}
+        if method == "DELETE":
+            parts = path.strip("/").split("/")
+            if len(parts) == 2:
+                agent_id = parts[1]
+                result = registry.deregister_agent(agent_id)
+                await _json_response(send, {"success": True, **result})
+                return
+
+        # GET /agents/{agent_id}
+        if method == "GET" and path != "/agents" and path != "/agents/":
+            parts = path.strip("/").split("/")
+            if len(parts) == 2:
+                agent_id = parts[1]
+                agent = registry.get_agent(agent_id)
+                if agent is None:
+                    await _json_response(send, {"success": False, "error": "not found"}, 404)
+                    return
+                await _json_response(send, {"success": True, "agent": agent})
+                return
+
+        # GET /agents
+        if method == "GET":
+            qs = scope.get("query_string", b"").decode("utf-8")
+            params: dict = {}
+            for param in qs.split("&"):
+                if "=" in param:
+                    k, v = param.split("=", 1)
+                    params[k] = v
+            agents = registry.list_agents(
+                agent_type=params.get("agent_type", ""),
+                capability=params.get("capability", ""),
+                status=params.get("status", ""),
+                limit=int(params.get("limit", "50")),
+            )
+            await _json_response(send, {"success": True, "count": len(agents), "agents": agents})
+            return
+
+        await _json_response(send, {"error": "not found"}, 404)
+
+    except Exception as e:
+        log("agents REST error", {"path": path, "error": str(e)})
+        await _json_response(send, {"success": False, "error": str(e)}, 500)
+
+
+class AgentRegistryRouter:
+    """ASGI app that routes /agents/* to REST handlers, everything else to inner app."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").startswith("/agents"):
+            await _handle_agents_request(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+# =============================================================================
 # CORS MIDDLEWARE (simple ASGI wrapper)
 # =============================================================================
 
@@ -286,7 +450,7 @@ class CORSMiddleware:
                     "status": 204,
                     "headers": [
                         [b"access-control-allow-origin", b"*"],
-                        [b"access-control-allow-methods", b"GET, POST, OPTIONS"],
+                        [b"access-control-allow-methods", b"GET, POST, DELETE, OPTIONS"],
                         [b"access-control-allow-headers", b"content-type, x-api-key, authorization"],
                         [b"access-control-max-age", b"86400"],
                     ],
@@ -389,6 +553,7 @@ def _build_app(mcp):
 
     app = dual_transport
 
+    app = AgentRegistryRouter(app)
     app = HealthRouter(app)
     if oauth_enabled:
         app = OAuthCompatAuthMiddleware(app)
@@ -432,6 +597,7 @@ def run_sse_server(mcp) -> None:
     print(f"MCP transport ready on {host}:{port}", file=sys.stderr)
     print(f"  Streamable HTTP: http://{host}:{port}/mcp", file=sys.stderr)
     print(f"  Legacy SSE:      http://{host}:{port}/sse", file=sys.stderr)
+    print(f"  Agent registry:  http://{host}:{port}/agents", file=sys.stderr)
     print(f"  Health check:    http://{host}:{port}/health", file=sys.stderr)
     if oauth_enabled:
         print(f"  OAuth metadata:  http://{host}:{port}/.well-known/oauth-authorization-server", file=sys.stderr)
