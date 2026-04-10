@@ -1,12 +1,12 @@
-# Standalone AgentiBridge stack (pip distribution).
+# AgentiBridge database stack (pip distribution).
 #
 # This file is bundled with the agentibridge pip package.
-# It pulls the pre-built image from Docker Hub — no git clone required.
+# AgentiBridge runs natively on the host — this compose provides databases only.
 #
 # Usage (via CLI):
-#   agentibridge run         # start the stack
-#   agentibridge stop        # stop the stack
-#   agentibridge logs -f     # follow logs
+#   agentibridge run         # start databases + native agentibridge
+#   agentibridge stop        # stop everything
+#   agentibridge logs -f     # follow database logs
 #
 # Manual usage:
 #   cd ~/.agentibridge
@@ -17,47 +17,24 @@
 #   CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d  # named tunnel
 
 services:
-  agentibridge:
-    container_name: agentibridge
-    image: tccw/agentibridge:latest
-    ports:
-      - "8100:8100"
-    volumes:
-      # Mount host Claude Code home directory (read-only)
-      - ${CLAUDE_DIR:-~/.claude}:/home/appuser/.claude:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    env_file: docker.env
-    networks:
-      - sb-network
-    depends_on:
-      redis:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8100/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
-
   redis:
     container_name: agentibridge-redis
     image: redis:7-alpine
     command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
     volumes:
       - sb_redis_data:/data
     networks:
       - sb-network
     restart: unless-stopped
-    # Redis port NOT exposed to host (internal only)
 
   postgres:
     container_name: agentibridge-postgres
     image: pgvector/pgvector:pg16
-    env_file: docker.env
+    env_file: agentibridge.env
+    ports:
+      - "5432:5432"
     volumes:
       - sb_postgres_data:/var/lib/postgresql/data
     networks:
@@ -78,24 +55,22 @@ services:
     container_name: agentibridge-tunnel
     image: cloudflare/cloudflared:latest
     profiles: [tunnel]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - sb-network
-    depends_on:
-      agentibridge:
-        condition: service_healthy
     restart: unless-stopped
     command: >-
-      tunnel --no-autoupdate --url http://agentibridge:8100
+      tunnel --no-autoupdate --url http://host.docker.internal:8100
 
   cloudflared-named:
     container_name: agentibridge-tunnel-named
     image: cloudflare/cloudflared:latest
     profiles: [tunnel-named]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - sb-network
-    depends_on:
-      agentibridge:
-        condition: service_healthy
     restart: unless-stopped
     command: >-
       tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}

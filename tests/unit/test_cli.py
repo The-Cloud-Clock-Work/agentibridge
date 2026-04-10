@@ -18,8 +18,6 @@ from agentibridge.cli import (
     cmd_stop,
     cmd_tunnel,
     cmd_update,
-    cmd_run,
-    cmd_bridge,
     cmd_embeddings,
     _container_health,
     _systemd_active,
@@ -27,12 +25,9 @@ from agentibridge.cli import (
     _parse_cloudflared_config,
     _extract_tunnel_url,
     _short_digest,
-    _stop_bridge,
     _validate_env,
     _ensure_stack_dir,
-    _maybe_start_bridge,
     _read_env_value,
-    _cmd_run_test,
 )
 
 
@@ -148,51 +143,49 @@ class TestCmdStatus:
 
         return side_effect
 
-    def test_status_docker_running(self, capsys, tmp_path):
-        """When Docker stack is running, shows container health + docker.env values."""
+    def test_status_with_env_file(self, capsys, tmp_path):
+        """Reads config from agentibridge.env and shows container health."""
         stack_dir = tmp_path / "agentibridge"
         stack_dir.mkdir()
-        env_file = stack_dir / "docker.env"
+        env_file = stack_dir / "agentibridge.env"
         env_file.write_text(
-            "REDIS_URL=redis://redis:6379/0\n"
-            "POSTGRES_URL=postgresql://ab:secret@postgres:5432/agentibridge\n"
+            "REDIS_URL=redis://localhost:6379/0\n"
+            "POSTGRES_URL=postgresql://ab:secret@localhost:5432/agentibridge\n"
             "AGENTIBRIDGE_TRANSPORT=sse\n"
             "AGENTIBRIDGE_PORT=8100\n"
             "AGENTIBRIDGE_POLL_INTERVAL=30\n"
         )
 
         container_health = {
-            "agentibridge-redis": "healthy",
+            "agentibridge-redis": "running",
             "agentibridge-postgres": "healthy",
-            "agentibridge-tunnel": None,  # not found
-            "agentibridge": "running",
+            "agentibridge-tunnel": None,
         }
 
         se = self._docker_inspect_side_effect(container_health)
 
+        mock_get_redis = MagicMock(return_value=None)
+        mock_get_pg = MagicMock(return_value=None)
+
         with (
-            patch("agentibridge.cli._is_stack_running", return_value=True),
             patch("agentibridge.cli._STACK_DIR", stack_dir),
             patch("agentibridge.cli.subprocess.run", side_effect=se),
+            patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
+            patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
         ):
             cmd_status(MagicMock())
 
         output = capsys.readouterr().out
 
-        # Redis section shows container health + docker.env URL
-        assert "container: healthy" in output
-        assert "redis://redis:6379/0 (Docker internal)" in output
+        assert "transport: sse" in output
+        assert "port: 8100" in output
+        assert "poll interval: 30s" in output
+        assert "env file:" in output
 
-        # Postgres section shows container health + docker.env URL
-        assert "postgresql://ab:secret@postgres:5432/agentibridge (Docker internal)" in output
-
-        # Config section reads from docker.env
-        assert "transport: sse (docker.env)" in output
-        assert "port: 8100 (docker.env)" in output
-        assert "poll interval: 30s (docker.env)" in output
-
-    def test_status_docker_not_running(self, capsys):
-        """When Docker is NOT running, falls back to host env vars."""
+    def test_status_no_env_file(self, capsys, tmp_path):
+        """Falls back to env vars when agentibridge.env doesn't exist."""
+        stack_dir = tmp_path / "agentibridge"
+        stack_dir.mkdir()
 
         def se(cmd, **kwargs):
             cmd_str = " ".join(str(c) for c in cmd)
@@ -202,34 +195,20 @@ class TestCmdStatus:
                 return _ok(stdout="inactive")
             return _fail()
 
+        mock_get_redis = MagicMock(return_value=None)
+        mock_get_pg = MagicMock(return_value=None)
+
         with (
-            patch("agentibridge.cli._is_stack_running", return_value=False),
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
             patch("agentibridge.cli.subprocess.run", side_effect=se),
-            patch.dict(
-                "os.environ",
-                {
-                    "AGENTIBRIDGE_TRANSPORT": "stdio",
-                    "AGENTIBRIDGE_PORT": "8100",
-                    "AGENTIBRIDGE_POLL_INTERVAL": "60",
-                },
-            ),
+            patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
+            patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
+            patch.dict("os.environ", {"AGENTIBRIDGE_TRANSPORT": "sse", "AGENTIBRIDGE_PORT": "8100"}),
         ):
-            # Mock redis/pg imports to avoid real connections
-            mock_get_redis = MagicMock(return_value=None)
-            mock_get_pg = MagicMock(return_value=None)
-            with (
-                patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
-                patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
-            ):
-                cmd_status(MagicMock())
+            cmd_status(MagicMock())
 
         output = capsys.readouterr().out
-
-        # Config should show host env values (no "docker.env" annotation)
-        assert "transport: stdio" in output
-        assert "docker.env" not in output
-
-        # Redis shows unavailable with host env
+        assert "transport: sse" in output
         assert "unavailable" in output
 
     def test_status_tunnel_systemd(self, capsys):
@@ -244,7 +223,6 @@ class TestCmdStatus:
             return _fail()
 
         with (
-            patch("agentibridge.cli._is_stack_running", return_value=False),
             patch("agentibridge.cli.subprocess.run", side_effect=se),
             patch("agentibridge.cli._cloudflared_hostname", return_value="tunnel.example.com"),
         ):
@@ -494,10 +472,10 @@ class TestShortDigest:
 
 
 def _make_stack_dir() -> Path:
-    """Return a temp Path with compose + docker.env files for testing."""
+    """Return a temp Path with compose + agentibridge.env files for testing."""
     d = Path(tempfile.mkdtemp())
     (d / "docker-compose.yml").write_text("services: {}\n")
-    (d / "docker.env").write_text(
+    (d / "agentibridge.env").write_text(
         "REDIS_URL=redis://r:6379/0\n"
         "POSTGRES_URL=postgresql://a:a@localhost/a\n"
         "POSTGRES_USER=a\nPOSTGRES_PASSWORD=a\nPOSTGRES_DB=a\n"
@@ -756,7 +734,7 @@ class TestCmdUpdate:
         assert "-f" in pull_cmd
         assert str(stack_dir / "docker-compose.yml") in pull_cmd
         assert "--env-file" in pull_cmd
-        assert str(stack_dir / "docker.env") in pull_cmd
+        assert str(stack_dir / "agentibridge.env") in pull_cmd
         assert pull_cmd[-1] == "agentibridge"
 
         # Verify recreate command: up -d --no-deps --force-recreate agentibridge
@@ -808,7 +786,7 @@ class TestCmdUpdate:
 class TestValidateEnv:
     def test_passes_when_all_vars_present(self, tmp_path):
         """No exit when all required vars are present."""
-        env_file = tmp_path / "docker.env"
+        env_file = tmp_path / "agentibridge.env"
         env_file.write_text(
             "REDIS_URL=redis://redis:6379/0\n"
             "POSTGRES_URL=postgresql://a:a@postgres:5432/a\n"
@@ -822,7 +800,7 @@ class TestValidateEnv:
 
     def test_exits_when_vars_missing(self, tmp_path, capsys):
         """Exits with code 1 listing missing variables."""
-        env_file = tmp_path / "docker.env"
+        env_file = tmp_path / "agentibridge.env"
         env_file.write_text("REDIS_URL=redis://redis:6379/0\n")
         with pytest.raises(SystemExit) as exc:
             _validate_env(env_file)
@@ -834,7 +812,7 @@ class TestValidateEnv:
 @pytest.mark.unit
 class TestEnsureStackDir:
     def test_scaffolds_compose_and_env(self, tmp_path, capsys):
-        """Creates compose file and docker.env, returns stack_dir on first run."""
+        """Creates compose file and agentibridge.env, returns stack_dir on first run."""
         stack_dir = tmp_path / "agentibridge"
         with (
             patch("agentibridge.cli._STACK_DIR", stack_dir),
@@ -847,10 +825,10 @@ class TestEnsureStackDir:
         assert "default configuration" in output
         assert "github.com" in output
         assert (stack_dir / "docker-compose.yml").exists()
-        assert (stack_dir / "docker.env").exists()
+        assert (stack_dir / "agentibridge.env").exists()
 
     def test_migrates_old_env_with_docker_vars(self, tmp_path, capsys):
-        """Moves .env to docker.env when it contains Docker vars."""
+        """Moves .env to agentibridge.env when it contains Docker vars."""
         stack_dir = tmp_path / "agentibridge"
         stack_dir.mkdir()
         # Write a compose file so it doesn't trigger first-run exit
@@ -877,7 +855,7 @@ class TestEnsureStackDir:
             result = _ensure_stack_dir()
         output = capsys.readouterr().out
         assert "Migrated" in output
-        assert (stack_dir / "docker.env").exists()
+        assert (stack_dir / "agentibridge.env").exists()
         assert result == stack_dir
 
 
@@ -908,322 +886,18 @@ class TestReadEnvValue:
 
 
 @pytest.mark.unit
-class TestMaybeStartBridge:
-    """Tests for _maybe_start_bridge()."""
-
-    def test_no_env_file_returns_early(self, tmp_path):
-        """No action when env file doesn't exist."""
-        _maybe_start_bridge(tmp_path, env_file=tmp_path / "nonexistent.env")
-        # Should not raise
-
-    def test_no_secret_returns_early(self, tmp_path):
-        """No action when DISPATCH_SECRET is not set."""
-        env = tmp_path / "docker.env"
-        env.write_text("REDIS_URL=redis://localhost\n")
-        _maybe_start_bridge(tmp_path, env_file=env)
-        # Should not raise
-
-    def test_placeholder_secret_skipped(self, tmp_path):
-        """Placeholder secret is skipped unless allow_placeholder=True."""
-        env = tmp_path / "docker.env"
-        env.write_text("DISPATCH_SECRET=changeme-generate-a-random-secret\n")
-        _maybe_start_bridge(tmp_path, env_file=env)
-        # Should not raise — placeholder is ignored
-
-    def test_already_running_skipped(self, tmp_path):
-        """If bridge process already running, skip start."""
-        env = tmp_path / "docker.env"
-        env.write_text("DISPATCH_SECRET=real-secret\n")
-
-        with patch("agentibridge.cli.subprocess.run", return_value=_ok()) as mock_run:
-            _maybe_start_bridge(tmp_path, env_file=env)
-
-        # pgrep should have been called
-        mock_run.assert_called_once()
-        assert "pgrep" in mock_run.call_args[0][0]
-
-    def test_starts_bridge_successfully(self, tmp_path, capsys):
-        """Starts bridge when secret is set and not already running."""
-        env = tmp_path / "docker.env"
-        env.write_text("DISPATCH_SECRET=real-secret\nDISPATCH_BRIDGE_PORT=9999\n")
-
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = None  # still running
-        mock_proc.pid = 12345
-
-        with (
-            patch("agentibridge.cli.subprocess.run", return_value=_fail()),  # pgrep = not running
-            patch("agentibridge.cli.subprocess.Popen", return_value=mock_proc),
-            patch("agentibridge.cli.time.sleep"),
-        ):
-            _maybe_start_bridge(tmp_path, env_file=env)
-
-        output = capsys.readouterr().out
-        assert "auto-started" in output
-        assert "12345" in output
-
-    def test_bridge_fails_to_start(self, tmp_path, capsys):
-        """Reports warning when bridge process exits immediately."""
-        env = tmp_path / "docker.env"
-        env.write_text("DISPATCH_SECRET=real-secret\n")
-
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = 1  # exited immediately
-
-        with (
-            patch("agentibridge.cli.subprocess.run", return_value=_fail()),
-            patch("agentibridge.cli.subprocess.Popen", return_value=mock_proc),
-            patch("agentibridge.cli.time.sleep"),
-        ):
-            _maybe_start_bridge(tmp_path, env_file=env)
-
-        output = capsys.readouterr().out
-        assert "WARNING" in output
-
-    def test_popen_exception_handled(self, tmp_path, capsys):
-        """Exception during Popen is caught gracefully."""
-        env = tmp_path / "docker.env"
-        env.write_text("DISPATCH_SECRET=real-secret\n")
-
-        with (
-            patch("agentibridge.cli.subprocess.run", return_value=_fail()),
-            patch("agentibridge.cli.subprocess.Popen", side_effect=OSError("No such file")),
-        ):
-            _maybe_start_bridge(tmp_path, env_file=env)
-
-        output = capsys.readouterr().out
-        assert "WARNING" in output
-
-
-@pytest.mark.unit
-class TestCmdRunTest:
-    """Tests for _cmd_run_test() dev mode."""
-
-    def test_exits_if_not_in_repo_root(self, tmp_path):
-        """Exits with error when Dockerfile is missing."""
-        with (
-            patch("os.getcwd", return_value=str(tmp_path)),
-            patch("agentibridge.cli.Path.exists", return_value=False),
-            pytest.raises(SystemExit),
-        ):
-            _cmd_run_test()
-
-    def test_runs_docker_compose_build(self, tmp_path, capsys):
-        """Full test mode: compose up --build, bridge start."""
-        # Create repo-root-like structure
-        (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
-        (tmp_path / "docker-compose.yml").write_text("services: {}\n")
-        (tmp_path / ".env.example").write_text(
-            "REDIS_URL=redis://localhost\n# DISPATCH_SECRET=changeme-generate-a-random-secret\n"
-        )
-
-        stack_dir = tmp_path / "stack"
-        stack_dir.mkdir()
-
-        calls = []
-
-        def se(cmd, **kw):
-            calls.append(list(cmd) if not isinstance(cmd, list) else cmd)
-            return _ok()
-
-        with (
-            patch("agentibridge.cli._STACK_DIR", stack_dir),
-            patch("agentibridge.cli.subprocess.run", side_effect=se),
-            patch("agentibridge.cli._maybe_start_bridge"),
-            patch("agentibridge.cli.Path.exists", side_effect=lambda self=None: True),
-            patch("agentibridge.cli.shutil.copy2"),
-            patch("builtins.open", MagicMock()),
-            patch(
-                "agentibridge.cli.Path.read_text", return_value="# DISPATCH_SECRET=changeme-generate-a-random-secret\n"
-            ),
-            patch("agentibridge.cli.Path.write_text"),
-        ):
-            _cmd_run_test()
-
-        output = capsys.readouterr().out
-        assert "Using existing" in output
-        assert "Stack started from local source" in output
-
-
-@pytest.mark.unit
-class TestCmdRun:
-    """Tests for cmd_run()."""
-
-    def test_no_docker_exits(self, capsys):
-        """Exits when docker is not installed."""
-        with (
-            patch("shutil.which", return_value=None),
-            pytest.raises(SystemExit),
-        ):
-            cmd_run(MagicMock(test=False, dev=False, rebuild=False, source_path=None))
-
-    def test_test_mode_delegates(self):
-        """--test flag delegates to _cmd_run_test."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/docker"),
-            patch("agentibridge.cli._cmd_run_test") as mock_test,
-        ):
-            cmd_run(MagicMock(test=True, dev=False, source_path=None))
-        mock_test.assert_called_once()
-
-    def test_dev_mode_delegates(self):
-        """--dev flag delegates to _cmd_run_dev."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/docker"),
-            patch("agentibridge.cli._cmd_run_dev") as mock_dev,
-        ):
-            cmd_run(MagicMock(test=False, dev=True, source_path=None, rebuild=False))
-        mock_dev.assert_called_once_with(source_path=None, rebuild=False)
-
-    def test_test_and_dev_mutually_exclusive(self):
-        """--test and --dev together exits with error."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/docker"),
-            pytest.raises(SystemExit),
-        ):
-            cmd_run(MagicMock(test=True, dev=True, source_path=None))
-
-    def test_source_path_requires_dev(self):
-        """--source-path without --dev exits with error."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/docker"),
-            pytest.raises(SystemExit),
-        ):
-            cmd_run(MagicMock(test=False, dev=False, source_path="/tmp", rebuild=False))
-
-
-@pytest.mark.unit
-class TestCmdBridge:
-    """Tests for cmd_bridge() management command."""
-
-    def test_start_no_env_file(self, tmp_path, capsys):
-        """start exits when docker.env doesn't exist."""
-        with (
-            patch("agentibridge.cli._STACK_DIR", tmp_path / "nodir"),
-            pytest.raises(SystemExit),
-        ):
-            cmd_bridge(MagicMock(action="start"))
-
-    def test_start_no_secret(self, tmp_path, capsys):
-        """start exits when DISPATCH_SECRET is not in docker.env."""
-        stack_dir = tmp_path / "stack"
-        stack_dir.mkdir()
-        (stack_dir / "docker.env").write_text("REDIS_URL=redis://localhost\n")
-
-        with (
-            patch("agentibridge.cli._STACK_DIR", stack_dir),
-            pytest.raises(SystemExit),
-        ):
-            cmd_bridge(MagicMock(action="start"))
-
-    def test_start_already_running(self, tmp_path, capsys):
-        """start reports already running when pgrep finds process."""
-        stack_dir = tmp_path / "stack"
-        stack_dir.mkdir()
-        (stack_dir / "docker.env").write_text("DISPATCH_SECRET=real-secret\n")
-
-        with (
-            patch("agentibridge.cli._STACK_DIR", stack_dir),
-            patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout=b"12345")),
-        ):
-            cmd_bridge(MagicMock(action="start"))
-
-        output = capsys.readouterr().out
-        assert "already running" in output
-
-    def test_stop_no_process(self, capsys):
-        """stop reports no process when pgrep finds nothing."""
-        with patch("agentibridge.cli.subprocess.run", return_value=MagicMock(stdout="", returncode=1)):
-            cmd_bridge(MagicMock(action="stop"))
-
-        output = capsys.readouterr().out
-        assert "No dispatch bridge" in output
-
-    def test_stop_kills_process(self, capsys):
-        """stop kills running bridge processes."""
-        calls = []
-
-        def se(cmd, **kw):
-            calls.append(cmd)
-            if "pgrep" in cmd:
-                return MagicMock(stdout="1234\n5678", returncode=0)
-            return _ok()
-
-        with patch("agentibridge.cli.subprocess.run", side_effect=se):
-            cmd_bridge(MagicMock(action="stop"))
-
-        output = capsys.readouterr().out
-        assert "stopped" in output
-
-    def test_logs_no_file(self, tmp_path, capsys):
-        """logs exits when log file doesn't exist."""
-        fake_log = tmp_path / "nonexistent_bridge.log"
-        with patch("agentibridge.cli._BRIDGE_LOG_FILE", fake_log):
-            with pytest.raises(SystemExit):
-                cmd_bridge(MagicMock(action="logs"))
-
-
-@pytest.mark.unit
-class TestStopBridge:
-    """Tests for _stop_bridge() helper."""
-
-    def test_returns_false_when_not_running(self, capsys):
-        """Returns False and prints nothing when no bridge process found."""
-        with patch(
-            "agentibridge.cli.subprocess.run",
-            return_value=MagicMock(stdout="", returncode=1),
-        ):
-            result = _stop_bridge()
-
-        assert result is False
-        assert capsys.readouterr().out == ""
-
-    def test_returns_true_and_kills(self, capsys):
-        """Returns True, kills PIDs, and prints message."""
-        calls = []
-
-        def se(cmd, **kw):
-            calls.append(cmd)
-            if "pgrep" in cmd:
-                return MagicMock(stdout="1234\n5678", returncode=0)
-            return _ok()
-
-        with patch("agentibridge.cli.subprocess.run", side_effect=se):
-            result = _stop_bridge()
-
-        assert result is True
-        output = capsys.readouterr().out
-        assert "[bridge]" in output
-        assert "1234" in output
-        # Verify kill was called with the PIDs
-        assert ["kill", "1234", "5678"] in calls
-
-
 @pytest.mark.unit
 class TestCmdStop:
     """Tests for cmd_stop() command."""
 
-    def test_no_docker_exits(self):
-        """Exits when docker is not installed."""
-        with (
-            patch("shutil.which", return_value=None),
-            pytest.raises(SystemExit),
-        ):
+    def test_stops_systemd_services(self):
+        """Calls systemctl stop for both services."""
+        with patch("agentibridge.cli.subprocess.run") as mock_run:
             cmd_stop(MagicMock())
 
-    def test_runs_compose_down_and_stops_bridge(self):
-        """Calls docker compose down, then stops the bridge."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/docker"),
-            patch("agentibridge.cli._ensure_stack_dir", return_value=Path("/tmp/stack")),
-            patch("agentibridge.cli._compose_cmd", return_value=["docker", "compose"]),
-            patch("agentibridge.cli.subprocess.run") as mock_run,
-            patch("agentibridge.cli._stop_bridge") as mock_bridge,
-        ):
-            cmd_stop(MagicMock())
-
-        mock_run.assert_called_once_with(["docker", "compose", "down"], check=True)
-        mock_bridge.assert_called_once()
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert ["systemctl", "--user", "stop", "agentibridge"] in calls
+        assert ["systemctl", "--user", "stop", "agentibridge-db"] in calls
 
 
 @pytest.mark.unit
@@ -1252,8 +926,10 @@ class TestCmdEmbeddings:
         return patch.dict("sys.modules", {"agentibridge.llm_client": mock_mod})
 
     def _native_mode(self):
-        """Patch _is_stack_running to return False (native/non-Docker mode)."""
-        return patch("agentibridge.cli._is_stack_running", return_value=False)
+        """Patch stack dir to non-existent path (no env file loaded)."""
+        from pathlib import Path
+
+        return patch("agentibridge.cli._STACK_DIR", Path("/tmp/nonexistent-agentibridge"))
 
     # ── Native mode tests ──────────────────────────────────────────────
 
@@ -1275,7 +951,7 @@ class TestCmdEmbeddings:
             cmd_embeddings(self._make_args())
         output = capsys.readouterr().out
         assert "Embedding Status" in output
-        assert "source: env" in output
+        assert "source: agentibridge.env" in output
         assert "AGENTIBRIDGE_EMBEDDING_ENABLED: false" in output
         assert "LLM_API_BASE: (not set)" in output
         assert "LLM_API_KEY: (not set)" in output
@@ -1374,8 +1050,6 @@ class TestCmdEmbeddings:
         mock_conn.execute.return_value.fetchone.side_effect = [
             (True,),  # table exists
             (150, 10),  # count, distinct sessions
-            ("48 kB",),  # table size
-            ("2026-03-13 14:00:00+00:00",),  # last embedded
         ]
         mock_pool = MagicMock()
         mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
@@ -1392,8 +1066,6 @@ class TestCmdEmbeddings:
         assert "status: connected" in output
         assert "total chunks: 150" in output
         assert "sessions embedded: 10" in output
-        assert "table size: 48 kB" in output
-        assert "last embedded: 2026-03-13 14:00:00+00:00" in output
 
     def test_postgres_no_table(self, capsys):
         """Shows 'table not created yet' when transcript_chunks doesn't exist."""
@@ -1442,76 +1114,37 @@ class TestCmdEmbeddings:
         assert "sessions with embeddings: 0" in output
         assert "coverage: 0.0%" in output
 
-    # ── Docker mode tests ──────────────────────────────────────────────
+    # ── Env file tests ──────────────────────────────────────────────
 
-    def test_docker_reads_from_docker_env(self, capsys, tmp_path):
-        """In Docker mode, config values come from docker.env, not shell env."""
-        env_file = tmp_path / "docker.env"
+    def test_reads_from_env_file(self, capsys, tmp_path):
+        """Config values are read from agentibridge.env."""
+        env_file = tmp_path / "agentibridge.env"
         env_file.write_text(
             "AGENTIBRIDGE_EMBEDDING_ENABLED=true\n"
-            "LLM_API_BASE=https://llm.docker.test/v1\n"
-            "LLM_API_KEY=sk-docker-secret-key-1234\n"
+            "LLM_API_BASE=https://llm.test/v1\n"
+            "LLM_API_KEY=sk-test-key-1234\n"
             "LLM_EMBED_MODEL=nomic-embed-text\n"
             "PGVECTOR_DIMENSIONS=768\n"
             "REDIS_KEY_PREFIX=agentibridge\n"
         )
+
+        mock_get_pg = MagicMock(return_value=None)
+        mock_get_redis = MagicMock(return_value=None)
+
         with (
-            patch("agentibridge.cli._is_stack_running", return_value=True),
             patch("agentibridge.cli._STACK_DIR", tmp_path),
             patch("agentibridge.cli._container_health", return_value=None),
-            patch("agentibridge.cli._docker_exec_redis", return_value=None),
+            patch.dict(
+                "sys.modules",
+                {
+                    "agentibridge.pg_client": MagicMock(get_pg=mock_get_pg),
+                    "agentibridge.redis_client": MagicMock(get_redis=mock_get_redis),
+                },
+            ),
         ):
             cmd_embeddings(self._make_args())
         output = capsys.readouterr().out
-        assert "source: docker.env" in output
+        assert "source: agentibridge.env" in output
         assert "AGENTIBRIDGE_EMBEDDING_ENABLED: true" in output
-        assert "LLM_API_BASE: https://llm.docker.test/v1" in output
-        assert "sk-doc...1234" in output
         assert "nomic-embed-text" in output
         assert "768" in output
-
-    def test_docker_postgres_stats(self, capsys, tmp_path):
-        """Docker mode queries Postgres via docker exec."""
-        env_file = tmp_path / "docker.env"
-        env_file.write_text("LLM_API_BASE=\nLLM_API_KEY=\nPOSTGRES_USER=agentibridge\nREDIS_KEY_PREFIX=agentibridge\n")
-        with (
-            patch("agentibridge.cli._is_stack_running", return_value=True),
-            patch("agentibridge.cli._STACK_DIR", tmp_path),
-            patch("agentibridge.cli._container_health", return_value="healthy (running)"),
-            patch("agentibridge.cli._docker_exec_query") as mock_query,
-            patch("agentibridge.cli._docker_exec_redis", return_value="50"),
-        ):
-            mock_query.side_effect = [
-                "t",  # table exists
-                "200|15",  # chunks|sessions
-                "96 kB",  # table size
-                "2026-03-13 10:00:00+00:00",  # last embedded
-            ]
-            cmd_embeddings(self._make_args())
-        output = capsys.readouterr().out
-        assert "total chunks: 200" in output
-        assert "sessions embedded: 15" in output
-        assert "table size: 96 kB" in output
-        assert "last embedded: 2026-03-13 10:00:00+00:00" in output
-        assert "total sessions in Redis: 50" in output
-        assert "coverage: 30.0%" in output
-
-    def test_docker_check_llm_via_exec(self, capsys, tmp_path):
-        """--check-llm in Docker mode uses docker exec into agentibridge container."""
-        env_file = tmp_path / "docker.env"
-        env_file.write_text(
-            "LLM_API_BASE=https://llm.docker.test/v1\n"
-            "LLM_API_KEY=sk-docker-secret-key-1234\n"
-            "REDIS_KEY_PREFIX=agentibridge\n"
-        )
-        with (
-            patch("agentibridge.cli._is_stack_running", return_value=True),
-            patch("agentibridge.cli._STACK_DIR", tmp_path),
-            patch("agentibridge.cli._container_health", return_value=None),
-            patch("agentibridge.cli._docker_exec_redis", return_value=None),
-            patch("agentibridge.cli.subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="1536\n", stderr="")
-            cmd_embeddings(self._make_args(check_llm=True))
-        output = capsys.readouterr().out
-        assert "reachable (returned 1536-dim vector)" in output

@@ -5,6 +5,7 @@ __pycache__/
 dist/
 build/
 .env
+agentibridge.env
 *.log
 .venv/
 venv/

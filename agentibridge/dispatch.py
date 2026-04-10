@@ -403,3 +403,91 @@ async def dispatch_task(
         "resumed_session": resume_session_id or None,
         "prompt_length": len(full_prompt),
     }
+
+
+async def handoff(
+    project_path: str,
+    summary: str,
+    decisions: str,
+    next_steps: str,
+    context: str = "",
+    source_session_id: str = "",
+    model: str = "sonnet",
+) -> Dict[str, Any]:
+    """Create a seeded conversation in a target project.
+
+    Blocks until the session is created. Returns the session_id
+    so the operator can `claude --resume <session_id>`.
+    """
+    from agentibridge.claude_runner import run_claude
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Build structured handoff prompt
+    parts = [
+        f"# HANDOFF — {date_str}\n\n",
+        "You are receiving a context handoff from a sibling Claude Code session.\n\n",
+        f"## Summary\n{summary}\n\n",
+        f"## Key Decisions\n{decisions}\n\n",
+        f"## Next Steps\n{next_steps}\n\n",
+    ]
+
+    if context:
+        parts.append(f"## Additional Context\n{context}\n\n")
+
+    # Inject source session context if provided
+    if source_session_id:
+        try:
+            restored = restore_session_context(source_session_id, last_n=20)
+            parts.append(f"## Source Session Context\n{restored}\n\n")
+        except Exception as e:
+            parts.append(f"## Source Session Context\n(Failed to restore: {e})\n\n")
+
+    parts.append(
+        "---\n"
+        "Acknowledge this handoff. Summarize your understanding in 2-3 sentences.\n"
+        "Do NOT take any action — wait for the operator.\n"
+    )
+
+    prompt = "".join(parts)
+
+    # Auto-generate session name from project + date
+    project_name = Path(project_path).name
+    session_name = f"handoff-{project_name}-{date_str}"
+
+    log("handoff: starting", {"project": project_path, "prompt_len": len(prompt)})
+
+    result = await run_claude(
+        prompt=prompt,
+        model=model,
+        cwd=project_path,
+        max_turns=1,
+        session_name=session_name,
+    )
+
+    if result.success:
+        log(
+            "handoff: completed",
+            {
+                "project": project_path,
+                "session_id": result.session_id,
+            },
+        )
+        resume_cmd = f"cd {project_path} && claude --resume {result.session_id}"
+        return {
+            "success": True,
+            "session_id": result.session_id,
+            "project_path": project_path,
+            "resume_command": resume_cmd,
+            "session_name": session_name,
+            "output": result.result,
+            "duration_ms": result.duration_ms,
+        }
+
+    log("handoff: failed", {"project": project_path, "error": result.error})
+    return {
+        "success": False,
+        "project_path": project_path,
+        "error": result.error,
+        "exit_code": result.exit_code,
+    }

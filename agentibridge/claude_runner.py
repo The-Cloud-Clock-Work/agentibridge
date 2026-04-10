@@ -274,6 +274,7 @@ async def run_claude(
     allowed_tools: Optional[str] = None,
     max_turns: Optional[int] = None,
     permission_mode: Optional[str] = None,
+    session_name: Optional[str] = None,
 ) -> ClaudeResult:
     """Run the ``claude`` CLI and return the parsed result.
 
@@ -339,13 +340,18 @@ async def run_claude(
         cmd.extend(["--allowedTools", allowed_tools])
     if max_turns:
         cmd.extend(["--max-turns", str(max_turns)])
+    if session_name:
+        cmd.extend(["--name", session_name])
 
     if resume_session_id:
         cmd.extend(["--resume", resume_session_id, "--print", prompt])
     else:
         cmd.extend(["-p", prompt])
 
-    log("claude_runner: starting", {"model": model, "prompt_len": len(prompt)})
+    log("claude_runner: starting", {"model": model, "prompt_len": len(prompt), "cmd": " ".join(cmd[:10])})
+
+    # Clean env for claude CLI — remove vars that hijack its auth
+    clean_env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -354,6 +360,7 @@ async def run_claude(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=clean_env,
         )
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)

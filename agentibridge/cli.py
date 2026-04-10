@@ -3,18 +3,17 @@
 Provides commands for status, config, connection strings, and service management.
 
 Usage:
-    agentibridge run        — Start the Docker stack (pulls Hub image automatically)
+    agentibridge install    — Install as systemd service (databases + native agentibridge)
     agentibridge update     — Update to the latest version (pip + Docker)
-    agentibridge stop       — Stop the Docker stack
-    agentibridge restart    — Restart the Docker stack
-    agentibridge logs       — View stack logs
-    agentibridge status     — Check if running, Redis connectivity, session count
+    agentibridge stop       — Stop agentibridge + databases
+    agentibridge restart    — Restart the stack
+    agentibridge logs       — View agentibridge logs
+    agentibridge status     — Check service status and connectivity
     agentibridge help       — Available MCP tools and configuration reference
     agentibridge connect    — Connection strings for Claude Code, ChatGPT, etc.
     agentibridge config     — Current config dump / generate .env template
-    agentibridge bridge     — Manage dispatch bridge (start/stop/logs)
-    agentibridge tunnel     — Cloudflare Tunnel status and URL (tunnel setup for wizard)
-    agentibridge locks      — Show Redis keys, file locks, and bridge resource state
+    agentibridge tunnel     — Cloudflare Tunnel status and URL
+    agentibridge locks      — Show Redis keys and file locks
     agentibridge install    — Install as systemd user service
     agentibridge uninstall  — Remove systemd service
     agentibridge version    — Print version
@@ -34,9 +33,8 @@ from pathlib import Path
 
 
 DATA_DIR = Path(__file__).parent / "data"
-_DOCKER_ENV = "docker.env"
+_ENV_FILE = "agentibridge.env"
 _DOCKER_PS_FORMAT = "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-_BRIDGE_LOG_FILE = Path.home() / ".agentibridge" / "logs" / "dispatch_bridge.log"
 _CLOUDFLARED_DIR = ".cloudflared"
 _CLOUDFLARED_CONFIG = "config.yml"
 _NOT_SET = "(not set)"
@@ -141,8 +139,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"AgentiBridge v{_version()}")
     print("=" * 50)
 
-    docker_mode = _is_stack_running()
-    env_file = _STACK_DIR / _DOCKER_ENV if docker_mode else None
+    env_file = _STACK_DIR / _ENV_FILE
 
     # --- Service ---
     print("\n[Service]")
@@ -184,52 +181,46 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     # --- Redis ---
     print("\n[Redis]")
-    if docker_mode and env_file and env_file.exists():
-        redis_url = _read_env_value("REDIS_URL", env_file) or _NOT_SET
-        health = _container_health("agentibridge-redis") or "unknown"
-        print(f"  container: {health}")
-        print(f"  url: {redis_url} (Docker internal)")
-    else:
-        try:
-            from agentibridge.redis_client import get_redis
+    health = _container_health("agentibridge-redis") or "not running"
+    print(f"  container: {health}")
+    try:
+        from agentibridge.redis_client import get_redis
 
-            r = get_redis()
-            if r is not None:
-                r.ping()
-                print("  status: connected")
-                from agentibridge.store import _rkey
+        r = get_redis()
+        if r is not None:
+            r.ping()
+            print("  status: connected")
+            from agentibridge.store import _rkey
 
-                count = r.zcard(_rkey("idx:all"))
-                print(f"  sessions indexed: {count}")
-            else:
-                url = os.getenv("REDIS_URL", _NOT_SET)
-                print(f"  status: unavailable (REDIS_URL={url})")
-        except Exception as e:
-            print(f"  status: error ({e})")
+            count = r.zcard(_rkey("idx:all"))
+            print(f"  sessions indexed: {count}")
+        else:
+            url = os.getenv("REDIS_URL") or (_read_env_value("REDIS_URL", env_file) if env_file.exists() else _NOT_SET)
+            print(f"  status: unavailable (REDIS_URL={url})")
+    except Exception as e:
+        print(f"  status: error ({e})")
 
     # --- Postgres ---
     print("\n[Postgres]")
-    if docker_mode and env_file and env_file.exists():
-        pg_url = _read_env_value("POSTGRES_URL", env_file) or _NOT_SET
-        health = _container_health("agentibridge-postgres") or "unknown"
-        print(f"  container: {health}")
-        print(f"  url: {pg_url} (Docker internal)")
-    else:
-        try:
-            from agentibridge.pg_client import get_pg
+    health = _container_health("agentibridge-postgres") or "not running"
+    print(f"  container: {health}")
+    try:
+        from agentibridge.pg_client import get_pg
 
-            pool = get_pg()
-            if pool is not None:
-                with pool.connection() as conn:
-                    row = conn.execute("SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks").fetchone()
-                    print("  status: connected")
-                    print(f"  chunks indexed: {row[0]}")
-                    print(f"  sessions with embeddings: {row[1]}")
-            else:
-                url = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", _NOT_SET))
-                print(f"  status: unavailable (POSTGRES_URL={url})")
-        except Exception as e:
-            print(f"  status: error ({e})")
+        pool = get_pg()
+        if pool is not None:
+            with pool.connection() as conn:
+                row = conn.execute("SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks").fetchone()
+                print("  status: connected")
+                print(f"  chunks indexed: {row[0]}")
+                print(f"  sessions with embeddings: {row[1]}")
+        else:
+            url = os.getenv("POSTGRES_URL") or (
+                _read_env_value("POSTGRES_URL", env_file) if env_file.exists() else _NOT_SET
+            )
+            print(f"  status: unavailable (POSTGRES_URL={url})")
+    except Exception as e:
+        print(f"  status: error ({e})")
 
     # --- Tunnel ---
     print("\n[Tunnel]")
@@ -290,17 +281,18 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     # --- Config ---
     print("\n[Config]")
-    if docker_mode and env_file and env_file.exists():
-        transport = _read_env_value("AGENTIBRIDGE_TRANSPORT", env_file) or "stdio"
+    if env_file.exists():
+        transport = _read_env_value("AGENTIBRIDGE_TRANSPORT", env_file) or "sse"
         port = _read_env_value("AGENTIBRIDGE_PORT", env_file) or "8100"
         poll = _read_env_value("AGENTIBRIDGE_POLL_INTERVAL", env_file) or "60"
-        print(f"  transport: {transport} (docker.env)")
-        print(f"  port: {port} (docker.env)")
-        print(f"  poll interval: {poll}s (docker.env)")
     else:
-        print(f"  transport: {os.getenv('AGENTIBRIDGE_TRANSPORT', 'stdio')}")
-        print(f"  port: {os.getenv('AGENTIBRIDGE_PORT', '8100')}")
-        print(f"  poll interval: {os.getenv('AGENTIBRIDGE_POLL_INTERVAL', '60')}s")
+        transport = os.getenv("AGENTIBRIDGE_TRANSPORT", "sse")
+        port = os.getenv("AGENTIBRIDGE_PORT", "8100")
+        poll = os.getenv("AGENTIBRIDGE_POLL_INTERVAL", "60")
+    print(f"  transport: {transport}")
+    print(f"  port: {port}")
+    print(f"  poll interval: {poll}s")
+    print(f"  env file: {env_file}")
 
 
 def cmd_help(args: argparse.Namespace) -> None:
@@ -853,73 +845,135 @@ CLAUDE_HOOK_LOG_ENABLED=true
 
 
 def cmd_install(args: argparse.Namespace) -> None:
-    mode = args.mode or "docker"
-    config_dir = Path.home() / ".config" / "agentibridge"
     systemd_dir = Path.home() / ".config" / "systemd" / "user"
 
-    print(f"Installing agentibridge as systemd user service (mode: {mode})")
+    print("Installing agentibridge as systemd user service")
 
-    # Create config directory
-    config_dir.mkdir(parents=True, exist_ok=True)
-    env_file = config_dir / "env"
-    if not env_file.exists():
-        env_file.write_text(
-            "# AgentiBridge environment\n"
-            "AGENTIBRIDGE_TRANSPORT=sse\n"
-            "AGENTIBRIDGE_HOST=0.0.0.0\n"
-            "AGENTIBRIDGE_PORT=8100\n"
-            "# AGENTIBRIDGE_API_KEYS=\n"
-            "# REDIS_URL=redis://localhost:6379/0\n"
-        )
-        print(f"  Created {env_file}")
+    # Stop existing services
+    for unit in ("agentibridge", "agentibridge-bridge", "agentibridge-db"):
+        subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, check=False)
+        subprocess.run(["systemctl", "--user", "disable", unit], capture_output=True, check=False)
+    # Stop old agentibridge container if running from previous install
+    subprocess.run(["docker", "stop", "agentibridge"], capture_output=True, check=False)
+    subprocess.run(["docker", "rm", "agentibridge"], capture_output=True, check=False)
+    # Kill stale processes
+    subprocess.run(["pkill", "-f", "python.*-m agentibridge"], capture_output=True, check=False)
 
-    # Determine service file
-    pkg_dir = Path(__file__).parent.parent
-    if mode == "docker":
-        service_src = pkg_dir / "deploy" / "agentibridge.service"
-    else:
-        service_src = pkg_dir / "deploy" / "agentibridge-native.service"
+    # Ensure stack dir and env
+    stack_dir = _ensure_stack_dir()
+    env_file = stack_dir / _ENV_FILE
 
-    if not service_src.exists():
-        print(f"  ERROR: Service file not found: {service_src}")
-        print("  Make sure the deploy/ directory is present.")
-        sys.exit(1)
+    # Always refresh compose file (removes old agentibridge container service)
+    compose_dest = stack_dir / "docker-compose.yml"
+    shutil.copy2(DATA_DIR / "docker-compose.yml", compose_dest)
+    print(f"  Updated {compose_dest}")
 
+    # Migrate old Docker-internal hostnames to localhost
+    if env_file.exists():
+        env_text = env_file.read_text()
+        new_text = env_text.replace("://redis:", "://localhost:").replace("@postgres:", "@localhost:")
+        # Remove obsolete bridge vars
+        for var in ("CLAUDE_DISPATCH_URL", "DISPATCH_SECRET", "DISPATCH_BRIDGE_PORT"):
+            new_text = re.sub(rf"^#?\s*{var}=.*\n?", "", new_text, flags=re.MULTILINE)
+        if new_text != env_text:
+            env_file.write_text(new_text)
+            print("  Migrated agentibridge.env: localhost + removed bridge vars")
+
+    # Ensure CLAUDE_BINARY is set to absolute path
+    if env_file.exists():
+        claude_bin = shutil.which("claude") or "claude"
+        env_text = env_file.read_text()
+        if "CLAUDE_BINARY=" not in env_text:
+            with open(env_file, "a") as f:
+                f.write(f"\nCLAUDE_BINARY={claude_bin}\n")
+            print(f"  Added CLAUDE_BINARY={claude_bin}")
+
+    # Generate systemd service with current Python path
+    python_bin = sys.executable
     systemd_dir.mkdir(parents=True, exist_ok=True)
-    service_dest = systemd_dir / "agentibridge.service"
-    shutil.copy2(service_src, service_dest)
-    print(f"  Installed {service_dest}")
+
+    # Database service (docker compose for Redis + Postgres)
+    db_dest = systemd_dir / "agentibridge-db.service"
+    db_dest.write_text(
+        "[Unit]\n"
+        "Description=AgentiBridge Databases (Redis + Postgres)\n"
+        "After=network.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "RemainAfterExit=yes\n"
+        f"WorkingDirectory={stack_dir}\n"
+        f"ExecStart=/usr/bin/docker compose up -d\n"
+        f"ExecStop=/usr/bin/docker compose down\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+    print(f"  Installed {db_dest}")
+
+    # AgentiBridge native service
+    svc_dest = systemd_dir / "agentibridge.service"
+    svc_dest.write_text(
+        "[Unit]\n"
+        "Description=AgentiBridge MCP Server (native)\n"
+        "After=network.target agentibridge-db.service\n"
+        "Wants=agentibridge-db.service\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"EnvironmentFile=-{env_file}\n"
+        "Environment=AGENTIBRIDGE_TRANSPORT=sse\n"
+        f"ExecStart={python_bin} -m agentibridge\n"
+        f"WorkingDirectory={Path.home()}\n"
+        "Restart=always\n"
+        "RestartSec=5\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+    print(f"  Installed {svc_dest} (python: {python_bin})")
+
+    # Remove old bridge service if present
+    bridge_svc = systemd_dir / "agentibridge-bridge.service"
+    if bridge_svc.exists():
+        bridge_svc.unlink()
+        print(f"  Removed obsolete {bridge_svc}")
 
     # Enable and start
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", "agentibridge"], check=True)
-    subprocess.run(["systemctl", "--user", "start", "agentibridge"], check=True)
-    print("  Service enabled and started")
+    for unit in ["agentibridge-db", "agentibridge"]:
+        subprocess.run(["systemctl", "--user", "enable", unit], check=False)
+        result = subprocess.run(["systemctl", "--user", "start", unit], check=False)
+        if result.returncode == 0:
+            print(f"  {unit}: enabled and started")
+        else:
+            print(f"  {unit}: enabled (start failed — check journalctl --user -u {unit})")
     print()
     print("Check status with: agentibridge status")
     print("View logs with: journalctl --user -u agentibridge -f")
 
 
 def cmd_uninstall(args: argparse.Namespace) -> None:
-    print("Uninstalling agentibridge systemd service...")
+    print("Uninstalling agentibridge systemd services...")
 
-    try:
-        subprocess.run(["systemctl", "--user", "stop", "agentibridge"], check=False)
-        subprocess.run(["systemctl", "--user", "disable", "agentibridge"], check=False)
-    except Exception:
-        pass
-
-    service_file = Path.home() / ".config" / "systemd" / "user" / "agentibridge.service"
-    if service_file.exists():
-        service_file.unlink()
-        print(f"  Removed {service_file}")
+    systemd_dir = Path.home() / ".config" / "systemd" / "user"
+    for unit in ("agentibridge", "agentibridge-db", "agentibridge-bridge"):
+        try:
+            subprocess.run(["systemctl", "--user", "stop", unit], check=False)
+            subprocess.run(["systemctl", "--user", "disable", unit], check=False)
+        except Exception:
+            pass
+        svc = systemd_dir / f"{unit}.service"
+        if svc.exists():
+            svc.unlink()
+            print(f"  Removed {svc}")
 
     try:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
     except Exception:
         pass
 
-    print("  Service uninstalled")
+    print("  Services uninstalled")
     print()
     print("Note: Config files in ~/.agentibridge/ were preserved.")
     print("Remove manually if no longer needed.")
@@ -1127,25 +1181,23 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
     print(f"AgentiBridge v{_version()} — Embedding Status")
     print("=" * 60)
 
-    docker_mode = _is_stack_running()
-    env_file = _STACK_DIR / _DOCKER_ENV if docker_mode else None
+    env_file = _STACK_DIR / _ENV_FILE
 
-    # ── Helper to read a value from docker.env or shell env ────────────
+    # ── Helper to read a value from agentibridge.env or shell env ────────────
     def _env(key: str, default: str = "") -> str:
-        if docker_mode and env_file and env_file.exists():
+        if env_file.exists():
             return _read_env_value(key, env_file) or default
         return os.getenv(key, default)
 
     # ── Config ─────────────────────────────────────────────────────────
     print("\n[Config]")
-    source = "docker.env" if docker_mode else "env"
     embed_enabled = _env("AGENTIBRIDGE_EMBEDDING_ENABLED", "false")
     llm_base = _env("LLM_API_BASE")
     llm_key = _env("LLM_API_KEY")
     llm_model = _env("LLM_EMBED_MODEL", "text-embedding-3-small")
     pg_dims = _env("PGVECTOR_DIMENSIONS", "1536")
 
-    print(f"  source: {source}")
+    print("  source: agentibridge.env")
     print(f"  AGENTIBRIDGE_EMBEDDING_ENABLED: {embed_enabled}")
     print(f"  LLM_API_BASE: {llm_base or _NOT_SET}")
     if llm_key:
@@ -1161,140 +1213,59 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
     if not llm_base or not llm_key:
         print("  status: not configured (LLM_API_BASE and LLM_API_KEY required)")
     elif args.check_llm:
-        if docker_mode:
-            # Test from inside the agentibridge container (has the env + network)
-            try:
-                result = subprocess.run(
-                    [
-                        "docker",
-                        "exec",
-                        "agentibridge",
-                        "python",
-                        "-c",
-                        "from agentibridge.llm_client import embed_text; v = embed_text('test'); print(len(v))",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                if result.returncode == 0:
-                    dims = result.stdout.strip()
-                    print(f"  status: reachable (returned {dims}-dim vector)")
-                else:
-                    err = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown error"
-                    print(f"  status: error ({err})")
-            except Exception as e:
-                print(f"  status: error ({e})")
-        else:
-            try:
-                from agentibridge.llm_client import embed_text
+        try:
+            from agentibridge.llm_client import embed_text
 
-                vec = embed_text("test")
-                print(f"  status: reachable (returned {len(vec)}-dim vector)")
-            except Exception as e:
-                print(f"  status: error ({e})")
+            vec = embed_text("test")
+            print(f"  status: reachable (returned {len(vec)}-dim vector)")
+        except Exception as e:
+            print(f"  status: error ({e})")
     else:
         print("  status: configured (use --check-llm to test connectivity)")
 
     # ── Postgres ───────────────────────────────────────────────────────
     print("\n[Postgres]")
     sessions_with_embeddings = 0
-    if docker_mode:
-        health = _container_health("agentibridge-postgres")
-        if health is None or health in ("exited", "dead", "created"):
-            print(f"  container: {health or 'not found'}")
-        else:
-            print(f"  container: {health}")
-            pg_user = _env("POSTGRES_USER", "agentibridge")
-
-            # Check table exists
-            table_check = _docker_exec_query(
-                "agentibridge-postgres",
-                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'transcript_chunks')",
-                pg_user,
-            )
-            if table_check == "f":
-                print("  table: transcript_chunks (not created yet)")
-            elif table_check == "t":
-                stats = _docker_exec_query(
-                    "agentibridge-postgres",
-                    "SELECT COUNT(*) || '|' || COUNT(DISTINCT session_id) FROM transcript_chunks",
-                    pg_user,
-                )
-                if stats and "|" in stats:
-                    total_chunks, embedded = stats.split("|")
-                    sessions_with_embeddings = int(embedded)
-                    print(f"  total chunks: {int(total_chunks):,}")
-                    print(f"  sessions embedded: {sessions_with_embeddings:,}")
-
-                size = _docker_exec_query(
-                    "agentibridge-postgres",
-                    "SELECT pg_size_pretty(pg_total_relation_size('transcript_chunks'))",
-                    pg_user,
-                )
-                if size:
-                    print(f"  table size: {size}")
-
-                last = _docker_exec_query(
-                    "agentibridge-postgres",
-                    "SELECT MAX(created_at) FROM transcript_chunks",
-                    pg_user,
-                )
-                if last:
-                    print(f"  last embedded: {last}")
-                else:
-                    print("  last embedded: (none)")
-            else:
-                print("  status: query failed (could not check table)")
+    pg_url = _env("POSTGRES_URL") or os.getenv("POSTGRES_URL", "")
+    if not pg_url:
+        print("  status: not configured (POSTGRES_URL not set)")
     else:
-        pg_url = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", ""))
-        if not pg_url:
-            print("  status: not configured (POSTGRES_URL not set)")
-        else:
-            try:
-                from agentibridge.pg_client import get_pg
+        health = _container_health("agentibridge-postgres")
+        if health:
+            print(f"  container: {health}")
+        try:
+            from agentibridge.pg_client import get_pg
 
-                pool = get_pg()
-                if pool is None:
-                    print("  status: connection failed")
-                else:
-                    with pool.connection() as conn:
-                        row = conn.execute(
-                            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
-                            "WHERE table_name = 'transcript_chunks')"
+            pool = get_pg()
+            if pool is None:
+                print("  status: connection failed")
+            else:
+                with pool.connection() as conn:
+                    row = conn.execute(
+                        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'transcript_chunks')"
+                    ).fetchone()
+                    if not row[0]:
+                        print("  status: connected (table not created yet)")
+                    else:
+                        stats = conn.execute(
+                            "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks"
                         ).fetchone()
-                        if not row[0]:
-                            print("  status: connected (table not created yet)")
-                        else:
-                            stats = conn.execute(
-                                "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM transcript_chunks"
-                            ).fetchone()
-                            total_chunks = stats[0]
-                            sessions_with_embeddings = stats[1]
-                            print("  status: connected")
-                            print(f"  total chunks: {total_chunks:,}")
-                            print(f"  sessions embedded: {sessions_with_embeddings:,}")
-
-                            size_row = conn.execute(
-                                "SELECT pg_size_pretty(pg_total_relation_size('transcript_chunks'))"
-                            ).fetchone()
-                            print(f"  table size: {size_row[0]}")
-
-                            last_row = conn.execute("SELECT MAX(created_at) FROM transcript_chunks").fetchone()
-                            if last_row[0]:
-                                print(f"  last embedded: {last_row[0]}")
-                            else:
-                                print("  last embedded: (none)")
-            except Exception as e:
-                print(f"  status: error ({e})")
+                        sessions_with_embeddings = stats[1]
+                        print("  status: connected")
+                        print(f"  total chunks: {stats[0]:,}")
+                        print(f"  sessions embedded: {sessions_with_embeddings:,}")
+        except Exception as e:
+            print(f"  status: error ({e})")
 
     # ── Coverage ───────────────────────────────────────────────────────
     print("\n[Coverage]")
-    if docker_mode:
-        prefix = _env("REDIS_KEY_PREFIX", "agentibridge")
-        total_raw = _docker_exec_redis("agentibridge-redis", "ZCARD", f"{prefix}:sb:idx:all")
-        if total_raw is not None:
-            total_sessions = int(total_raw)
+    try:
+        from agentibridge.redis_client import get_redis
+
+        r = get_redis()
+        if r is not None:
+            prefix = _env("REDIS_KEY_PREFIX", "agentibridge")
+            total_sessions = r.zcard(f"{prefix}:sb:idx:all")
             print(f"  total sessions in Redis: {total_sessions:,}")
             print(f"  sessions with embeddings: {sessions_with_embeddings:,}")
             if total_sessions > 0:
@@ -1303,26 +1274,9 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
             else:
                 print("  coverage: N/A (no sessions indexed)")
         else:
-            print("  Redis: unavailable (container not reachable)")
-    else:
-        try:
-            from agentibridge.redis_client import get_redis
-
-            r = get_redis()
-            if r is not None:
-                prefix = os.getenv("REDIS_KEY_PREFIX", "agentibridge")
-                total_sessions = r.zcard(f"{prefix}:sb:idx:all")
-                print(f"  total sessions in Redis: {total_sessions:,}")
-                print(f"  sessions with embeddings: {sessions_with_embeddings:,}")
-                if total_sessions > 0:
-                    pct = (sessions_with_embeddings / total_sessions) * 100
-                    print(f"  coverage: {pct:.1f}%")
-                else:
-                    print("  coverage: N/A (no sessions indexed)")
-            else:
-                print("  Redis: unavailable (cannot compute coverage)")
-        except Exception as e:
-            print(f"  Redis error: {e}")
+            print("  Redis: unavailable")
+    except Exception as e:
+        print(f"  Redis error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1346,14 +1300,14 @@ _REQUIRED_ENV_VARS = [
 
 
 def _validate_env(env_file: Path) -> None:
-    """Exit with error if any required variable is missing from docker.env."""
+    """Exit with error if any required variable is missing from agentibridge.env."""
     text = env_file.read_text()
     missing = [v for v in _REQUIRED_ENV_VARS if not re.search(rf"^\s*{v}=", text, re.MULTILINE)]
     if missing:
         print(f"ERROR: {env_file.name} is missing required variables:")
         for v in missing:
             print(f"  • {v}")
-        print(f"\nReference: {env_file.parent / 'docker.env.example'}")
+        print(f"\nReference: {env_file.parent / 'agentibridge.env.example'}")
         sys.exit(1)
 
 
@@ -1361,8 +1315,8 @@ def _ensure_stack_dir() -> Path:
     """Prepare ~/.agentibridge/ for docker compose operations.
 
     Migrates from legacy ~/.config/agentibridge/ if needed.
-    Copies bundled compose file and docker.env template on first run.
-    Copies bundled docker.env.example with working defaults on first run.
+    Copies bundled compose file and agentibridge.env template on first run.
+    Copies bundled agentibridge.env.example with working defaults on first run.
     """
     # Migrate legacy ~/.config/agentibridge/ → ~/.agentibridge/
     if _LEGACY_STACK_DIR.exists() and not _STACK_DIR.exists():
@@ -1376,18 +1330,18 @@ def _ensure_stack_dir() -> Path:
         shutil.copy2(DATA_DIR / "docker-compose.yml", compose_dest)
         print(f"Created {compose_dest}")
 
-    env_dest = _STACK_DIR / _DOCKER_ENV
+    env_dest = _STACK_DIR / _ENV_FILE
 
-    # Migration: if .env exists with Docker vars but docker.env doesn't, move it
-    old_env = _STACK_DIR / ".env"
-    if not env_dest.exists() and old_env.exists():
-        old_text = old_env.read_text()
-        if re.search(r"^\s*REDIS_URL=redis://redis", old_text, re.MULTILINE):
+    # Migration: rename docker.env or .env → agentibridge.env
+    for old_name in ("docker.env", ".env"):
+        old_env = _STACK_DIR / old_name
+        if not env_dest.exists() and old_env.exists():
             shutil.move(str(old_env), str(env_dest))
             print(f"Migrated {old_env} → {env_dest}")
+            break
 
     if not env_dest.exists():
-        shutil.copy2(DATA_DIR / "docker.env.example", env_dest)
+        shutil.copy2(DATA_DIR / "agentibridge.env.example", env_dest)
         print(f"Created {env_dest}")
         print()
         print("Starting Docker with default configuration.")
@@ -1422,7 +1376,7 @@ def _compose_cmd(stack_dir: Path) -> list[str]:
         "-f",
         str(stack_dir / "docker-compose.yml"),
         "--env-file",
-        str(stack_dir / _DOCKER_ENV),
+        str(stack_dir / _ENV_FILE),
     ]
 
 
@@ -1492,7 +1446,7 @@ def _update_docker_stack() -> None:
     """Pull latest image and recreate the agentibridge container."""
     stack_dir = _STACK_DIR
     compose_file = stack_dir / "docker-compose.yml"
-    env_file = stack_dir / _DOCKER_ENV
+    env_file = stack_dir / _ENV_FILE
 
     if not compose_file.exists() or not env_file.exists():
         print("\n[docker] Stack not initialised — run 'agentibridge run' first")
@@ -1567,294 +1521,21 @@ def _short_digest(digest: str) -> str:
     return digest[:12]
 
 
-_BRIDGE_PLACEHOLDER_SECRET = "changeme-generate-a-random-secret"
-
-
-def _maybe_start_bridge(stack_dir: Path, *, env_file: Path | None = None, allow_placeholder: bool = False) -> None:
-    """Auto-start the dispatch bridge if DISPATCH_SECRET is configured."""
-    env_file = env_file or (stack_dir / _DOCKER_ENV)
-    if not env_file.exists():
-        return
-
-    secret = _read_env_value("DISPATCH_SECRET", env_file)
-    if not secret:
-        return
-    if secret == _BRIDGE_PLACEHOLDER_SECRET and not allow_placeholder:
-        return
-
-    # Check if already running
-    check = subprocess.run(
-        ["pgrep", "-f", "agentibridge.dispatch_bridge"],
-        capture_output=True,
-    )
-    if check.returncode == 0:
-        return
-
-    port = _read_env_value("DISPATCH_BRIDGE_PORT", env_file) or "8101"
-    log_file = Path.home() / ".agentibridge" / "logs" / "dispatch_bridge.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port, "PYTHONUNBUFFERED": "1"}
-        with open(log_file, "w") as lf:
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "agentibridge.dispatch_bridge"],
-                env=env,
-                stdout=lf,
-                stderr=lf,
-                start_new_session=True,
-            )
-        time.sleep(1)
-        if proc.poll() is None:
-            print(f"[bridge] Dispatch bridge auto-started (PID {proc.pid}, port {port})")
-        else:
-            print(f"[bridge] WARNING: Dispatch bridge failed to start — check {log_file}")
-    except Exception as e:
-        print(f"[bridge] WARNING: Could not auto-start dispatch bridge: {e}")
-
-
-def _stop_bridge() -> bool:
-    """Stop the dispatch bridge if running.
-
-    Returns True if a process was killed, False if not running.
-    """
-    result = subprocess.run(
-        ["pgrep", "-f", "agentibridge.dispatch_bridge"],
-        capture_output=True,
-        text=True,
-    )
-    if not result.stdout.strip():
-        return False
-    pids = result.stdout.strip().split()
-    subprocess.run(["kill"] + pids)
-    print(f"[bridge] Dispatch bridge stopped (PID {' '.join(pids)})")
-    return True
-
-
-def _cmd_run_test() -> None:
-    """Dev mode: build from local source with fresh config (--test flag)."""
-    if not Path("Dockerfile").exists() or not Path("docker-compose.yml").exists():
-        print("ERROR: --test must be run from the agentibridge repo root.")
-        sys.exit(1)
-
-    # Ensure ~/.agentibridge exists — never remove or overwrite it
-    if _STACK_DIR.exists():
-        print(f"[test] Using existing {_STACK_DIR}")
-    else:
-        _ensure_stack_dir()
-        print(f"[test] Created {_STACK_DIR} from templates")
-
-    # Ensure repo root .env exists
-    env_path = Path(".env")
-    if not env_path.exists():
-        shutil.copy2(".env.example", ".env")
-        print("[test] Created .env from .env.example")
-
-    # Uncomment DISPATCH_SECRET so the bridge can auto-start
-    env_text = env_path.read_text()
-    if "# DISPATCH_SECRET=" in env_text:
-        env_text = env_text.replace(
-            "# DISPATCH_SECRET=" + _BRIDGE_PLACEHOLDER_SECRET,
-            "DISPATCH_SECRET=" + _BRIDGE_PLACEHOLDER_SECRET,
-        )
-        env_path.write_text(env_text)
-        print("[test] Uncommented DISPATCH_SECRET in .env")
-
-    cmd = [
-        "docker",
-        "compose",
-        "-f",
-        "docker-compose.yml",
-        "--env-file",
-        ".env",
-        "up",
-        "--build",
-        "-d",
-    ]
-    subprocess.run(cmd, check=True)
-
-    _maybe_start_bridge(_STACK_DIR, env_file=env_path.resolve(), allow_placeholder=True)
-
-    print()
-    subprocess.run(
-        ["docker", "ps", "--filter", "name=agentibridge", "--format", _DOCKER_PS_FORMAT],
-        check=False,
-    )
-    print()
-    print("[test] Stack started from local source. Bridge vars refreshed.")
-
-
-_DEV_REQUIRED_FILES = ["Dockerfile", "docker-compose.yml"]
-
-
-def _resolve_source_path(explicit_path: str | None) -> Path:
-    """Resolve the source code directory for --dev mode.
-
-    Resolution order:
-    1. Explicit --source-path flag
-    2. Current working directory (if it has Dockerfile + docker-compose.yml)
-    3. Saved path from state.json
-    4. Fail with helpful error
-    """
-
-    def _has_required(p: Path) -> bool:
-        return all((p / f).exists() for f in _DEV_REQUIRED_FILES)
-
-    # 1. Explicit path
-    if explicit_path:
-        p = Path(explicit_path).resolve()
-        if not p.is_dir():
-            print(f"ERROR: --source-path {explicit_path} is not a directory")
-            sys.exit(1)
-        if not _has_required(p):
-            print(f"ERROR: --source-path {p} missing Dockerfile or docker-compose.yml")
-            sys.exit(1)
-        _save_state({"source_path": str(p)})
-        return p
-
-    # 2. CWD
-    cwd = Path.cwd()
-    if _has_required(cwd):
-        _save_state({"source_path": str(cwd)})
-        return cwd
-
-    # 3. Saved state
-    state = _load_state()
-    saved = state.get("source_path")
-    if saved:
-        sp = Path(saved)
-        if _has_required(sp):
-            print(f"[dev] Using saved source path: {saved}")
-            return sp
-        print(f"[dev] Warning: saved source path {saved} no longer valid, ignoring")
-
-    # 4. Fail
-    print("Cannot find source code for --dev mode.")
-    print("Either:")
-    print("  1. Run from the repo root (containing Dockerfile + docker-compose.yml)")
-    print("  2. Use --source-path /path/to/repo")
-    sys.exit(1)
-
-
-def _cmd_run_dev(source_path: str | None, rebuild: bool) -> None:
-    """Dev mode: build from local source with production secrets."""
-    stack_dir = _ensure_stack_dir()
-    source = _resolve_source_path(source_path)
-
-    env_file = stack_dir / _DOCKER_ENV
-    compose_file = source / "docker-compose.yml"
-
-    print(f"[dev] Building from source: {source}")
-    print(f"[dev] Using production secrets: {env_file}")
-
-    cmd = ["docker", "compose", "-f", str(compose_file), "--env-file", str(env_file)]
-
-    if rebuild:
-        subprocess.run([*cmd, "pull"], check=False, cwd=str(source))
-
-    subprocess.run([*cmd, "up", "--build", "-d"], check=True, cwd=str(source))
-
-    _maybe_start_bridge(stack_dir, env_file=env_file, allow_placeholder=False)
-
-    print()
-    subprocess.run(
-        ["docker", "ps", "--filter", "name=agentibridge", "--format", _DOCKER_PS_FORMAT],
-        check=False,
-    )
-    print()
-    print("[dev] Stack started from local source with production secrets.")
-
-
-def cmd_run(args: argparse.Namespace) -> None:
-    if not shutil.which("docker"):
-        print("ERROR: docker is not installed or not in PATH.")
-        print("Install Docker Desktop or Docker Engine first.")
-        sys.exit(1)
-
-    if args.test and args.dev:
-        print("ERROR: --test and --dev are mutually exclusive")
-        sys.exit(1)
-
-    if getattr(args, "source_path", None) and not args.dev:
-        print("ERROR: --source-path can only be used with --dev")
-        sys.exit(1)
-
-    if args.test:
-        _cmd_run_test()
-        return
-
-    if args.dev:
-        _cmd_run_dev(source_path=getattr(args, "source_path", None), rebuild=args.rebuild)
-        return
-
-    stack_dir = _ensure_stack_dir()
-
-    state = _detect_stack_state(stack_dir)
-    if state == "running":
-        print("Stack is already running — pulling latest and restarting...")
-    elif state == "partial":
-        print("Stack is partially running — starting missing services...")
-
-    cmd = _compose_cmd(stack_dir)
-
-    if args.rebuild:
-        cmd += ["up", "--build", "--pull", "always", "-d"]
-    else:
-        cmd += ["up", "-d"]
-
-    subprocess.run(cmd, check=True)
-
-    # Auto-start dispatch bridge if DISPATCH_SECRET is configured
-    _maybe_start_bridge(stack_dir)
-
-    # Explain the CLOUDFLARE_TUNNEL_TOKEN warning if the var is unset
-    env_file = stack_dir / _DOCKER_ENV
-    token = _read_env_value("CLOUDFLARE_TUNNEL_TOKEN", env_file) if env_file.exists() else None
-    if not token:
-        systemd_state = _systemd_active("cloudflared")
-        if systemd_state == "active":
-            print()
-            print("Note: The CLOUDFLARE_TUNNEL_TOKEN warning above is harmless — your tunnel")
-            print("runs via systemd, not Docker. To silence it, add CLOUDFLARE_TUNNEL_TOKEN=")
-            print(f"(empty) to {env_file}.")
-
-    # Show running containers after start
-    print()
-    subprocess.run(
-        ["docker", "ps", "--filter", "name=agentibridge", "--format", _DOCKER_PS_FORMAT],
-        check=False,
-    )
-    print()
-    print("Stack started. Run 'agentibridge status' to check connectivity.")
-    print("View logs with: agentibridge logs --follow")
-
-
 def cmd_stop(args: argparse.Namespace) -> None:
-    if not shutil.which("docker"):
-        print("ERROR: docker is not installed or not in PATH.")
-        sys.exit(1)
-
-    stack_dir = _ensure_stack_dir()
-    subprocess.run(_compose_cmd(stack_dir) + ["down"], check=True)
-    _stop_bridge()
+    for unit in ("agentibridge", "agentibridge-db"):
+        subprocess.run(["systemctl", "--user", "stop", unit], check=False)
+    print("AgentiBridge stopped. Start with: agentibridge install")
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
-    if not shutil.which("docker"):
-        print("ERROR: docker is not installed or not in PATH.")
-        sys.exit(1)
-
-    stack_dir = _ensure_stack_dir()
-    subprocess.run(_compose_cmd(stack_dir) + ["restart"], check=True)
+    subprocess.run(["systemctl", "--user", "restart", "agentibridge-db"], check=False)
+    subprocess.run(["systemctl", "--user", "restart", "agentibridge"], check=False)
+    print("AgentiBridge restarted.")
 
 
 def cmd_logs(args: argparse.Namespace) -> None:
-    if not shutil.which("docker"):
-        print("ERROR: docker is not installed or not in PATH.")
-        sys.exit(1)
-
-    stack_dir = _ensure_stack_dir()
-    cmd = _compose_cmd(stack_dir) + ["logs", "--tail", str(args.tail)]
+    cmd = ["journalctl", "--user", "-u", "agentibridge", "--no-pager"]
+    cmd += ["-n", str(args.tail)]
     if args.follow:
         cmd.append("-f")
     subprocess.run(cmd, check=False)
@@ -1901,59 +1582,6 @@ def _save_state(data: dict) -> None:
         raise
 
 
-def cmd_bridge(args: argparse.Namespace) -> None:
-    """Manage the dispatch bridge (host-side Claude CLI proxy)."""
-    action = args.action
-    log_file = _BRIDGE_LOG_FILE
-
-    if action == "start":
-        env_file = _STACK_DIR / _DOCKER_ENV
-        if not env_file.exists():
-            print(f"ERROR: {env_file} not found. Run 'agentibridge run' first.")
-            sys.exit(1)
-        secret = _read_env_value("DISPATCH_SECRET", env_file)
-        if not secret:
-            print("ERROR: DISPATCH_SECRET not set in docker.env")
-            sys.exit(1)
-        port = _read_env_value("DISPATCH_BRIDGE_PORT", env_file) or "8101"
-
-        # Check already running
-        check = subprocess.run(
-            ["pgrep", "-f", "agentibridge.dispatch_bridge"],
-            capture_output=True,
-        )
-        if check.returncode == 0:
-            print(f"Dispatch bridge already running (PID {check.stdout.strip().decode()})")
-            return
-
-        env = {**os.environ, "DISPATCH_SECRET": secret, "DISPATCH_BRIDGE_PORT": port, "PYTHONUNBUFFERED": "1"}
-        with open(log_file, "w") as lf:
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "agentibridge.dispatch_bridge"],
-                env=env,
-                stdout=lf,
-                stderr=lf,
-                start_new_session=True,
-            )
-        time.sleep(1)
-        if proc.poll() is None:
-            print(f"Dispatch bridge started (PID {proc.pid}, port {port})")
-            print(f"Logs: {log_file}")
-        else:
-            print(f"ERROR: Dispatch bridge failed to start — check {log_file}")
-            sys.exit(1)
-
-    elif action == "stop":
-        if not _stop_bridge():
-            print("No dispatch bridge process found.")
-
-    elif action == "logs":
-        if not log_file.exists():
-            print(f"No log file found at {log_file}")
-            sys.exit(1)
-        subprocess.run(["tail", "-f", str(log_file)])
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1973,23 +1601,14 @@ def main() -> None:
     update_parser = subparsers.add_parser("update", help="Update agentibridge to the latest version")
     update_parser.add_argument("--docker", action="store_true", help="Also update Docker stack even if not running")
 
-    # run
-    run_parser = subparsers.add_parser("run", help="Start the Docker stack")
-    run_parser.add_argument("--rebuild", action="store_true", help="Force pull + rebuild before starting")
-    run_parser.add_argument(
-        "--test", action="store_true", help="Dev mode: reset ~/.agentibridge, build from local source"
-    )
-    run_parser.add_argument("--dev", action="store_true", help="Build from local source with production secrets")
-    run_parser.add_argument("--source-path", type=str, default=None, help="Path to source repo (used with --dev)")
-
     # stop
-    subparsers.add_parser("stop", help="Stop the Docker stack")
+    subparsers.add_parser("stop", help="Stop agentibridge + databases")
 
     # restart
-    subparsers.add_parser("restart", help="Restart the Docker stack")
+    subparsers.add_parser("restart", help="Restart agentibridge + databases")
 
     # logs
-    logs_parser = subparsers.add_parser("logs", help="View Docker stack logs")
+    logs_parser = subparsers.add_parser("logs", help="View agentibridge logs")
     logs_parser.add_argument(
         "--tail", type=int, default=100, metavar="N", help="Number of lines to show (default: 100)"
     )
@@ -2010,10 +1629,6 @@ def main() -> None:
     connect_parser.add_argument("--port", default=None, help="Server port (default: 8100)")
     connect_parser.add_argument("--api-key", default=None, help="API key to include in examples")
 
-    # bridge
-    bridge_parser = subparsers.add_parser("bridge", help="Manage dispatch bridge (host-side Claude CLI proxy)")
-    bridge_parser.add_argument("action", choices=["start", "stop", "logs"])
-
     # tunnel
     tunnel_parser = subparsers.add_parser("tunnel", help="Cloudflare Tunnel status and named tunnel setup")
     tunnel_parser.add_argument("action", nargs="?", default="status", choices=["status", "setup"])
@@ -2023,13 +1638,7 @@ def main() -> None:
     config_parser.add_argument("--generate-env", action="store_true", help="Print .env template")
 
     # install
-    install_parser = subparsers.add_parser("install", help="Install as systemd user service")
-    install_parser.add_argument(
-        "--docker", dest="mode", action="store_const", const="docker", help="Docker-based service (default)"
-    )
-    install_parser.add_argument(
-        "--native", dest="mode", action="store_const", const="native", help="Native Python service"
-    )
+    subparsers.add_parser("install", help="Install as systemd user service")
 
     # uninstall
     subparsers.add_parser("uninstall", help="Remove systemd service")
@@ -2048,7 +1657,6 @@ def main() -> None:
 
     commands = {
         "update": cmd_update,
-        "run": cmd_run,
         "stop": cmd_stop,
         "restart": cmd_restart,
         "logs": cmd_logs,
@@ -2058,7 +1666,6 @@ def main() -> None:
         "help": cmd_help,
         "connect": cmd_connect,
         "tunnel": cmd_tunnel,
-        "bridge": cmd_bridge,
         "config": cmd_config,
         "install": cmd_install,
         "uninstall": cmd_uninstall,

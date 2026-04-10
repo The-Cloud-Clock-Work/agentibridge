@@ -34,6 +34,7 @@ Available tools (17):
 
 import json
 import os
+from pathlib import Path
 import sys
 from typing import Dict
 
@@ -758,6 +759,109 @@ async def execute_plan(
 
 
 # =============================================================================
+# HANDOFF — Cross-project context transfer
+# =============================================================================
+
+
+@mcp.tool()
+def list_handoff_projects() -> str:
+    """List available projects for handoff.
+
+    Scans ~/.claude/projects/ and returns decoded project paths with
+    session counts. Use this to discover valid targets for the handoff tool.
+
+    Returns:
+        JSON with projects list
+    """
+    try:
+        from agentibridge.catalog import list_projects
+        from agentibridge.config import CLAUDE_CODE_HOME_DIR
+
+        base_dir = Path(CLAUDE_CODE_HOME_DIR) / "projects"
+        projects = list_projects(base_dir)
+
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(projects),
+                "projects": [p.to_dict() for p in projects],
+            }
+        )
+
+    except Exception as e:
+        log("MCP list_handoff_projects failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def handoff(
+    project_path: str,
+    summary: str,
+    decisions: str,
+    next_steps: str,
+    context: str = "",
+    source_session_id: str = "",
+    model: str = "sonnet",
+) -> str:
+    """Hand off context to a target project as a new conversation.
+
+    Creates a seeded Claude session in the target project with structured
+    context (summary, decisions, next steps). Blocks until the session is
+    created. Returns the session_id so the operator can resume with:
+        claude --resume <session_id>
+
+    The project_path can be a full path, an encoded project name, or a
+    fuzzy name like "agenticore" — it will be resolved against known projects.
+
+    Args:
+        project_path: Target project path or fuzzy name (e.g., "agenticore")
+        summary: What was accomplished in the current session
+        decisions: Key decisions made
+        next_steps: What the target session should do
+        context: Optional freeform additional context
+        source_session_id: Optional session to pull extra context from
+        model: Model for the target session (default: sonnet)
+
+    Returns:
+        JSON with session_id, project_path, output, duration_ms
+    """
+    try:
+        from agentibridge.catalog import resolve_project
+        from agentibridge.config import CLAUDE_CODE_HOME_DIR
+        from agentibridge.dispatch import handoff as _handoff
+
+        # Resolve fuzzy project name to full path
+        resolved_path = project_path
+        if not Path(project_path).is_absolute():
+            base_dir = Path(CLAUDE_CODE_HOME_DIR) / "projects"
+            match = resolve_project(base_dir, project_path)
+            if match is None:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Project not found: {project_path}",
+                    }
+                )
+            resolved_path = match.path
+
+        result = await _handoff(
+            project_path=resolved_path,
+            summary=summary,
+            decisions=decisions,
+            next_steps=next_steps,
+            context=context,
+            source_session_id=source_session_id,
+            model=model,
+        )
+
+        return json.dumps(result)
+
+    except Exception as e:
+        log("MCP handoff failed", {"project": project_path, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# =============================================================================
 # PHASE 5 — KNOWLEDGE CATALOG (Memory, Plans, History)
 # =============================================================================
 
@@ -1173,12 +1277,14 @@ def find_agents(capability: str) -> str:
         from agentibridge.registry import find_agents as _find
 
         agents = _find(capability)
-        return json.dumps({
-            "success": True,
-            "capability": capability,
-            "count": len(agents),
-            "agents": agents,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "capability": capability,
+                "count": len(agents),
+                "agents": agents,
+            }
+        )
     except Exception as e:
         log("MCP find_agents failed", {"capability": capability, "error": str(e)})
         return json.dumps({"success": False, "error": str(e)})
@@ -1213,8 +1319,12 @@ async def run_agent(
         from agentibridge.registry import route_to_agent
 
         result = await route_to_agent(
-            agent_id=agent_id, task=task, profile=profile,
-            repo_url=repo_url, wait=wait, file_path=file_path,
+            agent_id=agent_id,
+            task=task,
+            profile=profile,
+            repo_url=repo_url,
+            wait=wait,
+            file_path=file_path,
         )
         return json.dumps(result)
     except Exception as e:
@@ -1252,8 +1362,12 @@ async def dispatch_to_agent(
         from agentibridge.registry import route_by_capability
 
         result = await route_by_capability(
-            capability=capability, task=task, profile=profile,
-            repo_url=repo_url, wait=wait, file_path=file_path,
+            capability=capability,
+            task=task,
+            profile=profile,
+            repo_url=repo_url,
+            wait=wait,
+            file_path=file_path,
         )
         return json.dumps(result)
     except Exception as e:
