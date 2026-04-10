@@ -15,9 +15,9 @@ Common issues and solutions for AgentiBridge.
 FATAL: password authentication failed for user "agentibridge"
 ```
 
-**Cause:** The `POSTGRES_PASSWORD` env var only sets the password when the Postgres data volume is first initialized. If you change the password in `docker.env` after the volume already exists, the running Postgres still uses the old password.
+**Cause:** The `POSTGRES_PASSWORD` env var only sets the password when the Postgres data volume is first initialized. If you change the password in `agentibridge.env` after the volume already exists, the running Postgres still uses the old password.
 
-**Fix (preserve data):** Update the password inside Postgres to match your `docker.env`:
+**Fix (preserve data):** Update the password inside Postgres to match your `agentibridge.env`:
 
 ```bash
 docker exec agentibridge-postgres psql -U agentibridge \
@@ -29,7 +29,7 @@ docker exec agentibridge-postgres psql -U agentibridge \
 ```bash
 agentibridge stop
 docker volume rm sb_postgres_data
-agentibridge run
+agentibridge install
 ```
 
 ---
@@ -46,7 +46,7 @@ agentibridge run
 2. **LLM embedding config** — `LLM_API_BASE`, `LLM_API_KEY`, `LLM_EMBED_MODEL`
 3. **Postgres with pgvector** — `POSTGRES_URL` pointing to a pgvector-enabled database
 
-**Fix:** Add all three to your `docker.env` (or `.env` for native mode):
+**Fix:** Add all three to your `agentibridge.env` (or `.env` for native mode):
 
 ```bash
 AGENTIBRIDGE_EMBEDDING_ENABLED=true
@@ -59,14 +59,14 @@ Then recreate the container (see next section).
 
 ---
 
-## Config changes not taking effect after editing docker.env
+## Config changes not taking effect after editing agentibridge.env
 
-**Cause:** `agentibridge restart` restarts the same containers with the same environment. It does **not** reload `docker.env`.
+**Cause:** `agentibridge restart` restarts the same containers with the same environment. It does **not** reload `agentibridge.env`.
 
 **Fix:** Stop and recreate the containers:
 
 ```bash
-agentibridge stop && agentibridge run
+agentibridge stop && agentibridge install
 ```
 
 Or with Docker Compose directly:
@@ -94,7 +94,7 @@ httpx.ConnectError: [Errno -2] Name or address not found
 LLM_API_BASE=http://host.docker.internal:4000/v1
 ```
 
-**Fix (Cloudflare Access):** Add service-token credentials to `docker.env`:
+**Fix (Cloudflare Access):** Add service-token credentials to `agentibridge.env`:
 
 ```bash
 CF_ACCESS_CLIENT_ID=your-client-id.access
@@ -130,7 +130,7 @@ agentibridge embeddings --check-llm  # also tests LLM endpoint connectivity
 - Collector hasn't completed its first cycle yet (wait ~60s after startup)
 - `AGENTIBRIDGE_EMBEDDING_ENABLED` is not set to `true`
 - LLM endpoint is unreachable from the container (see "LLM endpoint unreachable" above)
-- Using `agentibridge run --test` but embedding config is only in `docker.env` (not the repo root `.env`) — see the [env file table](cli-commands.md#--test--local-dev-testing-mode)
+- Using `agentibridge install --test` but embedding config is only in `agentibridge.env` (not the repo root `.env`) — see the [env file table](cli-commands.md#--test--local-dev-testing-mode)
 
 **Fix:** Trigger an immediate collection:
 

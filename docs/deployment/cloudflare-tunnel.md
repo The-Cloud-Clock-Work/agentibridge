@@ -75,7 +75,7 @@ The tunnel token is **static** — you set it once and it works permanently acro
 CLOUDFLARE_TUNNEL_TOKEN=eyJh... docker compose --profile tunnel-named up -d
 ```
 
-Or add to `~/.agentibridge/docker.env` (recommended — set once, forget about it):
+Or add to `~/.agentibridge/agentibridge.env` (recommended — set once, forget about it):
 
 ```bash
 CLOUDFLARE_TUNNEL_TOKEN=eyJh...
@@ -227,7 +227,7 @@ This preserves protection for your other routes while letting MCP long-lived con
 
 This is not an AgentiBridge feature per se — it covers a specific deployment pattern where your LLM proxy (LiteLLM, OpenRouter, etc.) is protected by Cloudflare Access Zero Trust. The project author uses this setup: all LLM endpoints are behind Cloudflare Access, so AgentiBridge needs service-token credentials to make outbound API requests to them. If your LLM backend is not behind Cloudflare Access, skip this section.
 
-Set these in `~/.agentibridge/docker.env`:
+Set these in `~/.agentibridge/agentibridge.env`:
 
 ```bash
 # Cloudflare Access service-token for the LLM backend
