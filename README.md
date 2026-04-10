@@ -48,14 +48,14 @@ Your Claude Code sessions disappear when the terminal closes. AgentiBridge index
 
 - **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** (`claude` binary) — AgentiBridge indexes Claude Code transcripts, so the CLI must be installed. The tunnel wizard and dispatch features also invoke it directly.
 - **[cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)** — required for `agentibridge tunnel setup` (the tunnel wizard). Not needed if you don't use Cloudflare Tunnel.
-- **Docker** — required for `agentibridge run` (Docker mode). Not needed for native/stdio mode.
+- **Docker** — required for Redis + Postgres containers
 - **Python 3.12+**
 
 ## Quick Start
 
 ```bash
 pip install agentibridge
-agentibridge run
+agentibridge install
 curl http://localhost:8100/health
 ```
 
@@ -74,16 +74,23 @@ Then add AgentiBridge to `~/.mcp.json`:
 
 ---
 
-## Run Modes
+## How It Works
 
-Each mode has its own config file, auto-created from a bundled template. Both can run simultaneously.
+AgentiBridge runs **natively on the host**. Redis and Postgres run in Docker containers with ports exposed to localhost.
 
-| Mode | Command | Config | Storage |
-|------|---------|--------|---------|
-| **Docker** | `agentibridge run` | `~/.agentibridge/docker.env` | Redis + Postgres (bundled), `TRANSPORT=sse` |
-| **Native** | `python -m agentibridge` | `~/.agentibridge/.env` | Filesystem only (default), `TRANSPORT=stdio` |
+```
+Host (native)                    Docker (databases only)
+┌──────────────────────┐        ┌─────────────────────┐
+│ agentibridge (python) │───────▶│ Redis :6379         │
+│ claude CLI (dispatch) │        │ Postgres :5432      │
+└──────────────────────┘        └─────────────────────┘
+```
 
-**Docker** starts 3 containers (AgentiBridge + Redis + Postgres) with sessions indexed in Redis. **Native** reads raw JSONL files from `~/.claude/projects/` on each call — no external services needed. To add Redis/Postgres in native mode, run them yourself and set `REDIS_URL` / `POSTGRES_URL` in `~/.agentibridge/.env`.
+`agentibridge install` creates two systemd user services that auto-start on boot:
+- `agentibridge-db` — Docker Compose for Redis + Postgres
+- `agentibridge` — Native Python MCP server
+
+Single config file: `~/.agentibridge/agentibridge.env` (auto-created from template).
 
 See [Configuration Reference](docs/reference/configuration.md) for all variables.
 
@@ -93,20 +100,19 @@ See [Configuration Reference](docs/reference/configuration.md) for all variables
 
 | Command | What it does |
 |---------|-------------|
-| `agentibridge run` | Start the Docker stack |
-| `agentibridge run --rebuild` | Force rebuild before starting |
-| `agentibridge run --test` | Dev mode: build from local source with fresh config |
-| `agentibridge stop` | Stop the stack |
-| `agentibridge restart` | Restart the stack (does **not** reload `docker.env` — use `stop` + `run` after config changes) |
-| `agentibridge logs` | View recent logs (`--follow` to stream) |
-| `agentibridge status` | Health, containers, session count |
+| `agentibridge install` | Install systemd services (databases + native app) |
+| `agentibridge uninstall` | Remove systemd services |
+| `agentibridge stop` | Stop all services |
+| `agentibridge restart` | Restart all services |
+| `agentibridge logs` | View logs (`--follow` to stream) |
+| `agentibridge status` | Health, connectivity, session count |
 | `agentibridge version` | Print version |
-| `agentibridge update` | Updates agentibridge |
+| `agentibridge update` | Update agentibridge (pip + Docker images) |
 | `agentibridge config` | View current config |
 | `agentibridge connect` | Ready-to-paste client configs |
 | `agentibridge tunnel` | Tunnel status and URL |
 | `agentibridge tunnel setup` | Interactive tunnel wizard |
-| `agentibridge embeddings` | Embedding pipeline status (config, LLM, Postgres, coverage) |
+| `agentibridge embeddings` | Embedding pipeline status |
 | `agentibridge help` | Full reference |
 
 See [CLI Reference](docs/reference/cli-commands.md) for all commands and flags.
@@ -134,16 +140,16 @@ See [CLI Reference](docs/reference/cli-commands.md) for all commands and flags.
 | `list_plans` | "What plans have I created recently?" |
 | `get_plan` | "Show me the plan called moonlit-rolling-reddy" |
 | `search_history` | "Find prompts where I mentioned docker" |
+| `list_handoff_projects` | "What projects can I hand off to?" |
+| `handoff` | "Hand off this context to the agenticore project" |
 
-> **Note:** `search_semantic` and `generate_summary` require `AGENTIBRIDGE_EMBEDDING_ENABLED=true` + LLM config. Sessions are embedded automatically by the collector — see [Semantic Search](docs/architecture/semantic-search.md). Use `agentibridge embeddings` to check pipeline status. `dispatch_task` and `restore_session` require the dispatch bridge — see [Session Dispatch](docs/architecture/session-dispatch.md). Knowledge catalog tools (`list_memory_files`, `get_memory_file`, `list_plans`, `get_plan`, `search_history`) expose Claude Code's memory files, plans, and prompt history.
+> **Note:** `search_semantic` and `generate_summary` require `AGENTIBRIDGE_EMBEDDING_ENABLED=true` + LLM config. Sessions are embedded automatically by the collector — see [Semantic Search](docs/architecture/semantic-search.md). Use `agentibridge embeddings` to check pipeline status. `dispatch_task` calls the `claude` CLI directly on the host. `handoff` seeds a conversation in a target project with structured context — use `list_handoff_projects` to discover available targets.
 
 ---
 
 ## Configuration
 
-Config files are auto-created from bundled templates:
-- **Docker:** `~/.agentibridge/docker.env` (created on first `agentibridge run`)
-- **Native:** `~/.agentibridge/.env` (created on first `import agentibridge`)
+Single config file: `~/.agentibridge/agentibridge.env` (auto-created from template on first `agentibridge install`).
 
 Run `agentibridge config` to view current values. See [Configuration Reference](docs/reference/configuration.md) for all environment variables.
 

@@ -19,7 +19,7 @@ This document provides a deep dive into AgentiBridge's internal modules and impl
 | `oauth_provider.py` | OAuth 2.1 authorization server (opt-in) | `BridgeOAuthProvider` |
 | `embeddings.py` | Semantic search (Phase 2) | `TranscriptEmbedder`, `search_semantic()` |
 | `dispatch.py` | Session restore + task dispatch (Phase 4) | `restore_session_context()`, `dispatch_task()` |
-| `dispatch_bridge.py` | Host-side HTTP bridge for Docker dispatch | `GET /health`, `POST /dispatch` |
+| `dispatch.py` | Host-side HTTP bridge for Docker dispatch | `GET /health`, `POST /dispatch` |
 | `claude_runner.py` | Claude CLI subprocess wrapper | `run_claude()`, `ClaudeResult` |
 | `llm_client.py` | OpenAI-compatible embeddings + chat | `embed_text()`, `chat_completion()` |
 | `redis_client.py` | Redis helper | `get_redis()`, `redis_key()` |
@@ -302,7 +302,7 @@ Clients poll with `get_dispatch_job(job_id)` until `status` is `completed` or `f
 
 **Dispatch modes:**
 - **Local**: `CLAUDE_DISPATCH_URL` is empty → runs `claude` subprocess directly
-- **Bridge**: `CLAUDE_DISPATCH_URL` is set → HTTP POST to `dispatch_bridge.py` on the host
+- **Bridge**: `CLAUDE_DISPATCH_URL` is set → HTTP POST to `dispatch.py` on the host
 
 ## Knowledge Catalog (Phase 5)
 
@@ -418,7 +418,7 @@ raise SessionNotFoundError(
 
 2. Add validation in `Config.__post_init__()`
 3. Update `docs/reference/configuration.md`
-4. Add to `.env.example` generation in CLI
+4. Add to `agentibridge.env.example` generation in CLI
 
 ## See Also
 

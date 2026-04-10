@@ -214,7 +214,7 @@ When AgentiBridge runs inside Docker, the `claude` CLI binary isn't available in
 ```
 ┌─────────────────────┐        HTTP         ┌──────────────────────┐
 │ Docker container     │◄──────────────────►│  Host bridge          │
-│ AgentiBridge MCP     │   POST /dispatch    │  dispatch_bridge.py   │
+│ AgentiBridge MCP     │   POST /dispatch    │  dispatch.py   │
 │                      │   → 202 + job_id    │                      │
 │ claude_runner.py     │                     │  Spawns claude CLI    │
 │  _run_claude_http()  │   GET /job/{id}     │  Returns result       │
@@ -247,7 +247,7 @@ The bridge clears `CLAUDE_DISPATCH_URL` from its environment before calling `run
 |------|------|
 | `agentibridge/dispatch.py` | Job management (Redis + file), context restore, background task runner |
 | `agentibridge/claude_runner.py` | Claude CLI subprocess / HTTP bridge proxy (submit + poll) |
-| `agentibridge/dispatch_bridge.py` | Host-side HTTP bridge (Docker mode), fire-and-forget |
+| `agentibridge/dispatch.py` | Host-side HTTP bridge (Docker mode), fire-and-forget |
 
 ## Configuration
 
@@ -257,7 +257,7 @@ CLAUDE_DISPATCH_MODEL=sonnet
 CLAUDE_DISPATCH_TIMEOUT=300
 
 # Docker mode — bridge on host proxies CLI calls
-CLAUDE_DISPATCH_URL=http://host.docker.internal:8101
+# CLAUDE_DISPATCH_URL removed (native dispatch)
 DISPATCH_SECRET=<shared-secret>
 DISPATCH_BRIDGE_HOST=0.0.0.0
 DISPATCH_BRIDGE_PORT=8101

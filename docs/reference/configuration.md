@@ -14,7 +14,7 @@ Each run mode has its own config file in `~/.agentibridge/`:
 | File | Purpose | Created by |
 |------|---------|------------|
 | `~/.agentibridge/.env` | Native mode config | Auto-created on first `import agentibridge` |
-| `~/.agentibridge/docker.env` | Docker mode config | Auto-created on first `agentibridge run` |
+| `~/.agentibridge/agentibridge.env` | Docker mode config | Auto-created on first `agentibridge install` |
 
 **Native mode config resolution** (first found wins, explicit env vars always override):
 
@@ -28,10 +28,10 @@ AgentiBridge has two run modes that can run simultaneously without conflict:
 
 | Mode | Command | Config file | Storage | Setup |
 |------|---------|-------------|---------|-------|
-| **Docker** | `agentibridge run` | `docker.env` | Redis + Postgres (bundled) | Zero config — compose starts all 3 containers |
+| **Docker** | `agentibridge install` | `agentibridge.env` | Redis + Postgres (bundled) | Zero config — compose starts all 3 containers |
 | **Native** | `python -m agentibridge` | `.env` | Filesystem only (default) | No external services needed |
 
-**Docker mode** uses `~/.agentibridge/docker.env` (transport=sse, Redis, Postgres). The collector daemon indexes transcripts into Redis in the background. Tool calls read from Redis — fast, paginated, with time-range filters.
+**Docker mode** uses `~/.agentibridge/agentibridge.env` (transport=sse, Redis, Postgres). The collector daemon indexes transcripts into Redis in the background. Tool calls read from Redis — fast, paginated, with time-range filters.
 
 **Native mode** uses `~/.agentibridge/.env` (transport=stdio, no Redis by default). Every tool call (`list_sessions`, `search_sessions`, `get_session`, etc.) reads and parses the raw JSONL files from `~/.claude/projects/` directly. This works but is slower and re-parses files on every call. To add Redis in native mode, run your own instance and set `REDIS_URL` in `.env`.
 
@@ -108,9 +108,9 @@ When OAuth is enabled, `AGENTIBRIDGE_API_KEYS` still works as a fallback — Bea
 | `CLAUDE_DISPATCH_MODEL` | `sonnet` | Model to use for dispatched tasks. Options: `sonnet`, `opus`, `haiku` |
 | `CLAUDE_DISPATCH_TIMEOUT` | `300` | Maximum execution time for dispatched tasks (seconds) |
 | `CLAUDE_DISPATCH_URL` | _(none)_ | Bridge URL for Docker mode (e.g., `http://host.docker.internal:8101`). Empty = local subprocess mode |
-| `DISPATCH_SECRET` | _(none)_ | Shared secret sent from the container to the dispatch bridge |
-| `DISPATCH_BRIDGE_HOST` | `0.0.0.0` | Bind address for the host-side dispatch bridge |
-| `DISPATCH_BRIDGE_PORT` | `8101` | Port for the host-side dispatch bridge |
+| `DISPATCH_SECRET` | _(none)_ | Shared secret sent from the container to the dispatch (native) |
+| `DISPATCH_BRIDGE_HOST` | `0.0.0.0` | Bind address for the host-side dispatch (native) |
+| `DISPATCH_BRIDGE_PORT` | `8101` | Port for the host-side dispatch (native) |
 
 ### Knowledge Catalog Configuration (Phase 5)
 
@@ -221,7 +221,7 @@ Shows all active configuration values, including defaults.
 agentibridge config --generate-env
 ```
 
-Creates a `.env.example` file with all available options and descriptions.
+Creates a `agentibridge.env.example` file with all available options and descriptions.
 
 ### Validate Configuration
 
@@ -252,7 +252,7 @@ All Redis keys follow the pattern: `{REDIS_KEY_PREFIX}:sb:{suffix}`
 
 ## Docker Compose Overrides
 
-The `docker-compose.yml` reads from `docker.env` (not `.env`). The bundled `docker.env` template sets these defaults:
+The `docker-compose.yml` reads from `agentibridge.env` (not `.env`). The bundled `agentibridge.env` template sets these defaults:
 
 ```bash
 REDIS_URL=redis://redis:6379/0
@@ -261,7 +261,7 @@ AGENTIBRIDGE_HOST=0.0.0.0
 AGENTIBRIDGE_PORT=8100
 ```
 
-Override by editing `~/.agentibridge/docker.env` or exporting variables before running `agentibridge run`.
+Override by editing `~/.agentibridge/agentibridge.env` or exporting variables before running `agentibridge install`.
 
 ## See Also
 

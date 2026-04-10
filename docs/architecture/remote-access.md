@@ -67,7 +67,7 @@ When no keys are configured, auth is disabled (open access).
 
 Set `OAUTH_ISSUER_URL` to enable an in-memory OAuth 2.1 authorization server. This is required by some clients (e.g., claude.ai) that use the MCP OAuth flow. API key auth continues to work alongside OAuth — both methods are active simultaneously.
 
-Uncomment and set these in `~/.agentibridge/docker.env`:
+Uncomment and set these in `~/.agentibridge/agentibridge.env`:
 
 ```bash
 OAUTH_ISSUER_URL=https://bridge.yourdomain.com   # must be your actual public hostname
@@ -81,10 +81,10 @@ After changing OAuth config, you must recreate the containers (not just restart)
 
 ```bash
 agentibridge stop    # tears down containers
-agentibridge run     # recreates with new env vars
+agentibridge install     # recreates with new env vars
 ```
 
-> **Why not `agentibridge restart`?** Docker Compose `restart` only restarts existing containers — environment variables are baked in at creation time and are not reloaded. You must `stop` + `run` to pick up any `docker.env` changes.
+> **Why not `agentibridge restart`?** Docker Compose `restart` only restarts existing containers — environment variables are baked in at creation time and are not reloaded. You must `stop` + `run` to pick up any `agentibridge.env` changes.
 
 Verify the OAuth discovery endpoint returns your actual hostname:
 
