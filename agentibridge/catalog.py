@@ -111,9 +111,9 @@ def _parse_plan_filename(stem: str) -> Tuple[bool, str]:
 
 @dataclass
 class ProjectInfo:
-    encoded: str        # "-home-iamroot-dev-tccw-ecosystem-agenticore"
-    path: str           # "/home/iamroot/dev/tccw-ecosystem/agenticore"
-    name: str           # "agenticore"
+    encoded: str  # "-home-iamroot-dev-tccw-ecosystem-agenticore"
+    path: str  # "/home/iamroot/dev/tccw-ecosystem/agenticore"
+    name: str  # "agenticore"
     session_count: int  # number of .jsonl files
 
     def to_dict(self) -> dict:
@@ -134,12 +134,14 @@ def list_projects(base_dir: Path) -> List[ProjectInfo]:
         decoded = _real_path(encoded)
         name = Path(decoded).name
         session_count = sum(1 for _ in project_dir.glob("*.jsonl"))
-        results.append(ProjectInfo(
-            encoded=encoded,
-            path=decoded,
-            name=name,
-            session_count=session_count,
-        ))
+        results.append(
+            ProjectInfo(
+                encoded=encoded,
+                path=decoded,
+                name=name,
+                session_count=session_count,
+            )
+        )
     return results
 
 

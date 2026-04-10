@@ -351,8 +351,7 @@ async def run_claude(
     log("claude_runner: starting", {"model": model, "prompt_len": len(prompt), "cmd": " ".join(cmd[:10])})
 
     # Clean env for claude CLI — remove vars that hijack its auth
-    clean_env = {k: v for k, v in os.environ.items()
-                 if k not in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
+    clean_env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
 
     try:
         proc = await asyncio.create_subprocess_exec(

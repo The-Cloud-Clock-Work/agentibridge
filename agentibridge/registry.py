@@ -234,18 +234,20 @@ def register_agent(
 
     registered_at = existing.get("registered_at", now) if existing else now
 
-    data = asdict(AgentRecord(
-        agent_id=agent_id,
-        agent_name=agent_name or agent_id,
-        agent_type=agent_type,
-        capabilities=caps,
-        endpoint=endpoint,
-        status="online",
-        metadata=meta,
-        registered_at=registered_at,
-        last_heartbeat=now,
-        heartbeat_ttl=heartbeat_ttl,
-    ))
+    data = asdict(
+        AgentRecord(
+            agent_id=agent_id,
+            agent_name=agent_name or agent_id,
+            agent_type=agent_type,
+            capabilities=caps,
+            endpoint=endpoint,
+            status="online",
+            metadata=meta,
+            registered_at=registered_at,
+            last_heartbeat=now,
+            heartbeat_ttl=heartbeat_ttl,
+        )
+    )
 
     _write_file(agent_id, data)
     _write_redis(agent_id, data, heartbeat_ttl)

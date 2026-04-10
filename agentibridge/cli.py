@@ -195,9 +195,7 @@ def cmd_status(args: argparse.Namespace) -> None:
             count = r.zcard(_rkey("idx:all"))
             print(f"  sessions indexed: {count}")
         else:
-            url = os.getenv("REDIS_URL") or (
-                _read_env_value("REDIS_URL", env_file) if env_file.exists() else _NOT_SET
-            )
+            url = os.getenv("REDIS_URL") or (_read_env_value("REDIS_URL", env_file) if env_file.exists() else _NOT_SET)
             print(f"  status: unavailable (REDIS_URL={url})")
     except Exception as e:
         print(f"  status: error ({e})")
@@ -853,18 +851,13 @@ def cmd_install(args: argparse.Namespace) -> None:
 
     # Stop existing services
     for unit in ("agentibridge", "agentibridge-bridge", "agentibridge-db"):
-        subprocess.run(["systemctl", "--user", "stop", unit],
-                       capture_output=True, check=False)
-        subprocess.run(["systemctl", "--user", "disable", unit],
-                       capture_output=True, check=False)
+        subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, check=False)
+        subprocess.run(["systemctl", "--user", "disable", unit], capture_output=True, check=False)
     # Stop old agentibridge container if running from previous install
-    subprocess.run(["docker", "stop", "agentibridge"],
-                   capture_output=True, check=False)
-    subprocess.run(["docker", "rm", "agentibridge"],
-                   capture_output=True, check=False)
+    subprocess.run(["docker", "stop", "agentibridge"], capture_output=True, check=False)
+    subprocess.run(["docker", "rm", "agentibridge"], capture_output=True, check=False)
     # Kill stale processes
-    subprocess.run(["pkill", "-f", "python.*-m agentibridge"],
-                   capture_output=True, check=False)
+    subprocess.run(["pkill", "-f", "python.*-m agentibridge"], capture_output=True, check=False)
 
     # Ensure stack dir and env
     stack_dir = _ensure_stack_dir()
@@ -1249,8 +1242,7 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
             else:
                 with pool.connection() as conn:
                     row = conn.execute(
-                        "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
-                        "WHERE table_name = 'transcript_chunks')"
+                        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'transcript_chunks')"
                     ).fetchone()
                     if not row[0]:
                         print("  status: connected (table not created yet)")
@@ -1529,10 +1521,6 @@ def _short_digest(digest: str) -> str:
     return digest[:12]
 
 
-
-
-
-
 def cmd_stop(args: argparse.Namespace) -> None:
     for unit in ("agentibridge", "agentibridge-db"):
         subprocess.run(["systemctl", "--user", "stop", unit], check=False)
@@ -1592,8 +1580,6 @@ def _save_state(data: dict) -> None:
     except BaseException:
         os.unlink(tmp)
         raise
-
-
 
 
 # ---------------------------------------------------------------------------

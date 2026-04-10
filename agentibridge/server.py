@@ -780,11 +780,13 @@ def list_handoff_projects() -> str:
         base_dir = Path(CLAUDE_CODE_HOME_DIR) / "projects"
         projects = list_projects(base_dir)
 
-        return json.dumps({
-            "success": True,
-            "count": len(projects),
-            "projects": [p.to_dict() for p in projects],
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(projects),
+                "projects": [p.to_dict() for p in projects],
+            }
+        )
 
     except Exception as e:
         log("MCP list_handoff_projects failed", {"error": str(e)})
@@ -834,10 +836,12 @@ async def handoff(
             base_dir = Path(CLAUDE_CODE_HOME_DIR) / "projects"
             match = resolve_project(base_dir, project_path)
             if match is None:
-                return json.dumps({
-                    "success": False,
-                    "error": f"Project not found: {project_path}",
-                })
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Project not found: {project_path}",
+                    }
+                )
             resolved_path = match.path
 
         result = await _handoff(
@@ -1273,12 +1277,14 @@ def find_agents(capability: str) -> str:
         from agentibridge.registry import find_agents as _find
 
         agents = _find(capability)
-        return json.dumps({
-            "success": True,
-            "capability": capability,
-            "count": len(agents),
-            "agents": agents,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "capability": capability,
+                "count": len(agents),
+                "agents": agents,
+            }
+        )
     except Exception as e:
         log("MCP find_agents failed", {"capability": capability, "error": str(e)})
         return json.dumps({"success": False, "error": str(e)})
@@ -1313,8 +1319,12 @@ async def run_agent(
         from agentibridge.registry import route_to_agent
 
         result = await route_to_agent(
-            agent_id=agent_id, task=task, profile=profile,
-            repo_url=repo_url, wait=wait, file_path=file_path,
+            agent_id=agent_id,
+            task=task,
+            profile=profile,
+            repo_url=repo_url,
+            wait=wait,
+            file_path=file_path,
         )
         return json.dumps(result)
     except Exception as e:
@@ -1352,8 +1362,12 @@ async def dispatch_to_agent(
         from agentibridge.registry import route_by_capability
 
         result = await route_by_capability(
-            capability=capability, task=task, profile=profile,
-            repo_url=repo_url, wait=wait, file_path=file_path,
+            capability=capability,
+            task=task,
+            profile=profile,
+            repo_url=repo_url,
+            wait=wait,
+            file_path=file_path,
         )
         return json.dumps(result)
     except Exception as e:

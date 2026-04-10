@@ -466,10 +466,13 @@ async def handoff(
     )
 
     if result.success:
-        log("handoff: completed", {
-            "project": project_path,
-            "session_id": result.session_id,
-        })
+        log(
+            "handoff: completed",
+            {
+                "project": project_path,
+                "session_id": result.session_id,
+            },
+        )
         resume_cmd = f"cd {project_path} && claude --resume {result.session_id}"
         return {
             "success": True,

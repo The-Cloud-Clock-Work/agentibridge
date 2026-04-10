@@ -280,14 +280,16 @@ async def _read_json_body(receive) -> dict:
 async def _json_response(send, data: dict, status: int = 200):
     """Send a JSON response via ASGI."""
     body = json.dumps(data).encode()
-    await send({
-        "type": "http.response.start",
-        "status": status,
-        "headers": [
-            [b"content-type", b"application/json"],
-            [b"content-length", str(len(body)).encode()],
-        ],
-    })
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(body)).encode()],
+            ],
+        }
+    )
     await send({"type": "http.response.body", "body": body})
 
 

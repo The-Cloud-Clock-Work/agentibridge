@@ -223,7 +223,6 @@ class TestCmdStatus:
             return _fail()
 
         with (
-
             patch("agentibridge.cli.subprocess.run", side_effect=se),
             patch("agentibridge.cli._cloudflared_hostname", return_value="tunnel.example.com"),
         ):
@@ -929,6 +928,7 @@ class TestCmdEmbeddings:
     def _native_mode(self):
         """Patch stack dir to non-existent path (no env file loaded)."""
         from pathlib import Path
+
         return patch("agentibridge.cli._STACK_DIR", Path("/tmp/nonexistent-agentibridge"))
 
     # ── Native mode tests ──────────────────────────────────────────────
@@ -1134,10 +1134,13 @@ class TestCmdEmbeddings:
         with (
             patch("agentibridge.cli._STACK_DIR", tmp_path),
             patch("agentibridge.cli._container_health", return_value=None),
-            patch.dict("sys.modules", {
-                "agentibridge.pg_client": MagicMock(get_pg=mock_get_pg),
-                "agentibridge.redis_client": MagicMock(get_redis=mock_get_redis),
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "agentibridge.pg_client": MagicMock(get_pg=mock_get_pg),
+                    "agentibridge.redis_client": MagicMock(get_redis=mock_get_redis),
+                },
+            ),
         ):
             cmd_embeddings(self._make_args())
         output = capsys.readouterr().out
