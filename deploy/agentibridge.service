@@ -1,15 +1,16 @@
 [Unit]
-Description=AgentiBridge MCP Server (Docker Compose)
-Requires=docker.service
-After=docker.service
+Description=AgentiBridge MCP Server (native)
+After=network.target agentibridge-db.service
+Wants=agentibridge-db.service
 
 [Service]
 Type=simple
-WorkingDirectory=%h/agentibridge
-ExecStart=/usr/bin/docker compose up
-ExecStop=/usr/bin/docker compose down
-Restart=on-failure
-RestartSec=10
+EnvironmentFile=-%h/.agentibridge/docker.env
+Environment=AGENTIBRIDGE_TRANSPORT=sse
+ExecStart=%h/.venv/bin/python3 -m agentibridge
+WorkingDirectory=%h
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=default.target

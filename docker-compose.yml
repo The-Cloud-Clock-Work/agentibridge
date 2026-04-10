@@ -1,71 +1,36 @@
-# Standalone AgentiBridge stack.
+# AgentiBridge database stack.
 #
-# Indexes Claude CLI transcripts and serves them via SSE/HTTP MCP.
-# Any Claude Code session or cloud AI can connect and ask
-# "what are my agents doing?"
+# AgentiBridge runs natively on the host (pip install agentibridge).
+# This compose file provides Redis and Postgres only.
 #
 # Usage:
-#   docker compose up --build -d
+#   agentibridge run       # starts databases + native agentibridge
+#   agentibridge stop      # stops everything
+#   docker compose up -d   # databases only (manual)
 #
-# With Cloudflare Tunnel (expose to internet):
+# With Cloudflare Tunnel:
 #   docker compose --profile tunnel up -d                                    # quick tunnel
 #   CLOUDFLARE_TUNNEL_TOKEN=xxx docker compose --profile tunnel-named up -d  # named tunnel
-#
-# Connect from Claude Code (.mcp.json):
-#   {
-#     "mcpServers": {
-#       "agentibridge": {
-#         "url": "http://your-host:8100/sse",
-#         "headers": {"X-API-Key": "your-key"}
-#       }
-#     }
-#   }
 
 services:
-  agentibridge:
-    container_name: agentibridge
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: agentibridge:latest
-    ports:
-      - "8100:8100"
-    volumes:
-      # Mount host Claude CLI data (transcripts, plans, history, memory)
-      - ${CLAUDE_DIR:-~/.claude}:/home/appuser/.claude:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    env_file: .env
-    networks:
-      - sb-network
-    depends_on:
-      redis:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8100/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
-
   redis:
     container_name: agentibridge-redis
     image: redis:7-alpine
     command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
     volumes:
       - sb_redis_data:/data
     networks:
       - sb-network
     restart: unless-stopped
-    # Redis port NOT exposed to host (internal only)
 
   postgres:
     container_name: agentibridge-postgres
     image: pgvector/pgvector:pg16
-    env_file: .env
+    env_file: agentibridge.env
+    ports:
+      - "5432:5432"
     volumes:
       - sb_postgres_data:/var/lib/postgresql/data
     networks:
@@ -86,24 +51,22 @@ services:
     container_name: agentibridge-tunnel
     image: cloudflare/cloudflared:latest
     profiles: [tunnel]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - sb-network
-    depends_on:
-      agentibridge:
-        condition: service_healthy
     restart: unless-stopped
     command: >-
-      tunnel --no-autoupdate --url http://agentibridge:8100
+      tunnel --no-autoupdate --url http://host.docker.internal:8100
 
   cloudflared-named:
     container_name: agentibridge-tunnel-named
     image: cloudflare/cloudflared:latest
     profiles: [tunnel-named]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - sb-network
-    depends_on:
-      agentibridge:
-        condition: service_healthy
     restart: unless-stopped
     command: >-
       tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}

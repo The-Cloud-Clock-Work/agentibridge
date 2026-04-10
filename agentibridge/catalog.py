@@ -109,6 +109,100 @@ def _parse_plan_filename(stem: str) -> Tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class ProjectInfo:
+    encoded: str        # "-home-iamroot-dev-tccw-ecosystem-agenticore"
+    path: str           # "/home/iamroot/dev/tccw-ecosystem/agenticore"
+    name: str           # "agenticore"
+    session_count: int  # number of .jsonl files
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def list_projects(base_dir: Path) -> List[ProjectInfo]:
+    """List all projects with decoded paths and session counts."""
+    base_dir = Path(base_dir)
+    if not base_dir.exists():
+        return []
+
+    results: List[ProjectInfo] = []
+    for project_dir in sorted(base_dir.iterdir()):
+        if not project_dir.is_dir():
+            continue
+        encoded = project_dir.name
+        decoded = _real_path(encoded)
+        name = Path(decoded).name
+        session_count = sum(1 for _ in project_dir.glob("*.jsonl"))
+        results.append(ProjectInfo(
+            encoded=encoded,
+            path=decoded,
+            name=name,
+            session_count=session_count,
+        ))
+    return results
+
+
+def _real_path(encoded: str) -> str:
+    """Try to find the real filesystem path for an encoded project name.
+
+    decode_project_path is lossy (hyphens in real paths become slashes).
+    If the decoded path doesn't exist, walk from root rebuilding with hyphens.
+    """
+    decoded = decode_project_path(encoded)
+    if Path(decoded).exists():
+        return decoded
+
+    # Rebuild: try joining segments with hyphens where dirs don't exist
+    parts = decoded.strip("/").split("/")
+    current = Path("/")
+    i = 0
+    while i < len(parts):
+        candidate = current / parts[i]
+        if candidate.exists():
+            current = candidate
+            i += 1
+        else:
+            # Try joining with next segment via hyphen
+            merged = False
+            for j in range(i + 1, min(i + 5, len(parts) + 1)):
+                hyphenated = "-".join(parts[i:j])
+                if (current / hyphenated).exists():
+                    current = current / hyphenated
+                    i = j
+                    merged = True
+                    break
+            if not merged:
+                # Give up, return decoded as-is
+                return decoded
+    return str(current)
+
+
+def resolve_project(base_dir: Path, query: str) -> ProjectInfo | None:
+    """Fuzzy-match a project by name, path substring, or encoded name."""
+    projects = list_projects(base_dir)
+    if not projects:
+        return None
+
+    # Exact path match
+    for p in projects:
+        if p.path == query or p.encoded == query:
+            return p
+
+    # Name match (case-insensitive)
+    q = query.lower().replace("-", "").replace("_", "")
+    for p in projects:
+        if p.name.lower().replace("-", "").replace("_", "") == q:
+            return p
+
+    # Substring match
+    for p in projects:
+        if q in p.path.lower() or q in p.encoded.lower():
+            return p
+
+    return None
+
+
 def scan_memory_files(base_dir: Path, max_content: int = 51200) -> List[MemoryFile]:
     """Scan {base_dir}/*/memory/*.md for memory files.
 
