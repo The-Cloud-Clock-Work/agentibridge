@@ -394,8 +394,14 @@ async def route_to_agent(
     if file_path:
         body["file_path"] = file_path
 
+    # Long-running agents (claude-code subprocesses) routinely take 1-10 min.
+    # When wait=True, we block until the agent finishes — give it 10 min.
+    # When wait=False, the agent returns a job_id immediately, 30s is enough.
+    import os
+    timeout_s = float(os.getenv("AGENTIBRIDGE_AGENT_TIMEOUT", "600" if wait else "30"))
+
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
             resp = await client.post(f"{endpoint}/jobs", json=body)
             if resp.status_code == 503:
                 return {"success": False, "error": "agent at capacity", "retry": True, "agent_id": agent_id}
