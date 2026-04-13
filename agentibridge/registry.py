@@ -398,6 +398,7 @@ async def route_to_agent(
     # When wait=True, we block until the agent finishes — give it 10 min.
     # When wait=False, the agent returns a job_id immediately, 30s is enough.
     import os
+
     timeout_s = float(os.getenv("AGENTIBRIDGE_AGENT_TIMEOUT", "600" if wait else "30"))
 
     try:
