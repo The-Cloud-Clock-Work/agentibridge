@@ -567,20 +567,22 @@ class TestCmdUpdate:
 
     def test_pip_version_change_reported(self, capsys):
         """Reports old -> new version when pip upgrade changes version."""
+        # Use a version guaranteed to differ from the installed __version__
+        new_version = "99.99.99"
 
         def se(cmd, **kw):
             cmd_str = " ".join(str(c) for c in cmd)
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.5.0\n")
+                return _ok(stdout=f"Version: {new_version}\n")
             return _fail()
 
         self._run_update(side_effect=se)
         output = capsys.readouterr().out
         # Current version (from __version__) vs new version from pip show
         assert "Updated:" in output
-        assert "0.5.0" in output
+        assert new_version in output
 
     # ── pip upgrade: already latest ───────────────────────────────────
 
