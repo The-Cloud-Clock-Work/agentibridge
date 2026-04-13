@@ -393,6 +393,76 @@ def search_sessions(
 
 
 @mcp.tool()
+def agent_search(
+    query: str,
+    model: str = "opus",
+    timeout: int = 300,
+    extra_instructions: str = "",
+) -> str:
+    """Reconnaissance search via a headless Claude Code one-shot.
+
+    Wraps the operator's ``query`` in a recon prompt and invokes ``claude -p``
+    (bypass permissions, chosen model) to do the legwork — grepping sessions,
+    history, files, memory, plans — and return a structured answer.
+
+    Use when a single keyword/semantic search is not enough and you want an
+    agent to reason over the results. Cheaper than spinning up an interactive
+    Claude Code session just to look something up.
+
+    Args:
+        query: The operator's question (the bit that was in quotes).
+        model: Model for the one-shot (default: "opus").
+        timeout: Max seconds to wait for the CLI (default: 300).
+        extra_instructions: Optional extra context appended to the prompt.
+
+    Returns:
+        JSON: {success, query, result, session_id, duration_ms, error}.
+        ``result`` is the agent's answer (ideally JSON with matches, but
+        free-form is tolerated).
+    """
+    from agentibridge.claude_runner import run_claude_sync
+
+    prompt = (
+        "You are a reconnaissance helper for the agentibridge fleet. "
+        "The operator asked:\n\n"
+        f"  {query}\n\n"
+        "Use the MCP tools available to you (list_sessions, search_sessions, "
+        "search_history, search_semantic, get_session, list_memory_files, "
+        "list_plans, plus Read/Glob/Grep) to find the most relevant sessions, "
+        "files, history entries, memory files, or plans that match the query. "
+        "Return ONLY a compact JSON object of the form:\n"
+        '  {"success": true, "query": "<echo>", "count": N, '
+        '"matches": [ {...relevant fields per hit...} ], '
+        '"notes": "<one short sentence of context, optional>"}\n'
+        "Put the most relevant hits first. No prose outside the JSON."
+    )
+    if extra_instructions:
+        prompt += f"\n\nAdditional instructions:\n{extra_instructions}"
+
+    try:
+        result = run_claude_sync(
+            prompt,
+            model=model,
+            timeout=timeout,
+            permission_mode="bypassPermissions",
+        )
+        return json.dumps(
+            {
+                "success": result.success,
+                "query": query,
+                "result": result.result,
+                "session_id": result.session_id,
+                "duration_ms": result.duration_ms,
+                "timed_out": result.timed_out,
+                "error": result.error,
+            }
+        )
+    except Exception as e:
+        log("MCP agent_search failed", {"query": query, "error": str(e)})
+        return json.dumps({"success": False, "query": query, "error": str(e)})
+
+
+@mcp.tool()
 def collect_now() -> str:
     """Trigger immediate transcript collection.
 

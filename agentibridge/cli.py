@@ -1176,6 +1176,263 @@ def _docker_exec_redis(container: str, *redis_args: str) -> str | None:
     return None
 
 
+_SEARCH_PROMPT_TMPL = (
+    "You are a reconnaissance helper for the agentibridge fleet. "
+    "The operator asked:\n\n"
+    "  {query}\n\n"
+    "Use the MCP tools available to you (list_sessions, search_sessions, "
+    "search_history, search_semantic, get_session, list_memory_files, "
+    "list_plans, plus Read/Glob/Grep) to find the most relevant sessions, "
+    "files, history entries, memory files, or plans that match the query. "
+    "Return ONLY a compact JSON object of the form:\n"
+    '  {{"success": true, "query": "<echo>", "count": N, '
+    '"matches": [ {{...relevant fields per hit...}} ], '
+    '"notes": "<one short sentence of context, optional>"}}\n'
+    "Put the most relevant hits first. No prose outside the JSON."
+)
+
+
+def _strip_json_fence(text: str) -> str:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else t[3:]
+        if t.endswith("```"):
+            t = t[:-3]
+    return t.strip()
+
+
+def _render_search_human(result_text: str, query: str, duration_ms: int | None) -> str:
+    raw = _strip_json_fence(result_text or "")
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return result_text or "(no result)"
+
+    lines = []
+    dur = f"{(duration_ms or 0) / 1000:.1f}s" if duration_ms else "?"
+    count = data.get("count", len(data.get("matches") or []))
+    lines.append(f"\n🔎 {query}")
+    lines.append(f"   {count} match(es)  ·  {dur}")
+    notes = data.get("notes")
+    if notes:
+        lines.append(f"   note: {notes}")
+    lines.append("")
+
+    for i, m in enumerate(data.get("matches") or [], 1):
+        if not isinstance(m, dict):
+            lines.append(f"  {i}. {m}")
+            continue
+        # Headline: prefer type + id-ish field
+        kind = m.get("type") or m.get("kind") or ""
+        ident = (
+            m.get("sha")
+            or m.get("session_id")
+            or m.get("pr")
+            or m.get("file")
+            or m.get("path")
+            or m.get("codename")
+            or ""
+        )
+        ts = m.get("timestamp") or m.get("updated_at") or m.get("date") or ""
+        headline = " ".join(x for x in [kind, str(ident), ts] if x).strip()
+        lines.append(f"  {i}. {headline}")
+
+        for key in ("branch", "pr", "message", "file", "diff_stat", "summary", "details", "snippet"):
+            val = m.get(key)
+            if val:
+                val_str = str(val).replace("\n", " ")
+                if len(val_str) > 200:
+                    val_str = val_str[:197] + "..."
+                lines.append(f"       {key}: {val_str}")
+        # Any other fields we didn't render explicitly
+        rendered = {
+            "type",
+            "kind",
+            "sha",
+            "session_id",
+            "pr",
+            "file",
+            "path",
+            "codename",
+            "timestamp",
+            "updated_at",
+            "date",
+            "branch",
+            "message",
+            "diff_stat",
+            "summary",
+            "details",
+            "snippet",
+        }
+        extras = {k: v for k, v in m.items() if k not in rendered}
+        if extras:
+            extra_str = ", ".join(f"{k}={v}" for k, v in extras.items())
+            if len(extra_str) > 200:
+                extra_str = extra_str[:197] + "..."
+            lines.append(f"       {extra_str}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _fmt_tool_args(tool_name: str, tool_input: dict) -> str:
+    if not isinstance(tool_input, dict):
+        return ""
+    for key in ("query", "pattern", "path", "file_path", "session_id", "codename", "command"):
+        if tool_input.get(key):
+            val = str(tool_input[key])
+            if len(val) > 80:
+                val = val[:77] + "..."
+            return val
+    # fall back to the first string value
+    for v in tool_input.values():
+        if isinstance(v, str) and v:
+            return v[:80]
+    return ""
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    """Headless reconnaissance via streaming `claude -p`.
+
+    Streams progress (tool calls) to stderr in real time; prints a
+    human-readable summary on stdout when done (or raw JSON with --json).
+    """
+    query = " ".join(args.query).strip()
+    if not query:
+        print('usage: agentibridge search "<query>"', file=sys.stderr)
+        sys.exit(2)
+
+    prompt = _SEARCH_PROMPT_TMPL.format(query=query)
+    if args.instructions:
+        prompt += f"\n\nAdditional instructions:\n{args.instructions}"
+
+    binary = os.environ.get("CLAUDE_BINARY", "claude")
+    cmd = [
+        binary,
+        "--permission-mode",
+        "bypassPermissions",
+        "--model",
+        args.model,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        prompt,
+    ]
+
+    clean_env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
+
+    stderr_is_tty = sys.stderr.isatty()
+    dim = "\033[2m" if stderr_is_tty else ""
+    reset = "\033[0m" if stderr_is_tty else ""
+    bold = "\033[1m" if stderr_is_tty else ""
+
+    print(f"{bold}🔎 {query}{reset}", file=sys.stderr)
+    print(f"{dim}   spawning claude --model {args.model} (bypass, stream)...{reset}", file=sys.stderr)
+    sys.stderr.flush()
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=clean_env,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError:
+        print(f"claude CLI not found: {binary}", file=sys.stderr)
+        sys.exit(127)
+
+    final_result = None
+    final_session_id = None
+    final_duration_ms = None
+    is_error = False
+    started = time.time()
+
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            etype = event.get("type")
+
+            if etype == "system" and event.get("subtype") == "init":
+                sid = event.get("session_id", "")
+                print(f"{dim}   session {sid[:8]}{reset}", file=sys.stderr)
+
+            elif etype == "assistant":
+                for block in (event.get("message", {}) or {}).get("content", []) or []:
+                    btype = block.get("type")
+                    if btype == "tool_use":
+                        name = block.get("name", "?")
+                        arg_preview = _fmt_tool_args(name, block.get("input") or {})
+                        elapsed = time.time() - started
+                        print(
+                            f"{dim}   [{elapsed:5.1f}s] → {name}({arg_preview}){reset}",
+                            file=sys.stderr,
+                        )
+                    elif btype == "text":
+                        txt = (block.get("text") or "").strip()
+                        if txt and len(txt) < 120:
+                            print(f"{dim}   … {txt}{reset}", file=sys.stderr)
+                sys.stderr.flush()
+
+            elif etype == "result":
+                final_result = event.get("result") or ""
+                final_session_id = event.get("session_id")
+                final_duration_ms = event.get("duration_ms")
+                is_error = bool(event.get("is_error"))
+
+        proc.wait(timeout=args.timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        print("timed out", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        proc.kill()
+        print("\ninterrupted", file=sys.stderr)
+        sys.exit(130)
+
+    if proc.returncode != 0 and not final_result:
+        err = (proc.stderr.read() if proc.stderr else "") or f"exit {proc.returncode}"
+        print(f"claude failed: {err[:500]}", file=sys.stderr)
+        sys.exit(1)
+
+    resume_cmd = f"claude --resume {final_session_id}" if final_session_id else ""
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "success": not is_error,
+                    "query": query,
+                    "result": final_result,
+                    "session_id": final_session_id,
+                    "duration_ms": final_duration_ms,
+                    "resume_command": resume_cmd,
+                },
+                indent=2,
+            )
+        )
+    elif args.raw:
+        print(final_result or "")
+    else:
+        print(_render_search_human(final_result or "", query, final_duration_ms))
+
+    if final_session_id:
+        footer_stream = sys.stderr if args.raw else sys.stdout
+        print(f"{dim}session: {final_session_id}{reset}", file=footer_stream)
+        print(f"{dim}resume:  {resume_cmd}{reset}", file=footer_stream)
+
+    sys.exit(0 if not is_error else 1)
+
+
 def cmd_embeddings(args: argparse.Namespace) -> None:
     """Show embedding pipeline status: config, LLM backend, Postgres vectors."""
     print(f"AgentiBridge v{_version()} — Embedding Status")
@@ -1647,6 +1904,18 @@ def main() -> None:
     locks_parser = subparsers.add_parser("locks", help="Show Redis keys, file locks, and bridge resource state")
     locks_parser.add_argument("--clear", action="store_true", help="Clear all position locks (forces re-index)")
 
+    # search
+    search_parser = subparsers.add_parser(
+        "search",
+        help='Headless recon: spawn claude -p with a recon prompt wrapped around "<query>"',
+    )
+    search_parser.add_argument("query", nargs="+", help="Query string (quote it)")
+    search_parser.add_argument("--model", default="opus", help="Model (default: opus)")
+    search_parser.add_argument("--timeout", type=int, default=300, help="Timeout seconds (default: 300)")
+    search_parser.add_argument("--instructions", default="", help="Extra instructions appended to prompt")
+    search_parser.add_argument("--raw", action="store_true", help="Print only the agent's result text")
+    search_parser.add_argument("--json", action="store_true", help="Print full JSON envelope (machine-readable)")
+
     # embeddings
     embeddings_parser = subparsers.add_parser("embeddings", help="Show embedding pipeline status")
     embeddings_parser.add_argument(
@@ -1671,6 +1940,7 @@ def main() -> None:
         "uninstall": cmd_uninstall,
         "locks": cmd_locks,
         "embeddings": cmd_embeddings,
+        "search": cmd_search,
     }
 
     if args.command in commands:
