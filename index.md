@@ -22,7 +22,6 @@ Step away from your desk and productivity drops to zero. AgentiBridge makes your
 [![PyPI](https://img.shields.io/pypi/v/agentibridge)](https://pypi.org/project/agentibridge/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clock-Work/agentibridge/blob/main/LICENSE)
 [![Tests](https://github.com/The-Cloud-Clock-Work/agentibridge/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clock-Work/agentibridge/actions/workflows/test.yml)
-[![Docker](https://img.shields.io/docker/v/tccw/agentibridge?label=Docker%20Hub)](https://hub.docker.com/r/tccw/agentibridge)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 {: .text-center .mb-8 }
 
@@ -58,7 +57,19 @@ Anthropic's [Remote Control](https://code.claude.com/docs/en/remote-control) (Fe
 
 ---
 
-## See It In Action
+## See It In Action — `agentibridge search`
+
+![agentibridge search — headless Opus one-shot, live streaming progress, human-readable summary](docs/media/agentibridge-search-demo.png){: .d-block .mx-auto .mb-4 }
+
+One command from any shell. No interactive Claude Code session. No context switch.
+{: .fs-5 .text-center .text-grey-dk-100 .mb-2 }
+
+```bash
+agentibridge search "what was I doing in the email-template session around 20:00?"
+```
+
+Spawns a headless `claude -p --model opus` under the hood, wraps your query in a recon prompt, streams every tool call live to your terminal, and hands you back a human-readable summary with a `claude --resume <session_id>` footer so you can jump in and continue. Also available as the `agent_search` MCP tool for in-client use.
+{: .fs-4 .text-grey-dk-100 .mb-6 }
 
 ![claude.ai using AgentiBridge list_sessions tool](docs/media/examples/claude-ai-list-sessions.jpg){: .d-block .mx-auto .mb-4 }
 
@@ -71,14 +82,14 @@ AgentiBridge works from Claude Code CLI, claude.ai, ChatGPT, and any MCP client.
 
 <div class="feature-grid">
   <div class="feature-card">
-    <img src="{{ '/assets/images/feature-search.svg' | relative_url }}" alt="Semantic Search" class="feature-icon">
-    <h3>Semantic Search</h3>
-    <p>Ask natural language questions across all your past sessions. Powered by pgvector embeddings — no keyword matching needed.</p>
+    <img src="{{ '/assets/images/feature-search.svg' | relative_url }}" alt="Agentic Search" class="feature-icon">
+    <h3>Agentic Search</h3>
+    <p><code>agentibridge search "&lt;q&gt;"</code> spawns a headless Opus one-shot that reasons over your sessions, history, memory, and git — streams live progress, returns a human-readable summary.</p>
   </div>
   <div class="feature-card">
-    <img src="{{ '/assets/images/feature-dispatch.svg' | relative_url }}" alt="Background Dispatch" class="feature-icon">
-    <h3>Background Dispatch</h3>
-    <p>Fire-and-forget task dispatch with session restore. Resume work where you left off, from any device.</p>
+    <img src="{{ '/assets/images/feature-dispatch.svg' | relative_url }}" alt="Background Dispatch &amp; Handoff" class="feature-icon">
+    <h3>Dispatch + Handoff</h3>
+    <p>Fire-and-forget task dispatch with session restore. Seed a fresh conversation in any project with structured context. Resume work where you left off, from any device.</p>
   </div>
   <div class="feature-card">
     <img src="{{ '/assets/images/feature-security.svg' | relative_url }}" alt="Security First" class="feature-icon">
@@ -86,9 +97,9 @@ AgentiBridge works from Claude Code CLI, claude.ai, ChatGPT, and any MCP client.
     <p>OAuth 2.1 with PKCE, API key auth, Cloudflare Tunnel. Fully self-hosted — your data never leaves your infrastructure.</p>
   </div>
   <div class="feature-card">
-    <img src="{{ '/assets/images/feature-multiclient.svg' | relative_url }}" alt="Multi-Client Fleet" class="feature-icon">
-    <h3>Multi-Client Fleet</h3>
-    <p>Works with Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client. One server, all your clients.</p>
+    <img src="{{ '/assets/images/feature-multiclient.svg' | relative_url }}" alt="A2A + Multi-Client Fleet" class="feature-icon">
+    <h3>A2A + Multi-Client</h3>
+    <p>Built-in Agent-to-Agent registry — agents register, heartbeat, discover peers by capability. Works with Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP client.</p>
   </div>
 </div>
 
@@ -167,7 +178,7 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 
 ---
 
-## 16 MCP Tools
+## MCP Tools
 
 ### Foundation
 
@@ -186,14 +197,17 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 |:-----|:-------------|
 | `search_semantic` | Semantic search using embeddings |
 | `generate_summary` | Auto-generate session summary via LLM |
+| `agent_search` | Agentic recon — spawn headless Opus one-shot, return structured matches |
 
-### Dispatch
+### Dispatch + Handoff
 
 | Tool | What it does |
 |:-----|:-------------|
 | `restore_session` | Load session context for continuation |
 | `dispatch_task` | Fire-and-forget background job dispatch |
 | `get_dispatch_job` | Poll a background job for status and output |
+| `plan_task` / `execute_plan` / `get_dispatch_plan` / `list_dispatch_plans` | Plan-first workflows for longer tasks |
+| `list_handoff_projects` / `handoff` | Seed a conversation in another project with structured context |
 
 ### Knowledge Catalog
 
@@ -204,6 +218,13 @@ That's it. Your Claude Code sessions are now searchable from any MCP-compatible 
 | `list_plans` | List plans sorted by recency |
 | `get_plan` | Read a plan by codename |
 | `search_history` | Search the global prompt history |
+
+### Agent-to-Agent Registry
+
+| Tool | What it does |
+|:-----|:-------------|
+| `register_agent` / `heartbeat_agent` / `deregister_agent` | A2A lifecycle |
+| `list_agents` / `get_agent` / `find_agents` | Discover peers by type, status, or capability |
 
 ---
 
@@ -263,14 +284,17 @@ Claude.ai automatically discovers OAuth metadata, registers as a client, and com
 
 ## Deployment Options
 
+AgentiBridge ships as a **pip package only** — no Docker image for the app. The only optional Docker footprint is Redis + Postgres sidecars managed by `agentibridge install`.
+
 | | Minimal | Standard | Production |
 |:--|:--------|:---------|:-----------|
-| **Install** | `pip install agentibridge` | `docker compose up -d` | Docker + Cloudflare Tunnel |
+| **Install** | `pip install agentibridge` | `pip install agentibridge && agentibridge install` | `agentibridge install` + `agentibridge tunnel setup` |
+| **App** | Native Python | Native Python (systemd user unit) | Native Python (systemd user unit) |
 | **Storage** | Filesystem only | Redis + filesystem | Redis + Postgres (pgvector) |
-| **Search** | Keyword only | Keyword only | Keyword + semantic |
-| **Access** | Local only | Local network | Internet (HTTPS) |
+| **Search** | Keyword only | Keyword only | Keyword + semantic + `agent_search` |
+| **Access** | Local only | Local network | Internet (HTTPS via Cloudflare Tunnel) |
 | **Auth** | None | API key | OAuth 2.1 + API key |
-| **Dispatch** | N/A | Local bridge | Remote bridge |
+| **A2A** | Filesystem fallback | Redis-backed | Redis-backed, discoverable over HTTPS |
 
 ---
 
@@ -297,7 +321,13 @@ AgentiBridge is self-hosted, vendor-neutral infrastructure. Native features opti
 <details markdown="block">
 <summary><strong>Do I need Redis and Postgres?</strong></summary>
 
-No. `pip install agentibridge && agentibridge run` works with zero dependencies — filesystem-only storage out of the box. Add Redis for caching and Postgres for semantic search when you need them.
+No. `pip install agentibridge && python -m agentibridge` works with zero dependencies — filesystem-only storage out of the box. `agentibridge install` adds Redis + Postgres sidecars via Docker Compose for caching and semantic search. You can also point at an existing Redis/Postgres by setting `REDIS_URL` / `POSTGRES_URL` in `~/.agentibridge/agentibridge.env`.
+</details>
+
+<details markdown="block">
+<summary><strong>Is there a Docker image for AgentiBridge?</strong></summary>
+
+No. As of v0.5.0 AgentiBridge is a <strong>pip package only</strong> — the app runs natively via systemd. We dropped the app container image to shrink the surface area: one artifact (PyPI), one env file (<code>~/.agentibridge/agentibridge.env</code>), one unit to restart. Only the optional Redis/Postgres sidecars still use Docker.
 </details>
 
 <details markdown="block">
