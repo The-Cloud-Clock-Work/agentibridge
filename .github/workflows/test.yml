@@ -49,8 +49,13 @@ jobs:
         run: ruff format --check agentibridge/ tests/
 
   integration:
+    # Disabled for v0.5.0 — this job shells into a Docker container named
+    # `agentibridge`, but v0.5.0 drops the app Docker image (only Redis +
+    # Postgres sidecars remain in Docker; the app runs natively). The harness
+    # in tests/integration/test_docker.py needs to be rewritten for the native
+    # deployment model before this job can run again.
+    if: false
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
     needs: [unit, lint]
     steps:
       - uses: actions/checkout@v4
