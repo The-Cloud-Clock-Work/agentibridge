@@ -5,7 +5,7 @@ description = "Claude CLI transcript indexer and MCP server"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "The Cloud Clock Work"},
+    {name = "The Cloud Clockwork"},
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
