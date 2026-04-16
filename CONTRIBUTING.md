@@ -99,7 +99,7 @@ Includes:
 
 ### E2E Smoke Tests
 
-End-to-end tests that call all 6 Phase 1 MCP tools via the Claude CLI against a live bridge:
+End-to-end tests that call Phase 1 MCP tools via the Claude CLI against a live bridge:
 
 ```bash
 # Prerequisites:
@@ -112,7 +112,7 @@ End-to-end tests that call all 6 Phase 1 MCP tools via the Claude CLI against a 
 
 These tests:
 - Validate real MCP client → server integration
-- Test all Phase 1 tools: `list_sessions`, `get_session`, `get_session_segment`, `get_session_actions`, `search_sessions`, `collect_now`
+- Test Phase 1 tools: `list_sessions`, `get_session`, `get_session_actions`, `search_sessions`, `collect_now`
 - Run on a daily schedule via GitHub Actions (`e2e-smoke.yml`)
 
 ## Code Quality
