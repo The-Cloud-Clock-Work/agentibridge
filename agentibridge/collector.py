@@ -3,8 +3,11 @@
 Scans ~/.claude/projects/ for JSONL transcript files and incrementally
 indexes new entries into the SessionStore. Runs as a daemon thread
 inside the MCP server process.
+
+Phase 5 additions: memory files, plans, and history scanning.
 """
 
+import json
 import os
 import sys
 import threading
@@ -24,15 +27,14 @@ from agentibridge.store import SessionStore
 class SessionCollector:
     """Incremental transcript collector with background polling."""
 
-    def __init__(self, store: SessionStore) -> None:
+    def __init__(self, store: SessionStore, embedder=None) -> None:
         self._store = store
+        self._embedder = embedder
         self._interval = int(os.getenv("AGENTIBRIDGE_POLL_INTERVAL", "60"))
-        self._projects_dir = Path(
-            os.getenv(
-                "AGENTIBRIDGE_PROJECTS_DIR",
-                str(Path.home() / ".claude" / "projects"),
-            )
-        )
+        _home = Path(os.getenv("CLAUDE_CODE_HOME_DIR", str(Path.home() / ".claude")))
+        self._projects_dir = _home / "projects"
+        self._plans_dir = _home / "plans"
+        self._history_file = _home / "history.jsonl"
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -62,6 +64,7 @@ class SessionCollector:
         files_scanned = 0
         sessions_updated = 0
         entries_added = 0
+        updated_session_ids: list[str] = []
 
         try:
             all_files = scan_projects_dir(self._projects_dir)
@@ -73,6 +76,7 @@ class SessionCollector:
                     if result["updated"]:
                         sessions_updated += 1
                         entries_added += result["entries_added"]
+                        updated_session_ids.append(session_id)
                 except Exception as e:
                     log(
                         "Collector: file scan error",
@@ -86,12 +90,30 @@ class SessionCollector:
         except Exception as e:
             log("Collector: scan error", {"error": str(e)})
 
+        # Phase 5: scan memory files, plans, and history
+        memory_count = self._scan_memory_files()
+        plans_count = self._scan_plans()
+        history_count = self._scan_history()
+
+        # Phase 2: embed updated sessions + backfill un-embedded
+        embedded_count = 0
+        if self._embedder:
+            if updated_session_ids:
+                embedded_count = self._embed_sessions(updated_session_ids)
+            embedded_count += self._backfill_embeddings(
+                exclude=set(updated_session_ids),
+            )
+
         duration_ms = int((time() - start) * 1000)
 
         return {
             "files_scanned": files_scanned,
             "sessions_updated": sessions_updated,
             "entries_added": entries_added,
+            "memory_files_indexed": memory_count,
+            "plans_indexed": plans_count,
+            "history_entries_added": history_count,
+            "sessions_embedded": embedded_count,
             "duration_ms": duration_ms,
         }
 
@@ -100,10 +122,12 @@ class SessionCollector:
         # Initial collection
         try:
             stats = self.collect_once()
+            embedded = stats.get("sessions_embedded", 0)
+            embed_msg = f", {embedded} embedded" if embedded else ""
             print(
                 f"Initial collection: {stats['files_scanned']} files, "
                 f"{stats['sessions_updated']} updated, "
-                f"{stats['entries_added']} entries, "
+                f"{stats['entries_added']} entries{embed_msg}, "
                 f"{stats['duration_ms']}ms",
                 file=sys.stderr,
             )
@@ -142,7 +166,143 @@ class SessionCollector:
         if entries:
             self._store.add_entries(session_id, entries)
 
+        # Extract codename (slug) from first line of transcript
+        codename = self._extract_slug(filepath)
+        if codename:
+            self._store.upsert_codename(codename, session_id, project_encoded)
+
         # Save position
         self._store.save_file_position(str(filepath), new_offset)
 
         return {"updated": True, "entries_added": len(entries)}
+
+    def _extract_slug(self, filepath: Path) -> str:
+        """Read slug from first JSONL entry (cheap — reads one line)."""
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+                if first_line:
+                    return json.loads(first_line).get("slug", "")
+        except Exception:
+            pass
+        return ""
+
+    # ------------------------------------------------------------------
+    # Phase 2: Embedding pass
+    # ------------------------------------------------------------------
+
+    _BACKFILL_BATCH = 10  # max sessions to backfill per cycle
+
+    def _embed_sessions(self, session_ids: list[str]) -> int:
+        """Embed recently-updated sessions. Returns count of sessions embedded."""
+        if not self._embedder.is_available():
+            return 0
+        count = 0
+        for sid in session_ids:
+            try:
+                chunks = self._embedder.embed_session(sid)
+                if chunks > 0:
+                    count += 1
+            except Exception as e:
+                log("Collector: embedding error", {"session_id": sid, "error": str(e)})
+                continue
+        return count
+
+    def _backfill_embeddings(self, exclude: set[str] | None = None) -> int:
+        """Embed sessions in Redis that have no chunks in Postgres yet.
+
+        Processes up to _BACKFILL_BATCH per cycle to avoid overwhelming the
+        LLM API. Returns count of sessions embedded.
+        """
+        if not self._embedder.is_available():
+            return 0
+
+        try:
+            # Get all session IDs from Redis
+            all_ids = self._store.list_session_ids()
+            if not all_ids:
+                return 0
+
+            # Get session IDs that already have embeddings
+            embedded_ids = self._get_embedded_session_ids()
+
+            # Find un-embedded sessions, excluding ones just processed
+            exclude = exclude or set()
+            candidates = [sid for sid in all_ids if sid not in embedded_ids and sid not in exclude]
+            if not candidates:
+                return 0
+
+            batch = candidates[: self._BACKFILL_BATCH]
+            return self._embed_sessions(batch)
+        except Exception as e:
+            log("Collector: backfill error", {"error": str(e)})
+            return 0
+
+    def _get_embedded_session_ids(self) -> set[str]:
+        """Return set of session IDs that already have chunks in Postgres."""
+        try:
+            from agentibridge.pg_client import get_pg
+
+            pool = get_pg()
+            if pool is None:
+                return set()
+            with pool.connection() as conn:
+                rows = conn.execute("SELECT DISTINCT session_id FROM transcript_chunks").fetchall()
+                return {row[0] for row in rows}
+        except Exception:
+            return set()
+
+    # ------------------------------------------------------------------
+    # Phase 5: Knowledge catalog scan passes
+    # ------------------------------------------------------------------
+
+    def _scan_memory_files(self) -> int:
+        """Scan and index memory files from all projects."""
+        try:
+            from agentibridge.catalog import scan_memory_files
+            from agentibridge.config import AGENTIBRIDGE_MAX_MEMORY_CONTENT
+
+            files = scan_memory_files(self._projects_dir, max_content=AGENTIBRIDGE_MAX_MEMORY_CONTENT)
+            for mem in files:
+                self._store.upsert_memory_file(mem)
+            return len(files)
+        except Exception as e:
+            log("Collector: memory scan error", {"error": str(e)})
+            return 0
+
+    def _scan_plans(self) -> int:
+        """Scan and index plan files, resolving codename→session links."""
+        try:
+            from agentibridge.catalog import scan_plans_dir
+
+            plans = scan_plans_dir(self._plans_dir)
+            for plan in plans:
+                # Resolve session_ids via codename index
+                codename = plan.parent_codename if plan.is_agent_plan else plan.codename
+                sessions = self._store.get_sessions_for_codename(codename)
+                if sessions:
+                    plan.session_ids = [s["session_id"] for s in sessions]
+                    plan.project_path = sessions[0].get("project", "")
+                self._store.upsert_plan(plan)
+            return len(plans)
+        except Exception as e:
+            log("Collector: plans scan error", {"error": str(e)})
+            return 0
+
+    def _scan_history(self) -> int:
+        """Incrementally scan and index history.jsonl."""
+        try:
+            from agentibridge.catalog import parse_history
+
+            pos_key = str(self._history_file)
+            offset = self._store.get_file_position(pos_key)
+            entries, new_offset = parse_history(self._history_file, offset=offset)
+
+            if entries:
+                self._store.add_history_entries(entries)
+                self._store.save_file_position(pos_key, new_offset)
+
+            return len(entries)
+        except Exception as e:
+            log("Collector: history scan error", {"error": str(e)})
+            return 0

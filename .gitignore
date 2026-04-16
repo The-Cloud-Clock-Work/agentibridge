@@ -5,7 +5,17 @@ __pycache__/
 dist/
 build/
 .env
+agentibridge.env
 *.log
 .venv/
 venv/
 .coverage
+.claude
+_site/
+.jekyll-cache/
+Gemfile.lock
+.vscode
+CLAUDE.local.md
+.claude/settings.local.json
+
+.claude/CLAUDE.local.md

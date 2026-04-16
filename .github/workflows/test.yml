@@ -49,8 +49,13 @@ jobs:
         run: ruff format --check agentibridge/ tests/
 
   integration:
+    # Disabled for v0.5.0 — this job shells into a Docker container named
+    # `agentibridge`, but v0.5.0 drops the app Docker image (only Redis +
+    # Postgres sidecars remain in Docker; the app runs natively). The harness
+    # in tests/integration/test_docker.py needs to be rewritten for the native
+    # deployment model before this job can run again.
+    if: false
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
     needs: [unit, lint]
     steps:
       - uses: actions/checkout@v4
@@ -63,11 +68,20 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      - name: Create .env from example
-        run: cp .env.example .env
+      - name: Create env from example
+        run: cp agentibridge.env.example agentibridge.env
 
-      - name: Start Docker stack
-        run: docker compose up --build -d
+      - name: Clone test dataset
+        uses: actions/checkout@v4
+        with:
+          repository: The-Cloud-Clock-Work/bridge-smoke-dataset
+          token: ${{ secrets.ORG_GITHUB_TOKEN }}
+          path: bridge-smoke-dataset
+
+      - name: Start Docker stack with test data
+        run: |
+          echo "CLAUDE_DIR=${{ github.workspace }}/bridge-smoke-dataset/.claude" >> agentibridge.env
+          docker compose up --build -d
 
       - name: Wait for services
         run: |
@@ -86,8 +100,37 @@ jobs:
             sleep 1
           done
 
+      - name: Trigger initial collection
+        run: |
+          docker exec agentibridge python3 -c "
+          import sys; sys.path.insert(0, '/app')
+          import os; os.environ['AGENTIBRIDGE_ENABLED'] = 'false'
+          from agentibridge.collector import SessionCollector
+          from agentibridge.store import SessionStore
+          store = SessionStore()
+          c = SessionCollector(store)
+          stats = c.collect_once()
+          print(f'Collected: {stats}')
+          assert stats['files_scanned'] >= 4, f'Expected >=4 files, got {stats[\"files_scanned\"]}'
+          "
+
       - name: Run integration tests
-        run: python tests/integration/test_docker.py --test
+        run: python tests/integration/test_docker.py --test --report test-report.md
+
+      - name: Publish test report
+        if: always()
+        run: |
+          if [ -f test-report.md ]; then
+            cat test-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-report
+          path: test-report.md
+          if-no-files-found: ignore
 
       - name: Stop Docker stack
         if: always()

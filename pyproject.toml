@@ -1,11 +1,11 @@
 [project]
 name = "agentibridge"
-version = "0.2.1"
+version = "0.5.0"
 description = "Claude CLI transcript indexer and MCP server"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "The Cloud Clock Work"},
+    {name = "The Cloud Clockwork"},
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -26,6 +26,7 @@ dependencies = [
     "anthropic>=0.40",
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.1",
+    "python-dotenv>=1.0",
 ]
 
 [project.urls]
@@ -54,7 +55,7 @@ build-backend = "setuptools.build_meta"
 include = ["agentibridge*"]
 
 [tool.setuptools.package-data]
-agentibridge = ["data/*"]
+agentibridge = ["data/*", "data/.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

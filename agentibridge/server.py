@@ -8,7 +8,7 @@ for new data; all tools work with Redis or filesystem fallback.
 Usage:
     python -m agentibridge
 
-Available tools:
+Available tools (17):
     Phase 1 — Foundation:
     - list_sessions       — List sessions across all projects
     - get_session         — Get full session metadata + transcript
@@ -22,10 +22,19 @@ Available tools:
     Phase 4 — Write-back & Dispatch:
     - restore_session     — Load session context for continuation
     - dispatch_task       — Dispatch a task with optional session context
+    - get_dispatch_job    — Poll background job status
+    - list_dispatch_jobs  — List dispatch jobs with optional status filter
+    Phase 5 — Knowledge Catalog:
+    - list_memory_files   — List memory files across projects
+    - get_memory_file     — Read a specific memory file
+    - list_plans          — List plans sorted by recency
+    - get_plan            — Read a plan by codename
+    - search_history      — Search global prompt history
 """
 
 import json
 import os
+from pathlib import Path
 import sys
 from typing import Dict
 
@@ -115,10 +124,13 @@ def _get_store():
 def _get_collector():
     global _collector
     if _collector is None:
+        from agentibridge.config import AGENTIBRIDGE_ENABLED, AGENTIBRIDGE_EMBEDDING_ENABLED
         from agentibridge.collector import SessionCollector
 
-        _collector = SessionCollector(_get_store())
-        _collector.start()
+        embedder = _get_embedder() if AGENTIBRIDGE_EMBEDDING_ENABLED else None
+        _collector = SessionCollector(_get_store(), embedder=embedder)
+        if AGENTIBRIDGE_ENABLED:
+            _collector.start()
     return _collector
 
 
@@ -381,6 +393,76 @@ def search_sessions(
 
 
 @mcp.tool()
+def agent_search(
+    query: str,
+    model: str = "opus",
+    timeout: int = 300,
+    extra_instructions: str = "",
+) -> str:
+    """Reconnaissance search via a headless Claude Code one-shot.
+
+    Wraps the operator's ``query`` in a recon prompt and invokes ``claude -p``
+    (bypass permissions, chosen model) to do the legwork — grepping sessions,
+    history, files, memory, plans — and return a structured answer.
+
+    Use when a single keyword/semantic search is not enough and you want an
+    agent to reason over the results. Cheaper than spinning up an interactive
+    Claude Code session just to look something up.
+
+    Args:
+        query: The operator's question (the bit that was in quotes).
+        model: Model for the one-shot (default: "opus").
+        timeout: Max seconds to wait for the CLI (default: 300).
+        extra_instructions: Optional extra context appended to the prompt.
+
+    Returns:
+        JSON: {success, query, result, session_id, duration_ms, error}.
+        ``result`` is the agent's answer (ideally JSON with matches, but
+        free-form is tolerated).
+    """
+    from agentibridge.claude_runner import run_claude_sync
+
+    prompt = (
+        "You are a reconnaissance helper for the agentibridge fleet. "
+        "The operator asked:\n\n"
+        f"  {query}\n\n"
+        "Use the MCP tools available to you (list_sessions, search_sessions, "
+        "search_history, search_semantic, get_session, list_memory_files, "
+        "list_plans, plus Read/Glob/Grep) to find the most relevant sessions, "
+        "files, history entries, memory files, or plans that match the query. "
+        "Return ONLY a compact JSON object of the form:\n"
+        '  {"success": true, "query": "<echo>", "count": N, '
+        '"matches": [ {...relevant fields per hit...} ], '
+        '"notes": "<one short sentence of context, optional>"}\n'
+        "Put the most relevant hits first. No prose outside the JSON."
+    )
+    if extra_instructions:
+        prompt += f"\n\nAdditional instructions:\n{extra_instructions}"
+
+    try:
+        result = run_claude_sync(
+            prompt,
+            model=model,
+            timeout=timeout,
+            permission_mode="bypassPermissions",
+        )
+        return json.dumps(
+            {
+                "success": result.success,
+                "query": query,
+                "result": result.result,
+                "session_id": result.session_id,
+                "duration_ms": result.duration_ms,
+                "timed_out": result.timed_out,
+                "error": result.error,
+            }
+        )
+    except Exception as e:
+        log("MCP agent_search failed", {"query": query, "error": str(e)})
+        return json.dumps({"success": False, "query": query, "error": str(e)})
+
+
+@mcp.tool()
 def collect_now() -> str:
     """Trigger immediate transcript collection.
 
@@ -601,6 +683,768 @@ async def get_dispatch_job(job_id: str) -> str:
     return json.dumps({"success": True, **data})
 
 
+@mcp.tool()
+async def list_dispatch_jobs(status: str = "", limit: int = 20) -> str:
+    """List dispatch jobs with optional status filter.
+
+    Returns job summaries (newest first) without the full output field,
+    so the response stays compact even with many jobs.
+
+    Args:
+        status: Filter by status ("running", "completed", "failed"). Empty = all.
+        limit: Maximum number of jobs to return (default: 20)
+
+    Returns:
+        JSON with jobs list and count
+    """
+    try:
+        from agentibridge.dispatch import list_jobs
+
+        jobs = list_jobs(status=status, limit=limit)
+        return json.dumps({"success": True, "count": len(jobs), "jobs": jobs})
+
+    except Exception as e:
+        log("MCP list_dispatch_jobs failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# =============================================================================
+# PHASE 4b — DISPATCH PLANS (plan-then-execute workflow)
+# =============================================================================
+
+
+@mcp.tool()
+async def plan_task(
+    task: str,
+    repo_url: str = "",
+    wait: bool = False,
+    timeout: int = 0,
+) -> str:
+    """Create an implementation plan without executing it.
+
+    Runs Claude in read-only mode (Read, Glob, Grep only) to analyse the
+    codebase and produce a markdown plan. The plan can later be executed
+    with execute_plan.
+
+    Args:
+        task: What to plan (same format as dispatch_task)
+        repo_url: Repo to analyse (optional)
+        wait: Block until plan is ready (default: false)
+        timeout: Timeout in seconds (0 = use default from env)
+
+    Returns:
+        JSON with plan_id, job_id, status, and (if wait=true) the plan content
+    """
+    try:
+        from agentibridge.plans import submit_plan
+
+        result = await submit_plan(task=task, repo_url=repo_url, wait=wait, timeout=timeout)
+        return json.dumps({"success": True, **result})
+
+    except Exception as e:
+        log("MCP plan_task failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def get_dispatch_plan(plan_id: str) -> str:
+    """Get a plan by ID, including its markdown content once ready.
+
+    Args:
+        plan_id: Plan UUID returned by plan_task
+
+    Returns:
+        JSON with plan details including status and content
+    """
+    try:
+        from agentibridge.plans import get_plan_status
+
+        data = get_plan_status(plan_id)
+        if data is None:
+            return json.dumps({"success": False, "error": f"Plan not found: {plan_id}"})
+        return json.dumps({"success": True, **data})
+
+    except Exception as e:
+        log("MCP get_dispatch_plan failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def list_dispatch_plans(status: str = "", limit: int = 20) -> str:
+    """List dispatch plans with optional status filter.
+
+    Returns plan summaries (newest first) without the content field,
+    so the response stays compact even with many plans.
+
+    Args:
+        status: Filter by status (planning/ready/failed/executing/completed). Empty = all.
+        limit: Maximum number of plans to return (default: 20)
+
+    Returns:
+        JSON with plans list and count
+    """
+    try:
+        from agentibridge.plans import list_plans as list_dispatch_plans_fn
+
+        plans = list_dispatch_plans_fn(status=status, limit=limit)
+        return json.dumps({"success": True, "count": len(plans), "plans": plans})
+
+    except Exception as e:
+        log("MCP list_dispatch_plans failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def execute_plan(
+    plan_id: str,
+    repo_url: str = "",
+    wait: bool = False,
+    timeout: int = 0,
+) -> str:
+    """Execute a ready plan by ID.
+
+    Submits a normal coding job with the plan injected as context.
+
+    Args:
+        plan_id: Plan ID returned by plan_task
+        repo_url: Override repo URL (defaults to the one used when planning)
+        wait: Block until execution completes
+        timeout: Timeout in seconds (0 = use default from env)
+
+    Returns:
+        JSON with job_id and status
+    """
+    try:
+        from agentibridge.plans import execute_plan as execute_plan_fn
+
+        result = await execute_plan_fn(plan_id=plan_id, repo_url=repo_url, wait=wait, timeout=timeout)
+        return json.dumps({"success": True, **result})
+
+    except ValueError as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+    except Exception as e:
+        log("MCP execute_plan failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# =============================================================================
+# HANDOFF — Cross-project context transfer
+# =============================================================================
+
+
+@mcp.tool()
+def list_handoff_projects() -> str:
+    """List available projects for handoff.
+
+    Scans ~/.claude/projects/ and returns decoded project paths with
+    session counts. Use this to discover valid targets for the handoff tool.
+
+    Returns:
+        JSON with projects list
+    """
+    try:
+        from agentibridge.catalog import list_projects
+        from agentibridge.config import CLAUDE_CODE_HOME_DIR
+
+        base_dir = Path(CLAUDE_CODE_HOME_DIR) / "projects"
+        projects = list_projects(base_dir)
+
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(projects),
+                "projects": [p.to_dict() for p in projects],
+            }
+        )
+
+    except Exception as e:
+        log("MCP list_handoff_projects failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def handoff(
+    project_path: str,
+    summary: str,
+    decisions: str,
+    next_steps: str,
+    context: str = "",
+    source_session_id: str = "",
+    model: str = "sonnet",
+) -> str:
+    """Hand off context to a target project as a new conversation.
+
+    Creates a seeded Claude session in the target project with structured
+    context (summary, decisions, next steps). Blocks until the session is
+    created. Returns the session_id so the operator can resume with:
+        claude --resume <session_id>
+
+    The project_path can be a full path, an encoded project name, or a
+    fuzzy name like "agenticore" — it will be resolved against known projects.
+
+    Args:
+        project_path: Target project path or fuzzy name (e.g., "agenticore")
+        summary: What was accomplished in the current session
+        decisions: Key decisions made
+        next_steps: What the target session should do
+        context: Optional freeform additional context
+        source_session_id: Optional session to pull extra context from
+        model: Model for the target session (default: sonnet)
+
+    Returns:
+        JSON with session_id, project_path, output, duration_ms
+    """
+    try:
+        from agentibridge.catalog import resolve_project
+        from agentibridge.config import CLAUDE_CODE_HOME_DIR
+        from agentibridge.dispatch import handoff as _handoff
+
+        # Resolve fuzzy project name to full path
+        resolved_path = project_path
+        if not Path(project_path).is_absolute():
+            base_dir = Path(CLAUDE_CODE_HOME_DIR) / "projects"
+            match = resolve_project(base_dir, project_path)
+            if match is None:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Project not found: {project_path}",
+                    }
+                )
+            resolved_path = match.path
+
+        result = await _handoff(
+            project_path=resolved_path,
+            summary=summary,
+            decisions=decisions,
+            next_steps=next_steps,
+            context=context,
+            source_session_id=source_session_id,
+            model=model,
+        )
+
+        return json.dumps(result)
+
+    except Exception as e:
+        log("MCP handoff failed", {"project": project_path, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# =============================================================================
+# PHASE 5 — KNOWLEDGE CATALOG (Memory, Plans, History)
+# =============================================================================
+
+
+@mcp.tool()
+def list_memory_files(project: str = "") -> str:
+    """List all memory files across projects.
+
+    Memory files (~/.claude/projects/{project}/memory/*.md) contain curated
+    project knowledge — the highest-signal content per project.
+
+    Args:
+        project: Filter by project path substring (e.g., "agentibridge")
+
+    Returns:
+        JSON with files list
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        files = store.list_memory_files(project=project if project else None)
+
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(files),
+                "files": [
+                    {
+                        "project_path": f.project_path,
+                        "project_encoded": f.project_encoded,
+                        "filename": f.filename,
+                        "file_size_bytes": f.file_size_bytes,
+                        "last_modified": f.last_modified,
+                    }
+                    for f in files
+                ],
+            }
+        )
+
+    except Exception as e:
+        log("MCP list_memory_files failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def get_memory_file(project: str, filename: str = "MEMORY.md") -> str:
+    """Read a specific memory file's content.
+
+    Args:
+        project: Project encoded name (e.g., "-home-user-dev-myapp")
+        filename: Memory filename (default: "MEMORY.md")
+
+    Returns:
+        JSON with project_path, filename, content, file_size_bytes, last_modified
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        mem = store.get_memory_file(project, filename)
+        if mem is None:
+            return json.dumps({"success": False, "error": f"Memory file not found: {project}/{filename}"})
+
+        return json.dumps(
+            {
+                "success": True,
+                "project_path": mem.project_path,
+                "project_encoded": mem.project_encoded,
+                "filename": mem.filename,
+                "content": mem.content,
+                "file_size_bytes": mem.file_size_bytes,
+                "last_modified": mem.last_modified,
+            }
+        )
+
+    except Exception as e:
+        log("MCP get_memory_file failed", {"project": project, "filename": filename, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def list_plans(
+    project: str = "",
+    codename: str = "",
+    limit: int = 30,
+    offset: int = 0,
+    include_agent_plans: bool = False,
+) -> str:
+    """List plans sorted by recency.
+
+    Plans (~/.claude/plans/*.md) are detailed implementation blueprints
+    linked to sessions via the codename/slug field.
+
+    Args:
+        project: Filter by project path substring
+        codename: Filter by codename substring
+        limit: Maximum plans to return (default: 30)
+        offset: Skip first N results for pagination
+        include_agent_plans: Include agent subplans (default: False)
+
+    Returns:
+        JSON with plans list
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        plans = store.list_plans(
+            project=project if project else None,
+            codename=codename if codename else None,
+            limit=limit,
+            offset=offset,
+            include_agent_plans=include_agent_plans,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "count": len(plans),
+                "offset": offset,
+                "plans": [
+                    {
+                        "codename": p.codename,
+                        "file_size_bytes": p.file_size_bytes,
+                        "last_modified": p.last_modified,
+                        "is_agent_plan": p.is_agent_plan,
+                        "parent_codename": p.parent_codename,
+                        "session_ids": p.session_ids,
+                        "project_path": p.project_path,
+                    }
+                    for p in plans
+                ],
+            }
+        )
+
+    except Exception as e:
+        log("MCP list_plans failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def get_plan(codename: str, include_agent_plans: bool = False) -> str:
+    """Read a plan by codename.
+
+    Args:
+        codename: Plan codename (e.g., "cached-wondering-sloth")
+        include_agent_plans: Include agent subplans (default: False)
+
+    Returns:
+        JSON with codename, content, session_ids, project_path, agent_plans
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        result = store.get_plan(codename, include_agent_plans=include_agent_plans)
+        if result is None:
+            return json.dumps({"success": False, "error": f"Plan not found: {codename}"})
+
+        plan = result["plan"]
+        response = {
+            "success": True,
+            "codename": plan.codename,
+            "content": plan.content,
+            "file_size_bytes": plan.file_size_bytes,
+            "last_modified": plan.last_modified,
+            "session_ids": plan.session_ids,
+            "project_path": plan.project_path,
+        }
+
+        if include_agent_plans:
+            response["agent_plans"] = [
+                {
+                    "codename": ap.codename,
+                    "content": ap.content,
+                    "file_size_bytes": ap.file_size_bytes,
+                    "last_modified": ap.last_modified,
+                }
+                for ap in result["agent_plans"]
+            ]
+        else:
+            response["agent_plans"] = []
+
+        return json.dumps(response)
+
+    except Exception as e:
+        log("MCP get_plan failed", {"codename": codename, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def search_history(
+    query: str = "",
+    project: str = "",
+    session_id: str = "",
+    limit: int = 20,
+    offset: int = 0,
+    since: str = "",
+) -> str:
+    """Search the global prompt history.
+
+    History (~/.claude/history.jsonl) contains every user prompt across all
+    sessions with timestamps, project paths, and session UUIDs.
+
+    Args:
+        query: Search keyword or phrase (empty = all)
+        project: Filter by project path substring
+        session_id: Filter by session UUID
+        limit: Maximum results (default: 20)
+        offset: Skip first N results for pagination
+        since: ISO timestamp — only entries after this time
+
+    Returns:
+        JSON with entries list and total count
+    """
+    try:
+        _get_collector()
+        store = _get_store()
+
+        entries, total = store.search_history(
+            query=query,
+            project=project if project else None,
+            session_id=session_id if session_id else None,
+            limit=limit,
+            offset=offset,
+            since=since,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "total": total,
+                "count": len(entries),
+                "offset": offset,
+                "entries": [e.to_dict() for e in entries],
+            }
+        )
+
+    except Exception as e:
+        log("MCP search_history failed", {"query": query, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# =============================================================================
+# PHASE 6 — AGENT REGISTRY (A2A Discovery)
+# =============================================================================
+
+
+@mcp.tool()
+def register_agent(
+    agent_id: str,
+    agent_name: str = "",
+    agent_type: str = "",
+    capabilities: str = "[]",
+    endpoint: str = "",
+    metadata: str = "{}",
+    heartbeat_ttl: int = 300,
+) -> str:
+    """Register an agent for A2A discovery.
+
+    Agents call this on boot to announce themselves. Idempotent — safe to
+    call repeatedly (upsert). Capabilities and metadata are JSON strings.
+
+    Args:
+        agent_id: Unique agent identifier (e.g., "agenticore-dev-0")
+        agent_name: Human-readable name
+        agent_type: Category (e.g., "executor", "observer", "specialist")
+        capabilities: JSON array of capability strings
+        endpoint: How to reach this agent (URL)
+        metadata: JSON object with arbitrary key-value pairs
+        heartbeat_ttl: Seconds before agent is considered offline (default: 300)
+
+    Returns:
+        JSON with registration result
+    """
+    try:
+        from agentibridge.registry import register_agent as _register
+
+        caps = json.loads(capabilities) if capabilities else []
+        meta = json.loads(metadata) if metadata else {}
+        result = _register(
+            agent_id=agent_id,
+            agent_name=agent_name,
+            agent_type=agent_type,
+            capabilities=caps,
+            endpoint=endpoint,
+            metadata=meta,
+            heartbeat_ttl=heartbeat_ttl,
+        )
+        return json.dumps({"success": True, **result})
+    except Exception as e:
+        log("MCP register_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def deregister_agent(agent_id: str) -> str:
+    """Remove an agent from the registry.
+
+    Args:
+        agent_id: Agent identifier to remove
+
+    Returns:
+        JSON with deletion result
+    """
+    try:
+        from agentibridge.registry import deregister_agent as _deregister
+
+        result = _deregister(agent_id)
+        return json.dumps({"success": True, **result})
+    except Exception as e:
+        log("MCP deregister_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def heartbeat_agent(
+    agent_id: str,
+    status: str = "online",
+    metadata: str = "{}",
+) -> str:
+    """Update agent heartbeat timestamp and status.
+
+    Agents call this periodically to signal liveness. If no heartbeat
+    is received within heartbeat_ttl, the agent is reported as offline.
+
+    Args:
+        agent_id: Agent identifier
+        status: Current status ("online", "degraded")
+        metadata: JSON object merged into existing metadata
+
+    Returns:
+        JSON with heartbeat result
+    """
+    try:
+        from agentibridge.registry import heartbeat_agent as _heartbeat
+
+        meta = json.loads(metadata) if metadata else {}
+        result = _heartbeat(agent_id=agent_id, status=status, metadata=meta)
+        return json.dumps({"success": True, **result})
+    except Exception as e:
+        log("MCP heartbeat_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def list_agents(
+    agent_type: str = "",
+    capability: str = "",
+    status: str = "",
+    limit: int = 50,
+) -> str:
+    """List registered agents with optional filters.
+
+    Args:
+        agent_type: Filter by agent type (e.g., "executor")
+        capability: Filter by capability (e.g., "profile:coding")
+        status: Filter by effective status ("online", "offline", "degraded")
+        limit: Maximum agents to return (default: 50)
+
+    Returns:
+        JSON with agents list and count
+    """
+    try:
+        from agentibridge.registry import list_agents as _list
+
+        agents = _list(
+            agent_type=agent_type,
+            capability=capability,
+            status=status,
+            limit=limit,
+        )
+        return json.dumps({"success": True, "count": len(agents), "agents": agents})
+    except Exception as e:
+        log("MCP list_agents failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def get_agent(agent_id: str) -> str:
+    """Get full details of a registered agent.
+
+    Args:
+        agent_id: Agent identifier
+
+    Returns:
+        JSON with agent record including effective_status
+    """
+    try:
+        from agentibridge.registry import get_agent as _get
+
+        agent = _get(agent_id)
+        if agent is None:
+            return json.dumps({"success": False, "error": f"Agent not found: {agent_id}"})
+        return json.dumps({"success": True, "agent": agent})
+    except Exception as e:
+        log("MCP get_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def find_agents(capability: str) -> str:
+    """Find agents that have a specific capability.
+
+    Args:
+        capability: Capability string (e.g., "run_task", "profile:coding", "agent_mode")
+
+    Returns:
+        JSON with matching agents
+    """
+    try:
+        from agentibridge.registry import find_agents as _find
+
+        agents = _find(capability)
+        return json.dumps(
+            {
+                "success": True,
+                "capability": capability,
+                "count": len(agents),
+                "agents": agents,
+            }
+        )
+    except Exception as e:
+        log("MCP find_agents failed", {"capability": capability, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def run_agent(
+    agent_id: str,
+    task: str,
+    profile: str = "",
+    repo_url: str = "",
+    wait: bool = False,
+    file_path: str = "",
+) -> str:
+    """Route a task to a specific registered agent.
+
+    Looks up the agent in the registry, checks it's online and has capacity,
+    then forwards the task to its REST API. Returns job_id from the target agent.
+
+    Args:
+        agent_id: Target agent identifier (e.g., "agenticore-0", "publishing-agent-0")
+        task: What the agent should do
+        profile: Execution profile (optional — agent uses its default if omitted)
+        repo_url: GitHub repo URL (optional)
+        wait: If true, block until job completes (default: false)
+        file_path: Path to .mcp.json on shared FS (optional)
+
+    Returns:
+        JSON with success, agent_id, job details, or error with retry flag
+    """
+    try:
+        from agentibridge.registry import route_to_agent
+
+        result = await route_to_agent(
+            agent_id=agent_id,
+            task=task,
+            profile=profile,
+            repo_url=repo_url,
+            wait=wait,
+            file_path=file_path,
+        )
+        return json.dumps(result)
+    except Exception as e:
+        log("MCP run_agent failed", {"agent_id": agent_id, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def dispatch_to_agent(
+    capability: str,
+    task: str,
+    profile: str = "",
+    repo_url: str = "",
+    wait: bool = False,
+    file_path: str = "",
+) -> str:
+    """Route a task to the best available agent with a specific capability.
+
+    Finds all online agents with the capability, picks the one with most
+    available capacity, and forwards the task. Returns job_id from the
+    selected agent.
+
+    Args:
+        capability: Required capability (e.g., "profile:coding", "agent:publishing", "agent_mode")
+        task: What the agent should do
+        profile: Execution profile (optional)
+        repo_url: GitHub repo URL (optional)
+        wait: If true, block until job completes (default: false)
+        file_path: Path to .mcp.json on shared FS (optional)
+
+    Returns:
+        JSON with success, agent_id, routed_by, job details, or error with retry flag
+    """
+    try:
+        from agentibridge.registry import route_by_capability
+
+        result = await route_by_capability(
+            capability=capability,
+            task=task,
+            profile=profile,
+            repo_url=repo_url,
+            wait=wait,
+            file_path=file_path,
+        )
+        return json.dumps(result)
+    except Exception as e:
+        log("MCP dispatch_to_agent failed", {"capability": capability, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -608,8 +1452,17 @@ async def get_dispatch_job(job_id: str) -> str:
 
 def main():
     """Run the AgentiBridge MCP server."""
+    from agentibridge.config import AGENTIBRIDGE_REMOVE_TOOLS
+
     print("Starting AgentiBridge MCP server...", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
+
+    for name in AGENTIBRIDGE_REMOVE_TOOLS:
+        try:
+            mcp._tool_manager.remove_tool(name)
+            print(f"  Removed tool: {name}", file=sys.stderr)
+        except Exception:
+            print(f"  Warning: tool '{name}' not found, skipping", file=sys.stderr)
 
     available_tools = mcp._tool_manager.list_tools()
     print(f"Available tools: {len(available_tools)}", file=sys.stderr)
@@ -617,6 +1470,9 @@ def main():
         print(f"  - {tool.name}", file=sys.stderr)
 
     print("=" * 60, file=sys.stderr)
+
+    # Start collector eagerly so indexing + embedding begin immediately
+    _get_collector()
 
     transport = os.getenv("AGENTIBRIDGE_TRANSPORT", "stdio")
     if transport == "sse":

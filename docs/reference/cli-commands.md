@@ -1,3 +1,8 @@
+---
+title: CLI Commands
+nav_order: 1
+---
+
 # CLI Command Reference
 
 Complete reference for the `agentibridge` command-line tool.
@@ -6,20 +11,20 @@ Complete reference for the `agentibridge` command-line tool.
 
 ## Docker Stack
 
-### `agentibridge run`
+### `agentibridge install`
 
 Start the Docker stack (AgentiBridge + Redis + Postgres).
 
 ```
-agentibridge run [--rebuild]
+agentibridge install [--rebuild] [--test]
 ```
 
-On first run, copies the bundled `docker-compose.yml` and `.env.example` template to
-`~/.config/agentibridge/`. If `.env` does not yet exist the command exits immediately
+On first run, copies the bundled `docker-compose.yml` and `agentibridgeagentibridge.env.example` template to
+`~/.agentibridge/`. If `agentibridge.env` does not yet exist the command exits immediately
 with instructions to edit it before retrying.
 
 Before starting, the command validates that all [required env vars](#env-required-variables)
-are present in `.env`. If any are missing it prints them and exits with code 1.
+are present in `agentibridge.env`. If any are missing it prints them and exits with code 1.
 
 State detection:
 - **running** — prints advisory, pulls latest images, and restarts
@@ -31,6 +36,36 @@ State detection:
 | Flag | Description |
 |------|-------------|
 | `--rebuild` | Force `--pull always --build` before starting (equivalent to `docker compose up --build --pull always -d`) |
+| `--test` | Dev mode: build from local source with fresh config (see below) |
+
+#### `--test` — Local dev testing mode
+
+For developing AgentiBridge itself. Must be run from the repo root (where `Dockerfile` and
+`docker-compose.yml` exist).
+
+```bash
+cd ~/dev/agentibridge
+pip install -e .
+agentibridge install --test
+```
+
+**Which files each mode uses:**
+
+| Mode | Compose file | Env file | Image |
+|------|-------------|----------|-------|
+| `agentibridge install` | `~/.agentibridge/docker-compose.yml` | `~/.agentibridge/agentibridge.env` | Pulls from Docker Hub |
+| `agentibridge install --test` | `./docker-compose.yml` (repo root) | `./.env` (repo root) | Builds from local Dockerfile |
+
+> **Important:** Each mode reads a different env file. If you configure embedding or auth vars in `agentibridge.env`, those won't be seen by `--test` unless you also set them in the repo root `.env` (and vice versa).
+
+What it does:
+
+1. **Ensures `~/.agentibridge/` exists** — creates it from templates if missing. Never removes or overwrites an existing directory.
+2. **Ensures `.env`** — copies `agentibridge.env.example` to `.env` at the repo root if it doesn't exist.
+3. **Builds from local source** — runs `docker compose -f docker-compose.yml --env-file .env up --build -d`
+   using the repo root compose file (which has `build: context: .`) instead of the pip-distributed
+   compose file that pulls `tccw/agentibridge:latest` from Docker Hub.
+4. **Auto-starts the dispatch (native)** if `DISPATCH_SECRET` is configured in the repo root `.env`.
 
 ---
 
@@ -42,7 +77,7 @@ Stop the Docker stack.
 agentibridge stop
 ```
 
-Runs `docker compose down` against the managed stack in `~/.config/agentibridge/`.
+Runs `docker compose down` against the managed stack in `~/.agentibridge/`.
 
 ---
 
@@ -55,6 +90,13 @@ agentibridge restart
 ```
 
 Runs `docker compose restart`.
+
+> **Important:** `restart` does **not** reload `agentibridge.env`. Docker Compose `restart` only sends SIGHUP to existing containers — environment variables are baked in at container creation time. If you changed `agentibridge.env` (e.g., enabled OAuth, changed API keys, updated ports), you must recreate the containers:
+>
+> ```bash
+> agentibridge stop   # docker compose down
+> agentibridge install    # docker compose up -d (recreates with new env)
+> ```
 
 ---
 
@@ -140,49 +182,49 @@ source (`env` = set in environment, `default` = using built-in default).
 
 ## Dispatch Bridge
 
-The dispatch bridge is a host-side HTTP proxy that allows the Dockerised AgentiBridge
+The dispatch (native) is a host-side HTTP proxy that allows the Dockerised AgentiBridge
 container to call the Claude CLI binary installed on the host machine.
 
 ### `agentibridge bridge start`
 
-Start the dispatch bridge as a detached background process.
+Start the dispatch (native) as a detached background process.
 
 ```
 agentibridge bridge start
 ```
 
 Reads `DISPATCH_SECRET` and `DISPATCH_BRIDGE_PORT` (default `8101`) from
-`~/.config/agentibridge/.env`. If `DISPATCH_SECRET` is not set the command exits
+`~/.agentibridge/agentibridge.env`. If `DISPATCH_SECRET` is not set the command exits
 with an error.
 
 Checks whether an existing bridge process is already running (via `pgrep`) and
 exits early if so.
 
-Log output is written to `/tmp/dispatch_bridge.log`.
+Log output is written to `/tmp/dispatch.log`.
 
 ---
 
 ### `agentibridge bridge stop`
 
-Stop the dispatch bridge.
+Stop the dispatch (native).
 
 ```
 agentibridge bridge stop
 ```
 
-Sends SIGTERM to all `agentibridge.dispatch_bridge` processes found by `pgrep`.
+Sends SIGTERM to all `agentibridge.dispatch` processes found by `pgrep`.
 
 ---
 
 ### `agentibridge bridge logs`
 
-Tail the dispatch bridge log file.
+Tail the dispatch (native) log file.
 
 ```
 agentibridge bridge logs
 ```
 
-Runs `tail -f /tmp/dispatch_bridge.log`. Exits with code 1 if the log file does
+Runs `tail -f /tmp/dispatch.log`. Exits with code 1 if the log file does
 not exist.
 
 ---
@@ -197,12 +239,14 @@ Show Cloudflare Tunnel container state and the active URL.
 agentibridge tunnel [status]
 ```
 
-Inspects the `agentibridge-tunnel` Docker container. Outputs differ by mode:
+Checks both the `agentibridge-tunnel` Docker container and the `cloudflared` systemd service. Outputs differ by mode:
 
-- **Quick tunnel** — prints the `*.trycloudflare.com` URL and a ready-to-paste
+- **Quick tunnel (Docker)** — prints the `*.trycloudflare.com` URL and a ready-to-paste
   `~/.mcp.json` snippet including an API key (if `AGENTIBRIDGE_API_KEYS` is set).
-- **Named tunnel** — confirms connected state and directs you to the Cloudflare
+- **Named tunnel (Docker)** — confirms connected state and directs you to the Cloudflare
   Zero Trust dashboard for the hostname.
+- **Systemd service** — shows tunnel ID, hostname, service target, and credentials path
+  from `~/.cloudflared/config.yml`, plus a ready-to-paste `~/.mcp.json` snippet.
 - **Not running** — prints start instructions for both quick and named tunnel modes.
 
 ---
@@ -264,7 +308,7 @@ Install AgentiBridge as a systemd user service.
 agentibridge install [--docker | --native]
 ```
 
-Creates `~/.config/agentibridge/env` (if absent), copies the appropriate `.service`
+Creates `~/.agentibridge/env` (if absent), copies the appropriate `.service`
 file to `~/.config/systemd/user/`, then runs `systemctl --user enable --now agentibridge`.
 
 **Flags**
@@ -285,7 +329,7 @@ agentibridge uninstall
 ```
 
 Stops and disables the service, removes the `.service` file, and reloads systemd.
-Config files in `~/.config/agentibridge/` are **not** removed.
+Config files in `~/.agentibridge/` are **not** removed.
 
 ---
 
@@ -313,26 +357,51 @@ Sections:
 
 ---
 
-## `.env` Required Variables
+### `agentibridge embeddings`
+
+Show the full embedding pipeline status: configuration, LLM backend connectivity, Postgres vector storage stats, and embedding coverage.
+
+```
+agentibridge embeddings [--check-llm]
+```
+
+Sections:
+
+| Section | Content |
+|---------|---------|
+| `[Config]` | `AGENTIBRIDGE_EMBEDDING_ENABLED`, `LLM_API_BASE`, `LLM_API_KEY` (redacted), `LLM_EMBED_MODEL`, `PGVECTOR_DIMENSIONS` |
+| `[LLM Backend]` | Whether the LLM endpoint is configured; with `--check-llm`, sends a test embedding request |
+| `[Postgres]` | Connection status, `transcript_chunks` table existence, total chunks, sessions embedded, table size, last embedded timestamp |
+| `[Coverage]` | Total sessions in Redis vs sessions with embeddings, with a coverage percentage |
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--check-llm` | Send a real (tiny) embedding request to the LLM endpoint to verify connectivity. Off by default to avoid API costs/latency |
+
+---
+
+## `agentibridge.env` Required Variables
 
 The following variables are validated by `_validate_env` before every
 `run`, `stop`, `restart`, or `logs` invocation. If any are absent the
-command exits with a descriptive error.
+command exits with a descriptive error. These are checked in `~/.agentibridge/agentibridge.env`.
 
 | Variable | Description |
 |----------|-------------|
-| `REDIS_URL` | Redis connection URL (e.g. `redis://localhost:6379/0`) |
+| `REDIS_URL` | Redis connection URL (e.g. `redis://redis:6379/0`) |
 | `POSTGRES_URL` | Postgres connection URL (e.g. `postgresql://user:pass@localhost:5432/db`) |
 | `POSTGRES_USER` | Postgres username |
 | `POSTGRES_PASSWORD` | Postgres password |
 | `POSTGRES_DB` | Postgres database name |
-| `AGENTIBRIDGE_TRANSPORT` | Transport mode: `stdio` or `sse` |
+| `AGENTIBRIDGE_TRANSPORT` | Transport mode (should be `sse` for Docker) |
 | `AGENTIBRIDGE_PORT` | HTTP port for SSE transport (e.g. `8100`) |
 
 Generate a fully-annotated template:
 
 ```bash
-agentibridge config --generate-env > ~/.config/agentibridge/.env
+agentibridge config --generate-env > ~/.agentibridge/agentibridge.env
 ```
 
 See [Configuration](configuration.md) for the complete list of optional variables.

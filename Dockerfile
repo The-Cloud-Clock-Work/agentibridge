@@ -35,8 +35,8 @@ COPY --chown=appuser:appuser agentibridge/ ./agentibridge/
 # Create log directory
 RUN mkdir -p /app/logs && chown appuser:appuser /app/logs
 
-# Create .claude/projects mount target
-RUN mkdir -p /home/appuser/.claude/projects && \
+# Create .claude mount target (host ~/.claude is mounted read-only at runtime)
+RUN mkdir -p /home/appuser/.claude && \
     chown -R appuser:appuser /home/appuser/.claude
 
 USER appuser

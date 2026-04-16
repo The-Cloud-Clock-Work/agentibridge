@@ -26,7 +26,9 @@ Env vars:
 import asyncio
 import json
 import os
+import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from agentibridge.logging import log
@@ -55,6 +57,11 @@ def _dispatch_url() -> str:
 
 def _dispatch_secret() -> str:
     return os.environ.get("DISPATCH_SECRET", "")
+
+
+def _is_docker() -> bool:
+    """Detect whether we're running inside a Docker container."""
+    return Path("/.dockerenv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +123,16 @@ async def _run_claude_http(
     timeout: int,
     output_format: str,
     resume_session_id: Optional[str] = None,
+    allowed_tools: Optional[str] = None,
+    max_turns: Optional[int] = None,
+    permission_mode: Optional[str] = None,
 ) -> ClaudeResult:
-    """Proxy a dispatch request to the host-side bridge via HTTP.
+    """Submit a dispatch request and poll for results.
+
+    Phase 1 (Submit): POST /dispatch with short timeout → 202 + job_id.
+    Phase 2 (Poll): GET /job/{id} with exponential backoff until done or deadline.
+
+    Backward compatible: if POST returns a direct result (old bridge), returns it.
 
     Args:
         dispatch_url: Base URL of the dispatch bridge (e.g. http://host.docker.internal:8101).
@@ -125,6 +140,10 @@ async def _run_claude_http(
         model: Model name.
         timeout: Timeout in seconds for the Claude CLI execution.
         output_format: CLI output format.
+        resume_session_id: Optional session ID to resume.
+        allowed_tools: Comma-separated tool names (e.g. "Read,Glob,Grep").
+        max_turns: Maximum conversation turns.
+        permission_mode: Permission mode (e.g. "bypassPermissions").
 
     Returns:
         ClaudeResult with parsed output.
@@ -132,45 +151,99 @@ async def _run_claude_http(
     import httpx
 
     secret = _dispatch_secret()
-    url = f"{dispatch_url.rstrip('/')}/dispatch"
-    # Give the bridge time to timeout first, then add buffer for HTTP overhead
-    http_timeout = timeout + 30
+    base_url = dispatch_url.rstrip("/")
+    submit_url = f"{base_url}/dispatch"
+    deadline = time.monotonic() + timeout + 30  # buffer for HTTP overhead
 
-    log("claude_runner: HTTP dispatch", {"url": url, "model": model, "prompt_len": len(prompt)})
+    log("claude_runner: HTTP dispatch", {"url": submit_url, "model": model, "prompt_len": len(prompt)})
 
     try:
-        async with httpx.AsyncClient(timeout=http_timeout) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Phase 1: Submit
+            payload = {
+                "prompt": prompt,
+                "model": model,
+                "timeout": timeout,
+                "output_format": output_format,
+                "resume_session_id": resume_session_id or "",
+            }
+            if allowed_tools:
+                payload["allowed_tools"] = allowed_tools
+            if max_turns:
+                payload["max_turns"] = max_turns
+            if permission_mode:
+                payload["permission_mode"] = permission_mode
+
             resp = await client.post(
-                url,
-                json={
-                    "prompt": prompt,
-                    "model": model,
-                    "timeout": timeout,
-                    "output_format": output_format,
-                    "resume_session_id": resume_session_id or "",
-                },
+                submit_url,
+                json=payload,
                 headers={"X-Dispatch-Secret": secret},
             )
 
-        if resp.status_code == 401:
-            return ClaudeResult(success=False, error="Dispatch bridge auth failed (401)")
+            if resp.status_code == 401:
+                return ClaudeResult(success=False, error="Dispatch bridge auth failed (401)")
 
-        if resp.status_code != 200:
+            data = resp.json()
+
+            # Backward compat: old bridge returns 200 with direct result
+            if resp.status_code == 200 and "success" in data and "job_id" not in data:
+                return ClaudeResult(
+                    success=data.get("success", False),
+                    result=data.get("result"),
+                    session_id=data.get("session_id"),
+                    exit_code=data.get("exit_code"),
+                    duration_ms=data.get("duration_ms"),
+                    timed_out=data.get("timed_out", False),
+                    error=data.get("error"),
+                )
+
+            if resp.status_code not in (200, 202):
+                return ClaudeResult(
+                    success=False,
+                    error=f"Dispatch bridge returned HTTP {resp.status_code}: {resp.text[:500]}",
+                )
+
+            bridge_job_id = data.get("job_id")
+            if not bridge_job_id:
+                return ClaudeResult(success=False, error="Bridge returned no job_id")
+
+            # Phase 2: Poll for result
+            poll_url = f"{base_url}/job/{bridge_job_id}"
+            poll_interval = 2.0
+            max_poll_interval = 10.0
+
+            while time.monotonic() < deadline:
+                await asyncio.sleep(poll_interval)
+                poll_resp = await client.get(poll_url)
+
+                if poll_resp.status_code == 404:
+                    return ClaudeResult(success=False, error=f"Bridge job disappeared: {bridge_job_id}")
+
+                poll_data = poll_resp.json()
+                status = poll_data.get("status", "")
+
+                if status != "running":
+                    # Job finished — extract result
+                    result_data = poll_data.get("result", {}) or {}
+                    return ClaudeResult(
+                        success=result_data.get("success", False),
+                        result=result_data.get("result"),
+                        session_id=result_data.get("session_id"),
+                        exit_code=result_data.get("exit_code"),
+                        duration_ms=result_data.get("duration_ms"),
+                        timed_out=result_data.get("timed_out", False),
+                        error=result_data.get("error"),
+                    )
+
+                # Exponential backoff up to cap
+                poll_interval = min(poll_interval * 1.5, max_poll_interval)
+
+            # Deadline exceeded
             return ClaudeResult(
                 success=False,
-                error=f"Dispatch bridge returned HTTP {resp.status_code}: {resp.text[:500]}",
+                timed_out=True,
+                error=f"Dispatch bridge timed out after {timeout}s",
             )
-
-        data = resp.json()
-        return ClaudeResult(
-            success=data.get("success", False),
-            result=data.get("result"),
-            session_id=data.get("session_id"),
-            exit_code=data.get("exit_code"),
-            duration_ms=data.get("duration_ms"),
-            timed_out=data.get("timed_out", False),
-            error=data.get("error"),
-        )
 
     except httpx.ConnectError as e:
         msg = f"Cannot connect to dispatch bridge at {dispatch_url}: {e}"
@@ -178,8 +251,8 @@ async def _run_claude_http(
         return ClaudeResult(success=False, error=msg)
 
     except httpx.TimeoutException:
-        log("claude_runner: bridge timeout", {"url": dispatch_url, "timeout": http_timeout})
-        return ClaudeResult(success=False, timed_out=True, error=f"Dispatch bridge timed out after {http_timeout}s")
+        log("claude_runner: bridge timeout", {"url": dispatch_url, "timeout": timeout})
+        return ClaudeResult(success=False, timed_out=True, error=f"Dispatch bridge timed out after {timeout}s")
 
     except Exception as e:
         log("claude_runner: bridge unexpected error", {"error": str(e)})
@@ -198,6 +271,10 @@ async def run_claude(
     cwd: Optional[str] = None,
     output_format: str = "json",
     resume_session_id: Optional[str] = None,
+    allowed_tools: Optional[str] = None,
+    max_turns: Optional[int] = None,
+    permission_mode: Optional[str] = None,
+    session_name: Optional[str] = None,
 ) -> ClaudeResult:
     """Run the ``claude`` CLI and return the parsed result.
 
@@ -210,6 +287,10 @@ async def run_claude(
         timeout: Timeout in seconds (default: CLAUDE_DISPATCH_TIMEOUT or 300).
         cwd: Working directory for the subprocess.
         output_format: CLI output format (default: "json").
+        resume_session_id: Optional session ID to resume.
+        allowed_tools: Comma-separated tool names (e.g. "Read,Glob,Grep").
+        max_turns: Maximum conversation turns.
+        permission_mode: Permission mode (e.g. "bypassPermissions").
 
     Returns:
         ClaudeResult with parsed output.
@@ -220,36 +301,57 @@ async def run_claude(
     # Route to HTTP bridge if configured
     dispatch_url = _dispatch_url()
     if dispatch_url:
-        return await _run_claude_http(dispatch_url, prompt, model, timeout, output_format, resume_session_id)
+        return await _run_claude_http(
+            dispatch_url,
+            prompt,
+            model,
+            timeout,
+            output_format,
+            resume_session_id,
+            allowed_tools=allowed_tools,
+            max_turns=max_turns,
+            permission_mode=permission_mode,
+        )
+
+    # Fail fast inside Docker without bridge config
+    if _is_docker():
+        return ClaudeResult(
+            success=False,
+            error=(
+                "Running inside Docker but CLAUDE_DISPATCH_URL is not set. "
+                "Set CLAUDE_DISPATCH_URL=http://host.docker.internal:8101 and "
+                "DISPATCH_SECRET=<secret> in your docker.env, then run "
+                "'agentibridge bridge start' on the host."
+            ),
+        )
 
     # Local subprocess mode
     binary = _claude_binary()
-    if resume_session_id:
-        cmd = [
-            binary,
-            "--dangerously-skip-permissions",
-            "--model",
-            model,
-            "--output-format",
-            output_format,
-            "--resume",
-            resume_session_id,
-            "--print",
-            prompt,
-        ]
-    else:
-        cmd = [
-            binary,
-            "--dangerously-skip-permissions",
-            "--model",
-            model,
-            "--output-format",
-            output_format,
-            "-p",
-            prompt,
-        ]
 
-    log("claude_runner: starting", {"model": model, "prompt_len": len(prompt)})
+    # Build permission flags
+    if permission_mode:
+        perm_flags = ["--permission-mode", permission_mode]
+    else:
+        perm_flags = ["--dangerously-skip-permissions"]
+
+    cmd = [binary] + perm_flags + ["--model", model, "--output-format", output_format]
+
+    if allowed_tools:
+        cmd.extend(["--allowedTools", allowed_tools])
+    if max_turns:
+        cmd.extend(["--max-turns", str(max_turns)])
+    if session_name:
+        cmd.extend(["--name", session_name])
+
+    if resume_session_id:
+        cmd.extend(["--resume", resume_session_id, "--print", prompt])
+    else:
+        cmd.extend(["-p", prompt])
+
+    log("claude_runner: starting", {"model": model, "prompt_len": len(prompt), "cmd": " ".join(cmd[:10])})
+
+    # Clean env for claude CLI — remove vars that hijack its auth
+    clean_env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -258,6 +360,7 @@ async def run_claude(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=clean_env,
         )
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)

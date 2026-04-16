@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agentibridge.catalog import HistoryEntry, MemoryFile, PlanFile
 from agentibridge.parser import SessionEntry, SessionMeta
 
 
@@ -54,6 +55,7 @@ def make_meta(
     transcript_path: str = "/tmp/test.jsonl",
     has_subagents: bool = False,
     file_size_bytes: int = 5000,
+    codename: str = "",
 ) -> SessionMeta:
     return SessionMeta(
         session_id=session_id,
@@ -70,6 +72,7 @@ def make_meta(
         transcript_path=transcript_path,
         has_subagents=has_subagents,
         file_size_bytes=file_size_bytes,
+        codename=codename,
     )
 
 
@@ -197,3 +200,160 @@ def reset_singletons():
     srv._store = old_store
     srv._collector = old_collector
     srv._embedder = old_embedder
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Catalog factory helpers
+# ---------------------------------------------------------------------------
+
+
+def make_memory_file(
+    project_encoded: str = "-home-user-dev-myapp",
+    project_path: str = "/home/user/dev/myapp",
+    filename: str = "MEMORY.md",
+    filepath: str = "/tmp/memory/MEMORY.md",
+    content: str = "# Project Memory\n\nKey decisions go here.",
+    file_size_bytes: int = 128,
+    last_modified: str = "2025-06-01T10:00:00+00:00",
+) -> MemoryFile:
+    return MemoryFile(
+        project_encoded=project_encoded,
+        project_path=project_path,
+        filename=filename,
+        filepath=filepath,
+        content=content,
+        file_size_bytes=file_size_bytes,
+        last_modified=last_modified,
+    )
+
+
+def make_plan_file(
+    codename: str = "fancy-coding-parrot",
+    filename: str = "fancy-coding-parrot.md",
+    filepath: str = "/tmp/plans/fancy-coding-parrot.md",
+    content: str = "# Plan: Fancy Coding Parrot\n\n## Steps\n1. Do the thing",
+    file_size_bytes: int = 2048,
+    last_modified: str = "2025-06-01T12:00:00+00:00",
+    is_agent_plan: bool = False,
+    parent_codename: str = "fancy-coding-parrot",
+    session_ids: list = None,
+    project_path: str = "",
+) -> PlanFile:
+    return PlanFile(
+        codename=codename,
+        filename=filename,
+        filepath=filepath,
+        content=content,
+        file_size_bytes=file_size_bytes,
+        last_modified=last_modified,
+        is_agent_plan=is_agent_plan,
+        parent_codename=parent_codename,
+        session_ids=session_ids or [],
+        project_path=project_path,
+    )
+
+
+def make_history_entry(
+    display: str = "Help me create a Docker Compose setup",
+    timestamp: str = "2025-06-01T10:00:00+00:00",
+    project: str = "/home/user/dev/myapp",
+    session_id: str = "test-session-001",
+) -> HistoryEntry:
+    return HistoryEntry(
+        display=display,
+        timestamp=timestamp,
+        project=project,
+        session_id=session_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Catalog fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def temp_memory_dir(tmp_path):
+    """Create a temporary projects directory with memory files.
+
+    Structure:
+        tmp_path/
+            -home-user-dev-myapp/
+                memory/
+                    MEMORY.md
+                    patterns.md
+            -home-user-dev-backend/
+                memory/
+                    MEMORY.md
+    """
+    proj1 = tmp_path / "-home-user-dev-myapp" / "memory"
+    proj1.mkdir(parents=True)
+    (proj1 / "MEMORY.md").write_text("# MyApp Memory\n\nKey patterns here.\n")
+    (proj1 / "patterns.md").write_text("# Patterns\n\n- Use factory pattern\n")
+
+    proj2 = tmp_path / "-home-user-dev-backend" / "memory"
+    proj2.mkdir(parents=True)
+    (proj2 / "MEMORY.md").write_text("# Backend Memory\n\nAPI design notes.\n")
+
+    return tmp_path
+
+
+@pytest.fixture
+def temp_plans_dir(tmp_path):
+    """Create a temporary plans directory with plan files.
+
+    Creates:
+        tmp_path/fancy-coding-parrot.md
+        tmp_path/fancy-coding-parrot-agent-a1b2c3d.md
+        tmp_path/cool-jumping-fish.md
+    """
+    (tmp_path / "fancy-coding-parrot.md").write_text(
+        "# Plan: Fancy Coding Parrot\n\n## Steps\n1. Implement feature\n2. Write tests\n"
+    )
+    (tmp_path / "fancy-coding-parrot-agent-a1b2c3d.md").write_text(
+        "# Agent Subplan\n\n## Task\nImplement the helper module\n"
+    )
+    (tmp_path / "cool-jumping-fish.md").write_text("# Plan: Cool Jumping Fish\n\n## Steps\n1. Refactor module\n")
+    return tmp_path
+
+
+@pytest.fixture
+def temp_history_file(tmp_path):
+    """Create a temporary history.jsonl with sample entries."""
+    history_file = tmp_path / "history.jsonl"
+    entries = [
+        {
+            "display": "Help me create a Docker Compose setup",
+            "timestamp": 1717236000000,  # 2024-06-01T10:00:00Z
+            "projectPath": "/home/user/dev/myapp",
+            "sessionId": "session-001",
+        },
+        {
+            "display": "Add health checks to services",
+            "timestamp": 1717236300000,  # +5min
+            "projectPath": "/home/user/dev/myapp",
+            "sessionId": "session-001",
+        },
+        {
+            "display": "Migrate the database schema",
+            "timestamp": 1717236600000,  # +10min
+            "projectPath": "/home/user/dev/backend",
+            "sessionId": "session-002",
+        },
+        {
+            "display": "Fix the authentication bug",
+            "timestamp": 1717236900000,  # +15min
+            "projectPath": "/home/user/dev/backend",
+            "sessionId": "session-003",
+        },
+        {
+            "display": "Deploy to production",
+            "timestamp": 1717237200000,  # +20min
+            "projectPath": "/home/user/dev/myapp",
+            "sessionId": "session-001",
+        },
+    ]
+    with open(history_file, "w", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(entry) + "\n")
+    return history_file

@@ -1,21 +1,33 @@
 """Tests for agentibridge.cli module."""
 
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from agentibridge import __version__
 from agentibridge.cli import (
     main,
     cmd_version,
     cmd_help,
     cmd_connect,
     cmd_config,
+    cmd_status,
+    cmd_stop,
     cmd_tunnel,
     cmd_update,
+    cmd_embeddings,
+    _container_health,
+    _systemd_active,
+    _cloudflared_hostname,
+    _parse_cloudflared_config,
     _extract_tunnel_url,
     _short_digest,
+    _validate_env,
+    _ensure_stack_dir,
+    _read_env_value,
 )
 
 
@@ -26,7 +38,7 @@ class TestCmdVersion:
         cmd_version(args)
         output = capsys.readouterr().out
         assert "agentibridge" in output
-        assert "0.2.0" in output
+        assert re.search(r"\d+\.\d+\.\d+", output)
 
 
 @pytest.mark.unit
@@ -69,6 +81,7 @@ class TestCmdConnect:
         assert "Claude Code CLI" in output
         assert "ChatGPT" in output
         assert "localhost:8100" in output
+        assert '"type": "http"' in output
         assert "/sse" in output
         assert "/health" in output
 
@@ -104,6 +117,205 @@ class TestCmdConfig:
 
 
 @pytest.mark.unit
+class TestCmdStatus:
+    """Tests for `agentibridge status`."""
+
+    def _docker_inspect_side_effect(self, container_health: dict):
+        """Return a side_effect that handles docker inspect + systemctl calls."""
+
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(str(c) for c in cmd)
+            # docker inspect for container health
+            if "docker" in cmd_str and "inspect" in cmd_str:
+                for name, status in container_health.items():
+                    if name in cmd_str:
+                        if status is None:
+                            return _fail()
+                        return _ok(stdout=status)
+                return _fail()
+            # systemctl --user is-active agentibridge
+            if "systemctl" in cmd_str and "--user" in cmd_str:
+                return _ok(stdout="inactive")
+            # systemctl is-active cloudflared
+            if "systemctl" in cmd_str and "cloudflared" in cmd_str:
+                return _ok(stdout="inactive")
+            return _fail()
+
+        return side_effect
+
+    def test_status_with_env_file(self, capsys, tmp_path):
+        """Reads config from agentibridge.env and shows container health."""
+        stack_dir = tmp_path / "agentibridge"
+        stack_dir.mkdir()
+        env_file = stack_dir / "agentibridge.env"
+        env_file.write_text(
+            "REDIS_URL=redis://localhost:6379/0\n"
+            "POSTGRES_URL=postgresql://ab:secret@localhost:5432/agentibridge\n"
+            "AGENTIBRIDGE_TRANSPORT=sse\n"
+            "AGENTIBRIDGE_PORT=8100\n"
+            "AGENTIBRIDGE_POLL_INTERVAL=30\n"
+        )
+
+        container_health = {
+            "agentibridge-redis": "running",
+            "agentibridge-postgres": "healthy",
+            "agentibridge-tunnel": None,
+        }
+
+        se = self._docker_inspect_side_effect(container_health)
+
+        mock_get_redis = MagicMock(return_value=None)
+        mock_get_pg = MagicMock(return_value=None)
+
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli.subprocess.run", side_effect=se),
+            patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
+            patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
+        ):
+            cmd_status(MagicMock())
+
+        output = capsys.readouterr().out
+
+        assert "transport: sse" in output
+        assert "port: 8100" in output
+        assert "poll interval: 30s" in output
+        assert "env file:" in output
+
+    def test_status_no_env_file(self, capsys, tmp_path):
+        """Falls back to env vars when agentibridge.env doesn't exist."""
+        stack_dir = tmp_path / "agentibridge"
+        stack_dir.mkdir()
+
+        def se(cmd, **kwargs):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "systemctl" in cmd_str and "--user" in cmd_str:
+                return _ok(stdout="inactive")
+            if "systemctl" in cmd_str and "cloudflared" in cmd_str:
+                return _ok(stdout="inactive")
+            return _fail()
+
+        mock_get_redis = MagicMock(return_value=None)
+        mock_get_pg = MagicMock(return_value=None)
+
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli.subprocess.run", side_effect=se),
+            patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
+            patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
+            patch.dict("os.environ", {"AGENTIBRIDGE_TRANSPORT": "sse", "AGENTIBRIDGE_PORT": "8100"}),
+        ):
+            cmd_status(MagicMock())
+
+        output = capsys.readouterr().out
+        assert "transport: sse" in output
+        assert "unavailable" in output
+
+    def test_status_tunnel_systemd(self, capsys):
+        """When cloudflared systemd service is active, shows 'systemd' in output."""
+
+        def se(cmd, **kwargs):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "systemctl" in cmd_str and "cloudflared" in cmd_str:
+                return _ok(stdout="active")
+            if "systemctl" in cmd_str and "--user" in cmd_str:
+                return _ok(stdout="inactive")
+            return _fail()
+
+        with (
+            patch("agentibridge.cli.subprocess.run", side_effect=se),
+            patch("agentibridge.cli._cloudflared_hostname", return_value="tunnel.example.com"),
+        ):
+            mock_get_redis = MagicMock(return_value=None)
+            mock_get_pg = MagicMock(return_value=None)
+            with (
+                patch.dict("sys.modules", {"agentibridge.redis_client": MagicMock(get_redis=mock_get_redis)}),
+                patch.dict("sys.modules", {"agentibridge.pg_client": MagicMock(get_pg=mock_get_pg)}),
+            ):
+                cmd_status(MagicMock())
+
+        output = capsys.readouterr().out
+        assert "active (systemd)" in output
+        assert "hostname: tunnel.example.com" in output
+
+
+@pytest.mark.unit
+class TestContainerHealth:
+    def test_returns_health_status(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout="healthy")):
+            assert _container_health("agentibridge-redis") == "healthy"
+
+    def test_returns_none_when_not_found(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_fail()):
+            assert _container_health("agentibridge-redis") is None
+
+    def test_returns_none_on_exception(self):
+        with patch("agentibridge.cli.subprocess.run", side_effect=Exception("no docker")):
+            assert _container_health("agentibridge-redis") is None
+
+
+@pytest.mark.unit
+class TestSystemdActive:
+    def test_returns_active(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout="active")):
+            assert _systemd_active("cloudflared") == "active"
+
+    def test_returns_inactive(self):
+        with patch("agentibridge.cli.subprocess.run", return_value=_ok(stdout="inactive")):
+            assert _systemd_active("cloudflared") == "inactive"
+
+    def test_returns_none_on_exception(self):
+        with patch("agentibridge.cli.subprocess.run", side_effect=FileNotFoundError):
+            assert _systemd_active("cloudflared") is None
+
+
+def _mock_cloudflared_dir(tmp_path):
+    """Create a .cloudflared dir under tmp_path and patch the constants."""
+    cf_dir = tmp_path / ".cloudflared"
+    cf_dir.mkdir()
+    return cf_dir
+
+
+@pytest.mark.unit
+class TestCloudflaredHostname:
+    def test_extracts_hostname(self, tmp_path):
+        cf_dir = _mock_cloudflared_dir(tmp_path)
+        (cf_dir / "config.yml").write_text(
+            "tunnel: abc-123\ningress:\n  - hostname: bridge.example.com\n    service: http://localhost:8100\n"
+        )
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            assert _cloudflared_hostname() == "bridge.example.com"
+
+    def test_returns_none_when_no_file(self, tmp_path):
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            assert _cloudflared_hostname() is None
+
+
+@pytest.mark.unit
+class TestParseCloudflaredConfig:
+    def test_parses_full_config(self, tmp_path):
+        cf_dir = _mock_cloudflared_dir(tmp_path)
+        (cf_dir / "config.yml").write_text(
+            "tunnel: abc-123\n"
+            "credentials-file: /home/user/.cloudflared/abc-123.json\n"
+            "ingress:\n"
+            "  - hostname: bridge.example.com\n"
+            "    service: http://localhost:8100\n"
+            "  - service: http_status:404\n"
+        )
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            info = _parse_cloudflared_config()
+        assert info["tunnel_id"] == "abc-123"
+        assert info["hostname"] == "bridge.example.com"
+        assert info["service"] == "http://localhost:8100"
+        assert info["credentials_file"] == "/home/user/.cloudflared/abc-123.json"
+
+    def test_returns_empty_when_no_file(self, tmp_path):
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            assert _parse_cloudflared_config() == {}
+
+
+@pytest.mark.unit
 class TestMain:
     def test_no_args_prints_help(self, capsys):
         with patch("sys.argv", ["agentibridge"]):
@@ -115,7 +327,7 @@ class TestMain:
         with patch("sys.argv", ["agentibridge", "version"]):
             main()
         output = capsys.readouterr().out
-        assert "0.2.0" in output
+        assert re.search(r"\d+\.\d+\.\d+", output)
 
 
 @pytest.mark.unit
@@ -138,19 +350,25 @@ class TestExtractTunnelUrl:
 
 @pytest.mark.unit
 class TestCmdTunnel:
-    def test_tunnel_no_docker(self, capsys):
-        with patch("shutil.which", return_value=None):
+    def test_tunnel_no_docker_no_systemd(self, capsys):
+        with (
+            patch("shutil.which", return_value=None),
+            patch("agentibridge.cli._systemd_active", return_value="inactive"),
+        ):
             args = MagicMock()
             cmd_tunnel(args)
         output = capsys.readouterr().out
-        assert "Docker is not installed" in output
+        assert "not running" in output
 
-    def test_tunnel_not_running(self, capsys):
+    def test_tunnel_not_running_no_systemd(self, capsys):
         with patch("shutil.which", return_value="/usr/bin/docker"):
             mock_result = MagicMock()
             mock_result.returncode = 1
             mock_result.stdout = ""
-            with patch("agentibridge.cli.subprocess.run", return_value=mock_result):
+            with (
+                patch("agentibridge.cli.subprocess.run", return_value=mock_result),
+                patch("agentibridge.cli._systemd_active", return_value="inactive"),
+            ):
                 args = MagicMock()
                 cmd_tunnel(args)
         output = capsys.readouterr().out
@@ -183,6 +401,7 @@ class TestCmdTunnel:
         output = capsys.readouterr().out
         assert "https://my-test-tunnel.trycloudflare.com" in output
         assert "quick tunnel" in output
+        assert '"type": "http"' in output
         assert "/sse" in output
 
     def test_tunnel_named_connected(self, capsys):
@@ -207,6 +426,37 @@ class TestCmdTunnel:
         output = capsys.readouterr().out
         assert "named tunnel" in output
 
+    def test_tunnel_systemd_with_config(self, capsys):
+        """When no Docker tunnel but cloudflared runs via systemd, shows config."""
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+
+        cfg_info = {
+            "tunnel_id": "abc-123",
+            "hostname": "bridge.example.com",
+            "service": "http://localhost:8100",
+            "credentials_file": "/home/user/.cloudflared/abc-123.json",
+        }
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("agentibridge.cli.subprocess.run", return_value=mock_result),
+            patch("agentibridge.cli._systemd_active", return_value="active"),
+            patch("agentibridge.cli._parse_cloudflared_config", return_value=cfg_info),
+        ):
+            args = MagicMock()
+            cmd_tunnel(args)
+
+        output = capsys.readouterr().out
+        assert "active (systemd)" in output
+        assert "tunnel id: abc-123" in output
+        assert "hostname:  bridge.example.com" in output
+        assert "service:   http://localhost:8100" in output
+        assert "https://bridge.example.com/health" in output
+        assert "https://bridge.example.com/mcp" in output
+        assert '"type": "http"' in output
+
 
 @pytest.mark.unit
 class TestShortDigest:
@@ -222,10 +472,10 @@ class TestShortDigest:
 
 
 def _make_stack_dir() -> Path:
-    """Return a temp Path with compose + .env files for testing."""
+    """Return a temp Path with compose + agentibridge.env files for testing."""
     d = Path(tempfile.mkdtemp())
     (d / "docker-compose.yml").write_text("services: {}\n")
-    (d / ".env").write_text(
+    (d / "agentibridge.env").write_text(
         "REDIS_URL=redis://r:6379/0\n"
         "POSTGRES_URL=postgresql://a:a@localhost/a\n"
         "POSTGRES_USER=a\nPOSTGRES_PASSWORD=a\nPOSTGRES_DB=a\n"
@@ -317,20 +567,22 @@ class TestCmdUpdate:
 
     def test_pip_version_change_reported(self, capsys):
         """Reports old -> new version when pip upgrade changes version."""
+        # Use a version guaranteed to differ from the installed __version__
+        new_version = "99.99.99"
 
         def se(cmd, **kw):
             cmd_str = " ".join(str(c) for c in cmd)
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.5.0\n")
+                return _ok(stdout=f"Version: {new_version}\n")
             return _fail()
 
         self._run_update(side_effect=se)
         output = capsys.readouterr().out
         # Current version (from __version__) vs new version from pip show
         assert "Updated:" in output
-        assert "0.5.0" in output
+        assert new_version in output
 
     # ── pip upgrade: already latest ───────────────────────────────────
 
@@ -342,7 +594,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             return _fail()
 
         self._run_update(side_effect=se)
@@ -373,7 +625,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             return _fail()
 
         calls = self._run_update(has_docker=False, side_effect=se)
@@ -393,7 +645,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _fail()  # container not found
             return _fail()
@@ -419,7 +671,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _fail()  # stack not running
             if "images" in cmd_str:
@@ -453,7 +705,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _ok(stdout="running")
             if "images" in cmd_str:
@@ -484,7 +736,7 @@ class TestCmdUpdate:
         assert "-f" in pull_cmd
         assert str(stack_dir / "docker-compose.yml") in pull_cmd
         assert "--env-file" in pull_cmd
-        assert str(stack_dir / ".env") in pull_cmd
+        assert str(stack_dir / "agentibridge.env") in pull_cmd
         assert pull_cmd[-1] == "agentibridge"
 
         # Verify recreate command: up -d --no-deps --force-recreate agentibridge
@@ -510,7 +762,7 @@ class TestCmdUpdate:
             if "pip" in cmd_str and "install" in cmd_str:
                 return _ok()
             if "pip" in cmd_str and "show" in cmd_str:
-                return _ok(stdout="Version: 0.2.0\n")
+                return _ok(stdout=f"Version: {__version__}\n")
             if "inspect" in cmd_str:
                 return _ok(stdout="running")
             if "images" in cmd_str:
@@ -530,3 +782,371 @@ class TestCmdUpdate:
 
         output = capsys.readouterr().out
         assert "Image already up to date" in output
+
+
+@pytest.mark.unit
+class TestValidateEnv:
+    def test_passes_when_all_vars_present(self, tmp_path):
+        """No exit when all required vars are present."""
+        env_file = tmp_path / "agentibridge.env"
+        env_file.write_text(
+            "REDIS_URL=redis://redis:6379/0\n"
+            "POSTGRES_URL=postgresql://a:a@postgres:5432/a\n"
+            "AGENTIBRIDGE_TRANSPORT=sse\n"
+            "AGENTIBRIDGE_PORT=8100\n"
+            "POSTGRES_USER=agentibridge\n"
+            "POSTGRES_PASSWORD=agentibridge\n"
+            "POSTGRES_DB=agentibridge\n"
+        )
+        _validate_env(env_file)  # should not raise
+
+    def test_exits_when_vars_missing(self, tmp_path, capsys):
+        """Exits with code 1 listing missing variables."""
+        env_file = tmp_path / "agentibridge.env"
+        env_file.write_text("REDIS_URL=redis://redis:6379/0\n")
+        with pytest.raises(SystemExit) as exc:
+            _validate_env(env_file)
+        assert exc.value.code == 1
+        output = capsys.readouterr().out
+        assert "missing required variables" in output
+
+
+@pytest.mark.unit
+class TestEnsureStackDir:
+    def test_scaffolds_compose_and_env(self, tmp_path, capsys):
+        """Creates compose file and agentibridge.env, returns stack_dir on first run."""
+        stack_dir = tmp_path / "agentibridge"
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli._LEGACY_STACK_DIR", tmp_path / "legacy"),
+        ):
+            result = _ensure_stack_dir()
+        assert result == stack_dir
+        output = capsys.readouterr().out
+        assert "Created" in output
+        assert "default configuration" in output
+        assert "github.com" in output
+        assert (stack_dir / "docker-compose.yml").exists()
+        assert (stack_dir / "agentibridge.env").exists()
+
+    def test_migrates_old_env_with_docker_vars(self, tmp_path, capsys):
+        """Moves .env to agentibridge.env when it contains Docker vars."""
+        stack_dir = tmp_path / "agentibridge"
+        stack_dir.mkdir()
+        # Write a compose file so it doesn't trigger first-run exit
+        import shutil
+
+        from agentibridge.cli import DATA_DIR
+
+        shutil.copy2(DATA_DIR / "docker-compose.yml", stack_dir / "docker-compose.yml")
+        # Create .env with Docker vars
+        old_env = stack_dir / ".env"
+        old_env.write_text(
+            "REDIS_URL=redis://redis:6379/0\n"
+            "POSTGRES_URL=postgresql://a:a@postgres:5432/a\n"
+            "AGENTIBRIDGE_TRANSPORT=sse\n"
+            "AGENTIBRIDGE_PORT=8100\n"
+            "POSTGRES_USER=agentibridge\n"
+            "POSTGRES_PASSWORD=agentibridge\n"
+            "POSTGRES_DB=agentibridge\n"
+        )
+        with (
+            patch("agentibridge.cli._STACK_DIR", stack_dir),
+            patch("agentibridge.cli._LEGACY_STACK_DIR", tmp_path / "legacy"),
+        ):
+            result = _ensure_stack_dir()
+        output = capsys.readouterr().out
+        assert "Migrated" in output
+        assert (stack_dir / "agentibridge.env").exists()
+        assert result == stack_dir
+
+
+@pytest.mark.unit
+class TestReadEnvValue:
+    """Tests for _read_env_value()."""
+
+    def test_reads_existing_key(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("FOO=bar\nBAZ=qux\n")
+        assert _read_env_value("FOO", env) == "bar"
+        assert _read_env_value("BAZ", env) == "qux"
+
+    def test_returns_none_for_missing_key(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("FOO=bar\n")
+        assert _read_env_value("MISSING", env) is None
+
+    def test_skips_comments(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("# FOO=commented\nFOO=real\n")
+        assert _read_env_value("FOO", env) == "real"
+
+    def test_skips_lines_without_equals(self, tmp_path):
+        env = tmp_path / "test.env"
+        env.write_text("no_equals_here\nKEY=value\n")
+        assert _read_env_value("KEY", env) == "value"
+
+
+@pytest.mark.unit
+@pytest.mark.unit
+class TestCmdStop:
+    """Tests for cmd_stop() command."""
+
+    def test_stops_systemd_services(self):
+        """Calls systemctl stop for both services."""
+        with patch("agentibridge.cli.subprocess.run") as mock_run:
+            cmd_stop(MagicMock())
+
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert ["systemctl", "--user", "stop", "agentibridge"] in calls
+        assert ["systemctl", "--user", "stop", "agentibridge-db"] in calls
+
+
+@pytest.mark.unit
+class TestCmdEmbeddings:
+    """Tests for agentibridge embeddings command."""
+
+    def _make_args(self, check_llm=False):
+        args = MagicMock()
+        args.check_llm = check_llm
+        return args
+
+    def _mock_redis(self, return_value=None):
+        mock_mod = MagicMock(get_redis=MagicMock(return_value=return_value))
+        return patch.dict("sys.modules", {"agentibridge.redis_client": mock_mod})
+
+    def _mock_pg(self, return_value=None):
+        mock_mod = MagicMock(get_pg=MagicMock(return_value=return_value))
+        return patch.dict("sys.modules", {"agentibridge.pg_client": mock_mod})
+
+    def _mock_llm(self, embed_text=None, side_effect=None):
+        mock_mod = MagicMock()
+        if side_effect:
+            mock_mod.embed_text.side_effect = side_effect
+        elif embed_text is not None:
+            mock_mod.embed_text.return_value = embed_text
+        return patch.dict("sys.modules", {"agentibridge.llm_client": mock_mod})
+
+    def _native_mode(self):
+        """Patch stack dir to non-existent path (no env file loaded)."""
+        from pathlib import Path
+
+        return patch("agentibridge.cli._STACK_DIR", Path("/tmp/nonexistent-agentibridge"))
+
+    # ── Native mode tests ──────────────────────────────────────────────
+
+    def test_no_env_vars(self, capsys):
+        """Shows 'not configured' when no env vars are set."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+            "AGENTIBRIDGE_EMBEDDING_ENABLED": "false",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "Embedding Status" in output
+        assert "source: agentibridge.env" in output
+        assert "AGENTIBRIDGE_EMBEDDING_ENABLED: false" in output
+        assert "LLM_API_BASE: (not set)" in output
+        assert "LLM_API_KEY: (not set)" in output
+        assert "not configured (LLM_API_BASE and LLM_API_KEY required)" in output
+        assert "not configured (POSTGRES_URL not set)" in output
+
+    def test_config_values_shown(self, capsys):
+        """Shows config values when env vars are set."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "sk-test-key-abcdef123456",
+            "LLM_EMBED_MODEL": "text-embedding-3-small",
+            "PGVECTOR_DIMENSIONS": "1536",
+            "AGENTIBRIDGE_EMBEDDING_ENABLED": "true",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "AGENTIBRIDGE_EMBEDDING_ENABLED: true" in output
+        assert "LLM_API_BASE: https://llm.example.com/v1" in output
+        assert "sk-tes...3456" in output
+        assert "text-embedding-3-small" in output
+        assert "configured (use --check-llm to test connectivity)" in output
+
+    def test_api_key_redacted_short(self, capsys):
+        """Short API keys are fully masked."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "shortkey",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "LLM_API_KEY: ***" in output
+
+    def test_check_llm_reachable(self, capsys):
+        """--check-llm calls embed_text and shows vector dim in native mode."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "sk-test-key-abcdef123456",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_llm(embed_text=[0.1] * 1536),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args(check_llm=True))
+        output = capsys.readouterr().out
+        assert "reachable (returned 1536-dim vector)" in output
+
+    def test_check_llm_error(self, capsys):
+        """--check-llm shows error when endpoint fails."""
+        env = {
+            "LLM_API_BASE": "https://llm.example.com/v1",
+            "LLM_API_KEY": "sk-test-key-abcdef123456",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+        }
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_llm(side_effect=RuntimeError("connection refused")),
+            self._mock_redis(),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args(check_llm=True))
+        output = capsys.readouterr().out
+        assert "status: error (connection refused)" in output
+
+    def test_postgres_stats(self, capsys):
+        """Shows chunk/session counts from Postgres in native mode."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "postgresql://localhost:5432/test",
+        }
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.side_effect = [
+            (True,),  # table exists
+            (150, 10),  # count, distinct sessions
+        ]
+        mock_pool = MagicMock()
+        mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_pg(mock_pool),
+            self._mock_redis(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "status: connected" in output
+        assert "total chunks: 150" in output
+        assert "sessions embedded: 10" in output
+
+    def test_postgres_no_table(self, capsys):
+        """Shows 'table not created yet' when transcript_chunks doesn't exist."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "postgresql://localhost:5432/test",
+        }
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = (False,)
+        mock_pool = MagicMock()
+        mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_pg(mock_pool),
+            self._mock_redis(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "connected (table not created yet)" in output
+
+    def test_coverage_with_redis(self, capsys):
+        """Shows coverage percentage when Redis is available in native mode."""
+        env = {
+            "LLM_API_BASE": "",
+            "LLM_API_KEY": "",
+            "POSTGRES_URL": "",
+            "DATABASE_URL": "",
+            "REDIS_KEY_PREFIX": "agentibridge",
+        }
+        mock_redis = MagicMock()
+        mock_redis.zcard.return_value = 100
+
+        with (
+            self._native_mode(),
+            patch.dict("os.environ", env, clear=False),
+            self._mock_redis(mock_redis),
+            self._mock_pg(),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "total sessions in Redis: 100" in output
+        assert "sessions with embeddings: 0" in output
+        assert "coverage: 0.0%" in output
+
+    # ── Env file tests ──────────────────────────────────────────────
+
+    def test_reads_from_env_file(self, capsys, tmp_path):
+        """Config values are read from agentibridge.env."""
+        env_file = tmp_path / "agentibridge.env"
+        env_file.write_text(
+            "AGENTIBRIDGE_EMBEDDING_ENABLED=true\n"
+            "LLM_API_BASE=https://llm.test/v1\n"
+            "LLM_API_KEY=sk-test-key-1234\n"
+            "LLM_EMBED_MODEL=nomic-embed-text\n"
+            "PGVECTOR_DIMENSIONS=768\n"
+            "REDIS_KEY_PREFIX=agentibridge\n"
+        )
+
+        mock_get_pg = MagicMock(return_value=None)
+        mock_get_redis = MagicMock(return_value=None)
+
+        with (
+            patch("agentibridge.cli._STACK_DIR", tmp_path),
+            patch("agentibridge.cli._container_health", return_value=None),
+            patch.dict(
+                "sys.modules",
+                {
+                    "agentibridge.pg_client": MagicMock(get_pg=mock_get_pg),
+                    "agentibridge.redis_client": MagicMock(get_redis=mock_get_redis),
+                },
+            ),
+        ):
+            cmd_embeddings(self._make_args())
+        output = capsys.readouterr().out
+        assert "source: agentibridge.env" in output
+        assert "AGENTIBRIDGE_EMBEDDING_ENABLED: true" in output
+        assert "nomic-embed-text" in output
+        assert "768" in output

@@ -1,3 +1,8 @@
+---
+title: Cloudflare Tunnel
+nav_order: 3
+---
+
 # Cloudflare Tunnel Setup
 
 Expose AgentiBridge to the internet securely using Cloudflare Tunnel. No port forwarding, firewall changes, or public IP required.
@@ -64,11 +69,13 @@ In the tunnel configuration, add a **Public Hostname**:
 
 ### 3. Start with token
 
+The tunnel token is **static** — you set it once and it works permanently across restarts, reboots, and redeployments. It only changes if you delete and recreate the tunnel in the Zero Trust dashboard.
+
 ```bash
 CLOUDFLARE_TUNNEL_TOKEN=eyJh... docker compose --profile tunnel-named up -d
 ```
 
-Or add to `.env`:
+Or add to `~/.agentibridge/agentibridge.env` (recommended — set once, forget about it):
 
 ```bash
 CLOUDFLARE_TUNNEL_TOKEN=eyJh...
@@ -218,9 +225,9 @@ This preserves protection for your other routes while letting MCP long-lived con
 
 ### Fix 3 — Cloudflare Access Service Token (for LLM backend behind Access)
 
-If your **LLM API** (e.g., LiteLLM, OpenRouter proxy, or an internal model server) is itself protected by Cloudflare Access, AgentiBridge needs service-token credentials to make outbound requests to it.
+This is not an AgentiBridge feature per se — it covers a specific deployment pattern where your LLM proxy (LiteLLM, OpenRouter, etc.) is protected by Cloudflare Access Zero Trust. The project author uses this setup: all LLM endpoints are behind Cloudflare Access, so AgentiBridge needs service-token credentials to make outbound API requests to them. If your LLM backend is not behind Cloudflare Access, skip this section.
 
-Set these in your `.env`:
+Set these in `~/.agentibridge/agentibridge.env`:
 
 ```bash
 # Cloudflare Access service-token for the LLM backend
@@ -313,7 +320,7 @@ docker logs agentibridge-tunnel
 
 ### LLM requests failing with 403 when LLM backend is behind Cloudflare Access
 
-Set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in your `.env`. See [Fix 3](#fix-3--cloudflare-access-service-token-for-llm-backend-behind-access) above.
+Set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in `~/.agentibridge/.env`. See [Fix 3](#fix-3--cloudflare-access-service-token-for-llm-backend-behind-access) above.
 
 ### Stopping the tunnel
 

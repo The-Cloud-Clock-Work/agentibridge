@@ -1,3 +1,8 @@
+---
+title: Connecting Clients
+nav_order: 1
+---
+
 # Connecting Clients
 
 Step-by-step instructions for connecting various AI clients to AgentiBridge.
@@ -39,7 +44,7 @@ claude --mcp-debug
 
 ### Available Tools in Claude Code
 
-Once connected, Claude Code can use all 11 tools:
+Once connected, Claude Code can use all 16 tools:
 - "List my recent sessions" → `list_sessions`
 - "What did I work on yesterday?" → `list_sessions` with `since_hours=24`
 - "Search for Docker setup sessions" → `search_sessions`
@@ -83,15 +88,42 @@ paths:
 
 Note: ChatGPT Actions work best with REST endpoints. For full MCP integration, use the SSE endpoint with an MCP-compatible client.
 
-## Claude Web (MCP Servers)
+## Claude.ai (OAuth 2.1)
 
-Claude.ai supports connecting to remote MCP servers:
+Claude.ai requires **OAuth 2.1** to connect to remote MCP servers. AgentiBridge has a built-in OAuth authorization server.
 
-1. Go to **Settings** → **MCP Servers** → **Add Server**
-2. Enter:
-   - **Name**: AgentiBridge
-   - **URL**: `http://your-host:8100/sse`
-   - **Headers**: `X-API-Key: your-api-key`
+**1. Enable OAuth** — add to `~/.agentibridge/.env`:
+
+```bash
+OAUTH_ISSUER_URL=https://bridge.yourdomain.com
+OAUTH_CLIENT_ID=my-bridge-client
+OAUTH_CLIENT_SECRET=generate-a-strong-secret-here
+OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback
+OAUTH_ALLOWED_SCOPES=claudeai
+```
+
+**2. Expose over HTTPS** (e.g., Cloudflare Tunnel):
+
+```bash
+agentibridge tunnel setup    # interactive wizard
+```
+
+**3. Add to claude.ai:**
+
+Go to [claude.ai/settings/connectors](https://claude.ai/settings/connectors) → **Add Server** → enter:
+
+```
+https://bridge.yourdomain.com/mcp
+```
+
+Claude.ai will automatically discover OAuth at `/.well-known/oauth-authorization-server`, complete the PKCE flow, and store the token.
+
+**4. Verify:**
+
+```bash
+curl https://bridge.yourdomain.com/.well-known/oauth-authorization-server
+curl https://bridge.yourdomain.com/health
+```
 
 ## Grok (xAI)
 

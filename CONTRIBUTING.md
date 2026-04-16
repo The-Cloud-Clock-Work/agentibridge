@@ -43,7 +43,7 @@ docker compose up --build -d
 
 ### Unit Tests
 
-We have 452+ unit tests covering core functionality:
+We have 573+ unit tests covering core functionality:
 
 ```bash
 # Run all unit tests
@@ -186,7 +186,7 @@ python tests/integration/test_docker.py
 ```
 agentibridge/
 ├── agentibridge/           # Main package
-│   ├── server.py          # FastMCP server with 11 tools
+│   ├── server.py          # FastMCP server with 16 tools
 │   ├── parser.py          # JSONL transcript parser
 │   ├── store.py           # SessionStore (Redis + file fallback)
 │   ├── collector.py       # Background polling daemon
@@ -200,10 +200,11 @@ agentibridge/
 │   ├── redis_client.py    # Redis helper
 │   ├── pg_client.py       # Postgres + pgvector
 │   ├── config.py          # Centralized env-var configuration
+│   ├── catalog.py         # Knowledge catalog (Phase 5)
 │   ├── cli.py             # CLI tool
 │   └── logging.py         # Structured JSON logging
 ├── tests/
-│   ├── unit/              # Unit tests (452+ tests)
+│   ├── unit/              # Unit tests (573+ tests)
 │   ├── integration/       # Docker-based integration tests
 │   ├── stress/            # Performance tests
 │   └── e2e/               # End-to-end smoke tests

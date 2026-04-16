@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
@@ -18,4 +19,4 @@ jobs:
     with:
       bump: ${{ inputs.bump }}
     secrets:
-      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      RELEASE_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}

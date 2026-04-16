@@ -4,164 +4,153 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 11 MCP tools. It was extracted from the [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) project to run independently.
+**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via MCP tools and REST endpoints. Extracted from [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore).
+
+AgentiBridge runs **natively on the host**. Only Redis and Postgres run in Docker containers with ports exposed to localhost. Dispatch calls the `claude` CLI directly — no bridge process needed.
 
 ## Build & Development
 
 ```bash
-# Install dependencies
 pip install -e .
-
-# Run locally (stdio transport — for Claude Code CLI)
-python -m agentibridge
-
-# Run with SSE transport (for remote MCP clients)
-AGENTIBRIDGE_TRANSPORT=sse python -m agentibridge
-
-# Docker (full stack with Redis)
-docker compose up --build -d
-
-# Run unit tests
+agentibridge install                              # systemd services (databases + native app)
+agentibridge status                               # check connectivity
 pytest tests/unit -v -m unit --cov=agentibridge
-
-# Lint + format
 ruff check agentibridge/ tests/
 ruff format --check agentibridge/ tests/
-
-# Run integration tests (requires Docker)
-python tests/integration/test_docker.py --start
-python tests/integration/test_docker.py --test
-python tests/integration/test_docker.py --stop
-
-# CLI
-agentibridge version
-agentibridge status
-agentibridge help
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│  MCP Server (server.py)             │
-│  11 tools across 4 phases           │
-│                                     │
-│  Phase 1: list/get/search sessions  │
-│  Phase 2: semantic search + summary │
-│  Phase 3: SSE/HTTP transport + auth │
-│  Phase 4: restore context + dispatch│
-└─────────────┬───────────────────────┘
-              │
-    ┌─────────┴─────────┐
-    │                   │
-    ▼                   ▼
-┌──────────┐    ┌──────────────┐
-│ Collector│    │ SessionStore │
-│ (daemon) │───▶│ Redis + file │
-│ polls    │    │ fallback     │
-│ ~/.claude│    └──────────────┘
-└──────────┘
+MCP Server (server.py) — 29 tools
+  Phase 1: list/get/search sessions
+  Phase 2: semantic search + summary
+  Phase 3: SSE/HTTP transport + auth
+  Phase 4: restore context + dispatch
+  Phase 5: memory, plans, history
+  Phase 6: A2A agent registry
+  Handoff: cross-project context transfer
+        │
+   ┌────┴────┐
+   ▼         ▼
+Collector   SessionStore / Registry
+(daemon)    Redis (Docker) + file fallback
 ```
+
+## Deployment Model
+
+```
+Host (native)                    Docker (databases only)
+┌──────────────────────┐        ┌─────────────────────┐
+│ agentibridge (python) │───────▶│ Redis :6379         │
+│ claude CLI (dispatch) │        │ Postgres :5432      │
+└──────────────────────┘        └─────────────────────┘
+        │
+        ▼
+  ~/.agentibridge/agentibridge.env  (single config file)
+```
+
+- `agentibridge install` creates two systemd services: `agentibridge-db` (docker compose) + `agentibridge` (native python)
+- Config: `~/.agentibridge/agentibridge.env` — single env file for everything
+- Dispatch calls `claude` CLI directly as a subprocess (no bridge)
 
 ## Key Modules
 
 | Module | Purpose |
 |--------|---------|
-| `agentibridge/server.py` | FastMCP server with 11 tools |
-| `agentibridge/parser.py` | Pure-function JSONL transcript parser |
-| `agentibridge/store.py` | SessionStore (Redis + filesystem fallback) |
-| `agentibridge/collector.py` | Background polling daemon |
-| `agentibridge/transport.py` | SSE/HTTP transport + API key auth |
-| `agentibridge/oauth_provider.py` | OAuth 2.1 authorization server (opt-in) |
-| `agentibridge/embeddings.py` | Semantic search (Phase 2) |
-| `agentibridge/dispatch.py` | Background job dispatch, session restore (Phase 4) |
-| `agentibridge/dispatch_bridge.py` | Host-side HTTP bridge for Docker dispatch |
-| `agentibridge/claude_runner.py` | Claude CLI runner (dispatch) |
-| `agentibridge/llm_client.py` | OpenAI-compatible embeddings + chat |
-| `agentibridge/redis_client.py` | Redis helper |
-| `agentibridge/pg_client.py` | Postgres + pgvector connection |
-| `agentibridge/config.py` | Configuration with validation |
-| `agentibridge/cli.py` | CLI helper tool (status/connect/install) |
-| `agentibridge/logging.py` | Structured JSON logging |
+| `server.py` | FastMCP server — all MCP tools |
+| `parser.py` | Pure-function JSONL transcript parser |
+| `store.py` | SessionStore (Redis + filesystem fallback) |
+| `collector.py` | Background polling daemon |
+| `transport.py` | SSE/HTTP transport + REST endpoints |
+| `registry.py` | A2A agent registry (Phase 6) |
+| `oauth_provider.py` | OAuth 2.1 authorization server (opt-in) |
+| `embeddings.py` | Semantic search (Phase 2) |
+| `dispatch.py` | Background job dispatch, session restore, handoff |
+| `catalog.py` | Knowledge catalog: memory, plans, history, project discovery |
+| `claude_runner.py` | Claude CLI runner (dispatch + handoff) |
+| `config.py` | Configuration with validation |
+| `cli.py` | CLI: install, status, connect, config, etc. |
 
 ## Key Environment Variables
 
-```bash
-# Redis
-REDIS_URL=redis://redis:6379/0
-REDIS_KEY_PREFIX=agentibridge
+All configured in `~/.agentibridge/agentibridge.env`:
 
-# Transport
-AGENTIBRIDGE_TRANSPORT=stdio    # or "sse"
+```bash
+REDIS_URL=redis://localhost:6379/0
+REDIS_KEY_PREFIX=agentibridge
+AGENTIBRIDGE_TRANSPORT=sse
 AGENTIBRIDGE_HOST=0.0.0.0
 AGENTIBRIDGE_PORT=8100
-AGENTIBRIDGE_API_KEYS=          # comma-separated, empty = no auth
-
-# Collector
+AGENTIBRIDGE_API_KEYS=              # comma-separated, empty = no auth
+CLAUDE_CODE_HOME_DIR=~/.claude
 AGENTIBRIDGE_POLL_INTERVAL=60
 AGENTIBRIDGE_MAX_ENTRIES=500
-
-# Semantic search (Phase 2)
-AGENTIBRIDGE_EMBEDDING_ENABLED=false  # set to "true" to enable (requires POSTGRES_URL + LLM config)
-
-# Postgres + pgvector (vector storage for semantic search)
-POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
-PGVECTOR_DIMENSIONS=1536
-
-# Embeddings + LLM (OpenAI-compatible API)
+AGENTIBRIDGE_EMBEDDING_ENABLED=false
+POSTGRES_URL=postgresql://user:pass@localhost:5432/agentibridge
 LLM_API_BASE=http://localhost:11434/v1
-LLM_API_KEY=
 LLM_EMBED_MODEL=text-embedding-3-small
 LLM_CHAT_MODEL=gpt-4o-mini
-
-# Summary generation (Anthropic SDK preferred, falls back to LLM_CHAT_MODEL)
-ANTHROPIC_API_KEY=
-
-# Dispatch (Claude CLI)
-CLAUDE_BINARY=claude
-CLAUDE_DISPATCH_MODEL=sonnet
-CLAUDE_DISPATCH_TIMEOUT=300
-
-# Dispatch bridge (Docker mode — host-side proxy for Claude CLI)
-DISPATCH_SECRET=                # shared secret for bridge auth
-DISPATCH_BRIDGE_PORT=8101       # port the dispatch bridge listens on
-
-# Cloudflare Tunnel (optional — use docker compose --profile tunnel)
-CLOUDFLARE_TUNNEL_TOKEN=        # set for named tunnel; leave empty for quick tunnel
-
-# Logging
-CLAUDE_HOOK_LOG_ENABLED=true
+CLAUDE_BINARY=/path/to/claude       # absolute path, set by `agentibridge install`
+AGENTIBRIDGE_HEARTBEAT_TTL=120
 ```
 
-## MCP Tools (11 total)
+## MCP Tools (29 total)
 
 ### Phase 1 — Foundation
-- `list_sessions` — List sessions across all projects
-- `get_session` — Get full session metadata + transcript
-- `get_session_segment` — Paginated/time-range transcript retrieval
-- `get_session_actions` — Extract tool calls with counts
-- `search_sessions` — Keyword search across transcripts
-- `collect_now` — Trigger immediate collection
+`list_sessions`, `get_session`, `get_session_segment`, `get_session_actions`, `search_sessions`, `collect_now`
 
 ### Phase 2 — Semantic Search
-- `search_semantic` — Semantic search using embeddings
-- `generate_summary` — Auto-generate session summary via LLM
+`search_semantic`, `generate_summary`
 
 ### Phase 4 — Write-back & Dispatch
-- `restore_session` — Load session context for continuation
-- `dispatch_task` — Fire-and-forget background job dispatch (returns job_id immediately)
-- `get_dispatch_job` — Poll a background job for status and output
+`restore_session`, `dispatch_task`, `get_dispatch_job`, `list_dispatch_jobs`, `plan_task`, `get_dispatch_plan`, `list_dispatch_plans`, `execute_plan`
+
+### Phase 5 — Knowledge Catalog
+`list_memory_files`, `get_memory_file`, `list_plans`, `get_plan`, `search_history`
+
+### Phase 6 — A2A Agent Registry
+`register_agent`, `deregister_agent`, `heartbeat_agent`, `list_agents`, `get_agent`, `find_agents`
+
+### Handoff — Cross-project Context Transfer
+- `list_handoff_projects` — Discover projects from `~/.claude/projects/` with session counts
+- `handoff` — Seed a conversation in a target project with structured context (summary, decisions, next steps). Blocks until session is created. Returns `session_id` + `resume_command` for `claude --resume`.
+
+## A2A Agent Registry (Phase 6)
+
+**Module:** `agentibridge/registry.py` — `AgentRecord` dataclass, Redis storage, file fallback.
+
+**REST endpoints** (in `transport.py`):
+- `POST /agents/register`
+- `POST /agents/{agent_id}/heartbeat`
+- `DELETE /agents/{agent_id}`
+- `GET /agents`
+- `GET /agents/{agent_id}`
+
+**Redis keys** (prefix `agentibridge:sb:`):
+- `agent:{agent_id}` — Hash, TTL = `heartbeat_ttl * 2`
+- `idx:agents` — Sorted set by `last_heartbeat`
+- `idx:agents:cap:{capability}` — Set of agent_ids per capability
+
+**Auto-offline:** if `last_heartbeat` age exceeds `heartbeat_ttl`, `effective_status` returns `"offline"` at read time — no writes needed.
+
+## Related Projects
+
+| Project | Description |
+|---------|-------------|
+| **agenticore** | Parent orchestration project |
+| **agentihooks** | Hook system & MCP tool server for Claude Code agents |
 
 ## Redis + File Fallback Pattern
 
-All stateful operations follow a consistent pattern:
-1. Try Redis via `agentibridge.redis_client` (`get_redis()` returns client or `None`)
-2. Fall back to reading directly from `~/.claude/projects/` JSONL files
-3. Redis keys are namespaced: `{REDIS_KEY_PREFIX}:sb:{key}`
+1. Try Redis via `agentibridge.redis_client` (`get_redis()` → client or `None`)
+2. Fall back to reading from `~/.claude/projects/` JSONL files
+3. Keys namespaced: `{REDIS_KEY_PREFIX}:sb:{key}`
 
-## Claude CLI Transcript Format
+## Troubleshooting
 
-Raw transcripts live in `~/.claude/projects/{path-encoded}/` as `.jsonl` files:
-- **Path encoding**: `/home/user/dev/project` -> `-home-user-dev-project`
-- **Entry types**: `user`, `assistant`, `summary`, `system`
-- **Filtered types**: `queue-operation`, `file-history-snapshot`, `progress`
+See [docs/reference/troubleshooting.md](docs/reference/troubleshooting.md). Key gotchas:
+- `AGENTIBRIDGE_EMBEDDING_ENABLED=true` must be set explicitly (defaults `false`)
+- `POSTGRES_PASSWORD` only takes effect on first volume init
+- If dispatch fails with "Claude CLI binary not found", check `CLAUDE_BINARY` in `agentibridge.env`
+- `claude_runner.py` strips `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from env before spawning CLI to prevent auth hijacking

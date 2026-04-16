@@ -1,6 +1,12 @@
+---
+title: Documentation
+nav_order: 2
+has_children: true
+---
+
 # AgentiBridge Documentation
 
-AgentiBridge is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 11 MCP tools.
+AgentiBridge is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via 16 MCP tools.
 
 ## Getting Started
 
@@ -11,6 +17,7 @@ AgentiBridge is a standalone MCP server that indexes Claude Code CLI transcripts
 - [Semantic Search](architecture/semantic-search.md) — Natural language search across transcripts using embeddings
 - [Remote Access](architecture/remote-access.md) — SSE/HTTP transport with API key authentication
 - [Session Dispatch](architecture/session-dispatch.md) — Fire-and-forget background jobs, session resume, and context injection
+- [Knowledge Catalog](architecture/knowledge-catalog.md) — Memory files, plans, and prompt history
 
 ## Deployment
 

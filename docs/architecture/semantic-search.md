@@ -1,3 +1,8 @@
+---
+title: Semantic Search
+nav_order: 1
+---
+
 # Semantic Search
 
 AI-powered semantic search for AgentiBridge, enabling natural language queries across all indexed Claude Code transcripts. Instead of exact keyword matching, users can ask questions like "how does authentication work" and get semantically relevant results.
@@ -106,7 +111,7 @@ Requires:
 - `AGENTIBRIDGE_EMBEDDING_ENABLED=true` (opt-in flag, defaults to `false`)
 - LLM API configured (`LLM_API_BASE` + `LLM_EMBED_MODEL` env vars)
 - Postgres with pgvector (`POSTGRES_URL`)
-- Sessions embedded via `embed_session()`
+- Sessions must be embedded (happens automatically — see below)
 
 ### `generate_summary`
 
@@ -117,11 +122,35 @@ Returns: JSON with AI-generated summary
 
 Uses Claude Sonnet to produce 2-3 sentence session summaries.
 
+## Automatic Embedding
+
+The collector automatically embeds sessions when `AGENTIBRIDGE_EMBEDDING_ENABLED=true` is set. No manual embedding step is needed.
+
+**How it works:**
+
+1. The collector starts immediately on server boot (not lazily on first tool call)
+2. Each poll cycle (default: 60s), the collector indexes new transcript entries into Redis
+3. After indexing, sessions that received new entries are embedded into Postgres via the LLM API
+4. Only updated sessions are embedded each cycle — not the entire corpus
+
+**Embedding is resilient:**
+- If the LLM API is down, embedding is skipped for that cycle (collection still works)
+- If one session fails to embed, the collector continues with the next
+- `ON CONFLICT DO UPDATE` makes re-embedding safe (idempotent)
+- Each conversation turn becomes one chunk (~50 chunks per long session)
+
+**Monitor progress with the CLI:**
+
+```bash
+agentibridge embeddings              # config, chunk counts, coverage %
+agentibridge embeddings --check-llm  # also test LLM endpoint connectivity
+```
+
 ## Configuration
 
 ```bash
 # Postgres + pgvector (required for vector storage)
-POSTGRES_URL=postgresql://agentibridge:agentibridge@localhost:5432/agentibridge
+POSTGRES_URL=postgresql://DB_USER:DB_PASSWORD@localhost:5432/agentibridge
 PGVECTOR_DIMENSIONS=1536
 
 # Enable/disable embedding (default: false — opt-in)
@@ -133,7 +162,10 @@ LLM_API_KEY=your-api-key
 LLM_EMBED_MODEL=text-embedding-3-small
 LLM_CHAT_MODEL=gpt-4o-mini
 
-# Required for summary generation (preferred over LLM_CHAT_MODEL):
+# Summary generation — set ONE of these:
+#   Direct API:  ANTHROPIC_API_KEY=sk-ant-xxxxx
+#   LLM proxy:   ANTHROPIC_AUTH_TOKEN=your-proxy-token
+#                ANTHROPIC_BASE_URL=https://your-proxy.example.com
 ANTHROPIC_API_KEY=...
 ```
 

@@ -1,0 +1,102 @@
+// AgentiBridge brand colors
+$ab-indigo: #6366f1;
+$ab-violet: #8b5cf6;
+$ab-amber: #f59e0b;
+$ab-emerald: #10b981;
+$ab-cyan: #06b6d4;
+
+// Feature grid
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin: 2rem 0;
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.feature-card {
+  padding: 1.5rem;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.05);
+  transition: border-color 0.2s ease;
+
+  &:hover {
+    border-color: $ab-indigo;
+  }
+
+  h3 {
+    margin-top: 0.75rem;
+    margin-bottom: 0.5rem;
+    color: $ab-indigo;
+  }
+
+  p {
+    margin-bottom: 0;
+    font-size: 0.9rem;
+    opacity: 0.85;
+  }
+}
+
+.feature-icon {
+  width: 48px;
+  height: 48px;
+}
+
+// Hero actions
+.hero-actions {
+  .btn-primary {
+    background-color: $ab-indigo;
+    border-color: $ab-indigo;
+
+    &:hover {
+      background-color: darken($ab-indigo, 10%);
+    }
+  }
+}
+
+// Badge row centering
+.text-center img {
+  display: inline-block;
+}
+
+// Home content spacing
+.home-content {
+  max-width: 900px;
+  margin: 0 auto;
+
+  > h1:first-child {
+    margin-top: 2rem;
+  }
+}
+
+// FAQ details styling
+details {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 6px;
+
+  summary {
+    cursor: pointer;
+
+    &:hover {
+      color: $ab-indigo;
+    }
+  }
+
+  p {
+    margin-top: 0.75rem;
+  }
+}
+
+// Deployment options table
+table {
+  th:first-child,
+  td:first-child {
+    font-weight: 600;
+  }
+}

@@ -1,3 +1,8 @@
+---
+title: Internals
+nav_order: 5
+---
+
 # Internal Architecture
 
 This document provides a deep dive into AgentiBridge's internal modules and implementation patterns.
@@ -6,7 +11,7 @@ This document provides a deep dive into AgentiBridge's internal modules and impl
 
 | Module | Purpose | Key Functions/Classes |
 |--------|---------|----------------------|
-| `server.py` | FastMCP server with 11 tools | tool handlers, `main()` |
+| `server.py` | FastMCP server with 16 tools | tool handlers, `main()` |
 | `parser.py` | Pure-function JSONL transcript parser | `parse_transcript_entries()`, `scan_projects_dir()` |
 | `store.py` | SessionStore (Redis + filesystem fallback) | `SessionStore`, `get_session_meta()`, `list_sessions()` |
 | `collector.py` | Background polling daemon | `SessionCollector`, `collect_once()` |
@@ -14,13 +19,14 @@ This document provides a deep dive into AgentiBridge's internal modules and impl
 | `oauth_provider.py` | OAuth 2.1 authorization server (opt-in) | `BridgeOAuthProvider` |
 | `embeddings.py` | Semantic search (Phase 2) | `TranscriptEmbedder`, `search_semantic()` |
 | `dispatch.py` | Session restore + task dispatch (Phase 4) | `restore_session_context()`, `dispatch_task()` |
-| `dispatch_bridge.py` | Host-side HTTP bridge for Docker dispatch | `GET /health`, `POST /dispatch` |
+| `dispatch.py` | Host-side HTTP bridge for Docker dispatch | `GET /health`, `POST /dispatch` |
 | `claude_runner.py` | Claude CLI subprocess wrapper | `run_claude()`, `ClaudeResult` |
 | `llm_client.py` | OpenAI-compatible embeddings + chat | `embed_text()`, `chat_completion()` |
 | `redis_client.py` | Redis helper | `get_redis()`, `redis_key()` |
 | `pg_client.py` | Postgres + pgvector connection | `get_pg()`, auto-schema creation |
 | `config.py` | Centralized env-var configuration | module-level constants |
 | `cli.py` | CLI helper tool | `run`, `stop`, `status`, `tunnel`, `bridge`, `locks` |
+| `catalog.py` | Knowledge catalog: memory, plans, history | `scan_memory_files()`, `scan_plans_dir()`, `parse_history()` |
 | `logging.py` | Structured JSON logging | `log()` |
 
 ## Redis + File Fallback Pattern
@@ -59,6 +65,16 @@ agentibridge:sb:idx:project:{encoded}    # Sorted set of session IDs per project
 agentibridge:sb:session:{id}:meta        # Hash of session metadata fields
 agentibridge:sb:session:{id}:entries     # List of JSON-serialized entries (capped at MAX_ENTRIES)
 agentibridge:sb:pos:{filepath_hash}      # Byte offset for incremental transcript reading
+
+# Phase 5 — Knowledge Catalog
+agentibridge:sb:memory:{project}:{filename}        # Hash of memory file metadata + content
+agentibridge:sb:idx:memory                         # Sorted set of all memory file keys (score = mtime)
+agentibridge:sb:plan:{codename}                    # Hash of plan metadata + content
+agentibridge:sb:plan:{codename}:agents             # List of agent subplan codenames
+agentibridge:sb:idx:plans                          # Sorted set of all plan codenames (score = mtime)
+agentibridge:sb:codename:{slug}                    # Set of session IDs linked to a plan codename
+agentibridge:sb:history                            # List of JSON-serialized history entries
+agentibridge:sb:pos:history                        # Byte offset for incremental history.jsonl parsing
 ```
 
 ### When Redis is Used
@@ -286,7 +302,46 @@ Clients poll with `get_dispatch_job(job_id)` until `status` is `completed` or `f
 
 **Dispatch modes:**
 - **Local**: `CLAUDE_DISPATCH_URL` is empty → runs `claude` subprocess directly
-- **Bridge**: `CLAUDE_DISPATCH_URL` is set → HTTP POST to `dispatch_bridge.py` on the host
+- **Bridge**: `CLAUDE_DISPATCH_URL` is set → HTTP POST to `dispatch.py` on the host
+
+## Knowledge Catalog (Phase 5)
+
+### Data Sources
+
+Phase 5 exposes three knowledge categories from Claude Code's local filesystem:
+
+| Source | Location | Format |
+|--------|----------|--------|
+| **Memory files** | `~/.claude/projects/{project}/memory/*.md` | Markdown files with curated project knowledge |
+| **Plans** | `~/.claude/plans/*.md` | Implementation blueprints linked to sessions via codename/slug |
+| **History** | `~/.claude/history.jsonl` | Every user prompt across all sessions with timestamps |
+
+### Agent Plans
+
+Plans with the suffix `-agent-{hex_hash}` are subplans created by agent subprocesses. They're linked to their parent plan by stripping the suffix:
+
+- `moonlit-rolling-reddy.md` — parent plan
+- `moonlit-rolling-reddy-agent-a1b2c3.md` — agent subplan
+
+When `include_agent_plans=True`, `get_plan` returns the parent content plus all linked agent subplans.
+
+### Incremental History Parsing
+
+The `parse_history()` function uses byte-offset tracking to avoid re-reading the entire `history.jsonl` on every collection cycle:
+
+1. Seek to the last known byte offset
+2. Detect if offset is at a line boundary (peek at byte before offset)
+3. If mid-line, skip the partial line remainder
+4. Read and parse new complete lines
+5. Return new entries + updated byte offset
+
+### Collector Integration
+
+`collect_once()` runs 3 additional scan passes after transcript indexing:
+
+1. **Memory scan**: `scan_memory_files()` finds `*.md` files in each project's `memory/` dir
+2. **Plans scan**: `scan_plans_dir()` reads `~/.claude/plans/`, resolves session IDs via codename index
+3. **History scan**: `parse_history()` incrementally reads new entries from `history.jsonl`
 
 ## Error Handling Patterns
 
@@ -363,7 +418,7 @@ raise SessionNotFoundError(
 
 2. Add validation in `Config.__post_init__()`
 3. Update `docs/reference/configuration.md`
-4. Add to `.env.example` generation in CLI
+4. Add to `agentibridge.env.example` generation in CLI
 
 ## See Also
 
@@ -371,3 +426,4 @@ raise SessionNotFoundError(
 - [Semantic Search Details](semantic-search.md)
 - [Remote Access Setup](remote-access.md)
 - [Session Dispatch](session-dispatch.md)
+- [Knowledge Catalog](knowledge-catalog.md)
