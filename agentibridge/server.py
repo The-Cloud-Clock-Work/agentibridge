@@ -636,7 +636,7 @@ async def dispatch_task(
 
     Args:
         task_description: What the agent should do
-        project: Project context hint (optional)
+        project: Project context hint (optional). Can be a full path or fuzzy name (e.g. "agentibridge") — resolved to cwd for the spawned session
         session_id: Past session to pull context from (optional)
         resume_session_id: Session to resume via --resume flag (optional)
         command: Command preset — default/thinkhard/ultrathink

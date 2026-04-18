@@ -7,6 +7,7 @@ Enables:
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,54 @@ from typing import Any, Dict, List, Optional
 
 from agentibridge.logging import log
 from agentibridge.redis_client import get_redis
+
+# ---------------------------------------------------------------------------
+# Project path resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_cwd(
+    project: str = "",
+    session_id: str = "",
+    resume_session_id: str = "",
+) -> str | None:
+    """Resolve the working directory for a dispatch.
+
+    Priority:
+    1. resume_session_id → session meta → project_path
+    2. session_id → session meta → project_path
+    3. project → fuzzy match against known projects, or use as-is if it's a path
+    4. None
+    """
+    from agentibridge.catalog import resolve_project
+    from agentibridge.store import SessionStore
+
+    # 1. Resume session — look up project_path from session meta
+    sid = resume_session_id or session_id
+    if sid:
+        try:
+            store = SessionStore()
+            meta = store.get_session_meta(sid)
+            if meta and meta.project_path:
+                p = Path(meta.project_path)
+                if p.is_dir():
+                    return str(p)
+        except Exception as e:
+            log("_resolve_cwd: session lookup failed", {"sid": sid, "error": str(e)})
+
+    # 2. Project — full path or fuzzy name
+    if project:
+        p = Path(project)
+        if p.is_dir():
+            return str(p)
+        # Fuzzy resolve against ~/.claude/projects/
+        claude_home = Path(os.environ.get("CLAUDE_CODE_HOME_DIR", "~/.claude")).expanduser()
+        projects_dir = claude_home / "projects"
+        info = resolve_project(projects_dir, project)
+        if info and Path(info.path).is_dir():
+            return info.path
+
+    return None
 
 # ---------------------------------------------------------------------------
 # Job store (fire-and-forget background tasks)
@@ -342,7 +391,8 @@ async def dispatch_task(
         },
     )
 
-    log("dispatch_task: started background job", {"job_id": job_id, "prompt_len": len(full_prompt)})
+    cwd = _resolve_cwd(project=project, session_id=session_id, resume_session_id=resume_session_id)
+    log("dispatch_task: started background job", {"job_id": job_id, "prompt_len": len(full_prompt), "cwd": cwd})
 
     async def _run_background() -> None:
         try:
@@ -350,6 +400,7 @@ async def dispatch_task(
                 prompt=full_prompt,
                 model=model,
                 resume_session_id=resume_session_id or None,
+                cwd=cwd,
             )
             completed_at = datetime.now(timezone.utc).isoformat()
             _write_job(
@@ -402,6 +453,7 @@ async def dispatch_task(
         "context_session": session_id or None,
         "resumed_session": resume_session_id or None,
         "prompt_length": len(full_prompt),
+        "cwd": cwd,
     }
 
 
@@ -418,8 +470,17 @@ async def handoff(
 
     Blocks until the session is created. Returns the session_id
     so the operator can `claude --resume <session_id>`.
+
+    project_path can be a full path or a fuzzy project name (e.g. "agentibridge").
     """
     from agentibridge.claude_runner import run_claude
+
+    # Resolve fuzzy project names
+    resolved = _resolve_cwd(project=project_path)
+    if resolved:
+        project_path = resolved
+    elif not Path(project_path).is_dir():
+        return {"success": False, "error": f"Cannot resolve project path: {project_path}"}
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
