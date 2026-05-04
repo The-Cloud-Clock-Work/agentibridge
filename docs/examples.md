@@ -55,4 +55,4 @@ Read the actual contents of any memory file. Use this to review what your agents
 ---
 
 {: .note }
-> **More examples coming** — dispatch jobs, semantic search results, session restore, and more MCP clients. Have a screenshot to share? [Open an issue](https://github.com/The-Cloud-Clock-Work/agentibridge/issues).
+> **More examples coming** — dispatch jobs, semantic search results, session restore, and more MCP clients. Have a screenshot to share? [Open an issue](https://github.com/The-Cloud-Clockwork/agentibridge/issues).

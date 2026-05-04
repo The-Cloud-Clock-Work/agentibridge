@@ -154,7 +154,7 @@ If required reviewers are not available on your plan, access is controlled by re
 USER_ID=$(gh api /user --jq '.id')
 
 # Set reviewer on the release environment
-gh api --method PUT /repos/The-Cloud-Clock-Work/agentibridge/environments/release \
+gh api --method PUT /repos/The-Cloud-Clockwork/agentibridge/environments/release \
   --input - <<EOF
 {
   "reviewers": [{"type": "User", "id": $USER_ID}],
@@ -163,7 +163,7 @@ gh api --method PUT /repos/The-Cloud-Clock-Work/agentibridge/environments/releas
 EOF
 
 # Verify
-gh api /repos/The-Cloud-Clock-Work/agentibridge/environments/release \
+gh api /repos/The-Cloud-Clockwork/agentibridge/environments/release \
   --jq '.protection_rules'
 ```
 
@@ -176,7 +176,7 @@ Controls the PyPI trusted publisher OIDC connection. **Do not remove this enviro
 1. Log into [pypi.org](https://pypi.org) → Your projects → `agentibridge` → Publishing
 2. Add a trusted publisher:
    - **Publisher:** GitHub Actions
-   - **Owner:** `The-Cloud-Clock-Work`
+   - **Owner:** `The-Cloud-Clockwork`
    - **Repository:** `agentibridge`
    - **Workflow:** `publish-pypi.yml`
    - **Environment:** `pypi`
@@ -209,7 +209,7 @@ Configure these in **Settings → Secrets and variables → Actions**:
 Only needed if main branch protection blocks `GITHUB_TOKEN` commits:
 
 1. GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
-2. Resource owner: `The-Cloud-Clock-Work`
+2. Resource owner: `The-Cloud-Clockwork`
 3. Repository access: `agentibridge` only
 4. Permissions: **Contents → Read and write**
 5. Add as `RELEASE_TOKEN` secret in the repo
@@ -278,12 +278,12 @@ After triggering a release, confirm all of the following:
 
 ```bash
 # 1. Version bump commit exists on main
-gh api /repos/The-Cloud-Clock-Work/agentibridge/commits/main \
+gh api /repos/The-Cloud-Clockwork/agentibridge/commits/main \
   --jq '.commit.message'
 # → "chore: release vX.Y.Z"
 
 # 2. Tag exists
-gh api /repos/The-Cloud-Clock-Work/agentibridge/git/refs/tags/vX.Y.Z \
+gh api /repos/The-Cloud-Clockwork/agentibridge/git/refs/tags/vX.Y.Z \
   --jq '.ref'
 # → "refs/tags/vX.Y.Z"
 
@@ -299,7 +299,7 @@ docker inspect nestorcolt/agentibridge:latest \
 # → X.Y.Z
 
 # 5. All workflow runs succeeded
-gh run list --repo The-Cloud-Clock-Work/agentibridge --limit 10
+gh run list --repo The-Cloud-Clockwork/agentibridge --limit 10
 ```
 
 ---
