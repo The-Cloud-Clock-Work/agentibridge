@@ -111,8 +111,8 @@ def _parse_plan_filename(stem: str) -> Tuple[bool, str]:
 
 @dataclass
 class ProjectInfo:
-    encoded: str  # "-home-iamroot-dev-tccw-ecosystem-agenticore"
-    path: str  # "/home/iamroot/dev/tccw-ecosystem/agenticore"
+    encoded: str  # "-home-iamroot-dev-tcc-ecosystem-agenticore"
+    path: str  # "/home/iamroot/dev/tcc-ecosystem/agenticore"
     name: str  # "agenticore"
     session_count: int  # number of .jsonl files
 
