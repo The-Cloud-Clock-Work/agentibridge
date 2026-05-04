@@ -13,7 +13,7 @@ If you discover a security vulnerability in AgentiBridge, please report it respo
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email the maintainers or use [GitHub's private vulnerability reporting](https://github.com/The-Cloud-Clock-Work/agentibridge/security/advisories/new).
+Instead, please email the maintainers or use [GitHub's private vulnerability reporting](https://github.com/The-Cloud-Clockwork/agentibridge/security/advisories/new).
 
 ### What to include
 

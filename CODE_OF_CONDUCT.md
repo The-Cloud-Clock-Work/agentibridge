@@ -60,7 +60,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-**[github.com/The-Cloud-Clock-Work/agentibridge/issues](https://github.com/The-Cloud-Clock-Work/agentibridge/issues)**.
+**[github.com/The-Cloud-Clockwork/agentibridge/issues](https://github.com/The-Cloud-Clockwork/agentibridge/issues)**.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

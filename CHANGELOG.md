@@ -54,5 +54,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions CI/CD (test, build, publish, release)
 - PyPI package publishing
 
-[0.2.1]: https://github.com/The-Cloud-Clock-Work/agentibridge/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/The-Cloud-Clock-Work/agentibridge/releases/tag/v0.2.0
+[0.2.1]: https://github.com/The-Cloud-Clockwork/agentibridge/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/The-Cloud-Clockwork/agentibridge/releases/tag/v0.2.0

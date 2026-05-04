@@ -15,7 +15,7 @@ Thank you for your interest in contributing to AgentiBridge! This guide will hel
 
 ```bash
 # Clone the repository
-git clone https://github.com/The-Cloud-Clock-Work/agentibridge.git
+git clone https://github.com/The-Cloud-Clockwork/agentibridge.git
 cd agentibridge
 
 # Install with development dependencies
