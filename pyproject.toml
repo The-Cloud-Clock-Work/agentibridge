@@ -30,9 +30,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/The-Cloud-Clock-Work/agentibridge"
-Repository = "https://github.com/The-Cloud-Clock-Work/agentibridge"
-Issues = "https://github.com/The-Cloud-Clock-Work/agentibridge/issues"
+Homepage = "https://github.com/The-Cloud-Clockwork/agentibridge"
+Repository = "https://github.com/The-Cloud-Clockwork/agentibridge"
+Issues = "https://github.com/The-Cloud-Clockwork/agentibridge/issues"
 
 [project.optional-dependencies]
 dev = [

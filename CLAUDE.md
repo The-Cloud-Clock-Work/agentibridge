@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via MCP tools and REST endpoints. Extracted from [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore).
+**AgentiBridge** is a standalone MCP server that indexes Claude Code CLI transcripts and exposes them via MCP tools and REST endpoints. Extracted from [agenticore](https://github.com/The-Cloud-Clockwork/agenticore).
 
 AgentiBridge runs **natively on the host**. Only Redis and Postgres run in Docker containers with ports exposed to localhost. Dispatch calls the `claude` CLI directly — no bridge process needed.
 

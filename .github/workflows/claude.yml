@@ -29,7 +29,7 @@ jobs:
         github.event.action == 'labeled' && github.event.label.name == 'claude' ||
         github.event.action == 'assigned'
       ))
-    uses: The-Cloud-Clock-Work/.github/.github/workflows/claude-reusable.yml@main
+    uses: The-Cloud-Clockwork/.github/.github/workflows/claude-reusable.yml@main
     secrets:
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
