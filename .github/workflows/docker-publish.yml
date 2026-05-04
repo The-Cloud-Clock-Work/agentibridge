@@ -18,7 +18,7 @@ jobs:
   push:
     needs: gate
     if: always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
-    uses: The-Cloud-Clock-Work/.github/.github/workflows/docker-publish-reusable.yml@main
+    uses: The-Cloud-Clockwork/.github/.github/workflows/docker-publish-reusable.yml@main
     with:
       image_name: agentibridge
     secrets:

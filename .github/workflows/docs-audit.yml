@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   docs-audit:
-    uses: The-Cloud-Clock-Work/.github/.github/workflows/docs-audit-reusable.yml@main
+    uses: The-Cloud-Clockwork/.github/.github/workflows/docs-audit-reusable.yml@main
     with:
       scope: ${{ inputs.scope }}
       extra_instructions: ${{ inputs.extra_instructions }}

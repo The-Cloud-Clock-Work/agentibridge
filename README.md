@@ -5,8 +5,8 @@
 ![AgentiBridge - Persistent session controller for your AI Agents](docs/media/agentibridge-readme-banner.jpg)
 
 [![PyPI](https://img.shields.io/pypi/v/agentibridge)](https://pypi.org/project/agentibridge/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clock-Work/agentibridge/blob/main/LICENSE)
-[![Tests](https://github.com/The-Cloud-Clock-Work/agentibridge/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clock-Work/agentibridge/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentibridge/blob/main/LICENSE)
+[![Tests](https://github.com/The-Cloud-Clockwork/agentibridge/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentibridge/actions/workflows/test.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 
 ```mermaid
@@ -329,7 +329,7 @@ See [Cloudflare Tunnel Guide](docs/deployment/cloudflare-tunnel.md) for full det
 ## Developer Setup
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentibridge
+git clone https://github.com/The-Cloud-Clockwork/agentibridge
 cd agentibridge
 pip install -e .
 agentibridge install            # sets up systemd + Redis/Postgres sidecars

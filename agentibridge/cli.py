@@ -1543,7 +1543,7 @@ def cmd_embeddings(args: argparse.Namespace) -> None:
 _STACK_DIR = Path.home() / ".agentibridge"
 _STATE_FILE = _STACK_DIR / "state.json"
 _LEGACY_STACK_DIR = Path.home() / ".config" / "agentibridge"
-_GITHUB_REPO_URL = "https://github.com/The-Cloud-Clock-Work/agentibridge"
+_GITHUB_REPO_URL = "https://github.com/The-Cloud-Clockwork/agentibridge"
 
 _REQUIRED_ENV_VARS = [
     "REDIS_URL",

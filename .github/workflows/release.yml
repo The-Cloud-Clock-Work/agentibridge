@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   release:
-    uses: The-Cloud-Clock-Work/.github/.github/workflows/release-reusable.yml@main
+    uses: The-Cloud-Clockwork/.github/.github/workflows/release-reusable.yml@main
     with:
       bump: ${{ inputs.bump }}
     secrets:

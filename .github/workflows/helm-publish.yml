@@ -18,7 +18,7 @@ jobs:
   publish:
     needs: gate
     if: always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
-    uses: The-Cloud-Clock-Work/.github/.github/workflows/helm-publish-reusable.yml@main
+    uses: The-Cloud-Clockwork/.github/.github/workflows/helm-publish-reusable.yml@main
     with:
       chart_path: charts/agentibridge
     permissions:

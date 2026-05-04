@@ -67,7 +67,7 @@ jobs:
       - name: Clone test dataset
         uses: actions/checkout@v4
         with:
-          repository: The-Cloud-Clock-Work/bridge-smoke-dataset
+          repository: The-Cloud-Clockwork/bridge-smoke-dataset
           token: ${{ secrets.ORG_GITHUB_TOKEN }}
           path: bridge-smoke-dataset
 
