@@ -37,23 +37,17 @@ It indexes every Claude Code transcript automatically, makes them searchable wit
 
 ---
 
-## AgentiBridge vs Anthropic Remote Control
+## What AgentiBridge Is
 
-Anthropic's [Remote Control](https://code.claude.com/docs/en/remote-control) (Feb 2026) continues **one live session** from your phone. AgentiBridge is the **other 90%** of remote agent control:
+AgentiBridge is the **indexing + dispatching layer** for Claude Code agents. It sits next to your agents — local or networked — and gives any MCP client a single, consistent surface to:
 
-| | Remote Control | AgentiBridge |
-|---|---|---|
-| **What it does** | Continue one live session from phone/browser | Index all past sessions, search, dispatch new ones |
-| **Session scope** | 1 active session | All sessions across all projects |
-| **Search** | None | Keyword + semantic search |
-| **Memory/Plans** | None | Catalog memory files, plans, history |
-| **Dispatch** | None | Fire-and-forget background task dispatch |
-| **Context restore** | Only the live session | Restore any past session's context |
-| **Multi-client** | claude.ai + Claude app only | Claude Code, claude.ai, ChatGPT, Grok, any MCP client |
-| **Runs where** | Local terminal (must stay open) | MCP server (Docker/stdio), works offline |
-| **Auth** | Pro/Max subscription | Self-hosted, no subscription needed |
+- **Index every transcript** the moment it's written. The collector watches `~/.claude/projects/`, parses session files, and writes a searchable store backed by Redis (live) and Postgres + pgvector (semantic).
+- **Search across the whole corpus**. Keyword for fast lookups, semantic for "what was I doing on the email-template thing?"-style queries. Any MCP client can call the search tools.
+- **Dispatch live, headless agents from anywhere**. Fire `claude -p` one-shots from your phone, ChatGPT, Grok, or claude.ai — AgentiBridge launches them on the host, streams the run, and hands you back a session ID and a summary.
+- **Wire agents into a network**. Built-in A2A registry: agents register, heartbeat, discover each other by capability. Coordinate locally on one box, or across boxes via Cloudflare Tunnel.
+- **Stay self-hosted**. Native pip package. Redis + Postgres in Docker if you want them, filesystem fallback if you don't. Your transcripts never leave your infrastructure.
 
-**Bottom line:** Remote Control is a "remote desktop for one session." AgentiBridge is a **knowledge base and orchestration layer** across all sessions. They're complementary, not competitive.
+It is not a remote-desktop for a single session. It is the substrate that turns a fleet of Claude Code processes — running on your laptop, your work box, a server, or your phone calling back home — into a coordinated, searchable, observable network.
 
 ---
 
@@ -337,12 +331,6 @@ No. No telemetry, no SaaS dependencies. Cloudflare Tunnel is opt-in, and even th
 </details>
 
 <details markdown="block">
-<summary><strong>How is this different from Anthropic's Remote Control?</strong></summary>
-
-Remote Control continues one active Claude Code session from your phone — great for live interaction. AgentiBridge indexes all past sessions, adds semantic search, background dispatch, context restore, and multi-client support. They solve different problems and work great together.
-</details>
-
-<details markdown="block">
 <summary><strong>Which clients are supported?</strong></summary>
 
 Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client. Run `agentibridge connect` for ready-to-paste configs.
@@ -352,7 +340,7 @@ Claude Code CLI, claude.ai, ChatGPT, Grok, and any MCP-compatible client. Run `a
 
 ## Code Quality
 
-Continuous static analysis via [SonarQube](https://sonar.homeofanton.com/dashboard?id=agentibridge) ensures code quality, security, and maintainability.
+Continuous static analysis via SonarQube ensures code quality, security, and maintainability.
 
 ---
 
