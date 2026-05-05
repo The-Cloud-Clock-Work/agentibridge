@@ -64,7 +64,7 @@ What it does:
 2. **Ensures `.env`** — copies `agentibridge.env.example` to `.env` at the repo root if it doesn't exist.
 3. **Builds from local source** — runs `docker compose -f docker-compose.yml --env-file .env up --build -d`
    using the repo root compose file (which has `build: context: .`) instead of the pip-distributed
-   compose file that pulls `tccw/agentibridge:latest` from Docker Hub.
+   compose file that pulls `the-cloud-clockwork/agentibridge:latest` from Docker Hub.
 4. **Auto-starts the dispatch (native)** if `DISPATCH_SECRET` is configured in the repo root `.env`.
 
 ---

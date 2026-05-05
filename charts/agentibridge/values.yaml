@@ -7,7 +7,7 @@ fullnameOverride: ""
 # Image
 # -----------------------------------------------------------------------------
 image:
-  repository: tccw/agentibridge
+  repository: ghcr.io/the-cloud-clockwork/agentibridge
   tag: "0.2.12"
   pullPolicy: IfNotPresent
 

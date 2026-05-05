@@ -1714,7 +1714,7 @@ def _update_docker_stack() -> None:
     # Capture current image digest
     old_digest = (
         subprocess.run(
-            ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
+            ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "ghcr.io/the-cloud-clockwork/agentibridge"],
             capture_output=True,
             text=True,
         )
@@ -1723,7 +1723,7 @@ def _update_docker_stack() -> None:
     )
 
     # Pull latest image
-    print("\n[docker] Pulling tccw/agentibridge:latest...")
+    print("\n[docker] Pulling ghcr.io/the-cloud-clockwork/agentibridge:latest...")
     result = subprocess.run(compose + ["pull", "agentibridge"])
     if result.returncode != 0:
         print("[docker] ERROR: Failed to pull latest image")
@@ -1732,7 +1732,7 @@ def _update_docker_stack() -> None:
     # Compare digests
     new_digest = (
         subprocess.run(
-            ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "tccw/agentibridge"],
+            ["docker", "images", "--digests", "--no-trunc", "--format", "{{.Digest}}", "ghcr.io/the-cloud-clockwork/agentibridge"],
             capture_output=True,
             text=True,
         )
