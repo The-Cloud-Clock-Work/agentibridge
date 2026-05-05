@@ -1,6 +1,7 @@
 ---
-title: See It In Action
-nav_order: 3
+title: Examples
+parent: Getting Started
+nav_order: 9
 ---
 
 # See It In Action
