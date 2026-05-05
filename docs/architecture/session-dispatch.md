@@ -1,6 +1,7 @@
 ---
 title: Session Dispatch
 nav_order: 3
+parent: Architecture
 ---
 
 # Session Dispatch & Context Restore

@@ -1,6 +1,7 @@
 ---
 title: Cloudflare Tunnel
 nav_order: 3
+parent: Deployment
 ---
 
 # Cloudflare Tunnel Setup

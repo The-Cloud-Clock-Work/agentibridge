@@ -1,6 +1,7 @@
 ---
 title: Reverse Proxy
 nav_order: 2
+parent: Deployment
 ---
 
 # Reverse Proxy Configuration

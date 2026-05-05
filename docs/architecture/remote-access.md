@@ -1,6 +1,7 @@
 ---
 title: Remote Access
 nav_order: 2
+parent: Architecture
 ---
 
 # Remote Access (SSE Transport)

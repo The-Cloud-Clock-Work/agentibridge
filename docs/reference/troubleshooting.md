@@ -1,6 +1,7 @@
 ---
 title: Troubleshooting
 nav_order: 4
+parent: Reference
 ---
 
 # Troubleshooting
