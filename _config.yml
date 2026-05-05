@@ -57,26 +57,6 @@ defaults:
       path: "docs"
     values:
       layout: "default"
-  - scope:
-      path: "docs/getting-started"
-    values:
-      parent: "Getting Started"
-      grand_parent: "Documentation"
-  - scope:
-      path: "docs/architecture"
-    values:
-      parent: "Architecture"
-      grand_parent: "Documentation"
-  - scope:
-      path: "docs/deployment"
-    values:
-      parent: "Deployment"
-      grand_parent: "Documentation"
-  - scope:
-      path: "docs/reference"
-    values:
-      parent: "Reference"
-      grand_parent: "Documentation"
 
 # Exclude non-docs files from Jekyll build
 exclude:

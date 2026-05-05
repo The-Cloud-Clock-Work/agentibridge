@@ -1,6 +1,7 @@
 ---
 title: CLI Commands
 nav_order: 1
+parent: Reference
 ---
 
 # CLI Command Reference

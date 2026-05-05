@@ -1,6 +1,7 @@
 ---
 title: Releases
 nav_order: 1
+parent: Deployment
 ---
 
 # Release Automation

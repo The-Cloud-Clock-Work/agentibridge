@@ -1,6 +1,7 @@
 ---
 title: Semantic Search
 nav_order: 1
+parent: Architecture
 ---
 
 # Semantic Search
