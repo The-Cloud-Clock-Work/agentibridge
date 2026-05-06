@@ -1,0 +1,45 @@
+# Controls how `gh release create --generate-notes` groups merged PRs.
+# Categorisation is driven by PR labels — label your PRs as you merge them
+# and the release page will auto-organise without manual editing.
+#
+# Catch-all `"*"` keeps any unlabelled PR visible under "Other changes".
+changelog:
+  exclude:
+    labels:
+      - chore
+      - dependencies
+      - duplicate
+      - invalid
+      - wontfix
+    authors:
+      - dependabot
+      - dependabot[bot]
+  categories:
+    - title: ✨ Features
+      labels:
+        - feature
+        - enhancement
+    - title: 🐛 Fixes
+      labels:
+        - bug
+        - fix
+    - title: 📚 Documentation
+      labels:
+        - docs
+        - documentation
+    - title: 🔧 CI / Build
+      labels:
+        - ci
+        - build
+        - infra
+    - title: ♻️ Refactor
+      labels:
+        - refactor
+        - cleanup
+    - title: 🧪 Tests
+      labels:
+        - test
+        - tests
+    - title: Other changes
+      labels:
+        - "*"

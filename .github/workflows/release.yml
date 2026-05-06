@@ -18,5 +18,13 @@ jobs:
     uses: The-Cloud-Clockwork/.github/.github/workflows/release-reusable.yml@main
     with:
       bump: ${{ inputs.bump }}
+      # Publishers fan out from the tag push — build.yml, docker-publish.yml,
+      # publish-pypi.yml, helm-publish.yml all listen on `tags: ["v*"]`. Empty
+      # downstream_workflows prevents the multi-fire that previously triggered
+      # each publisher twice (once via tag push, once via dispatch). Without
+      # this override, release-reusable's default dispatches all three.
+      # workflow_dispatch on each publisher is retained for manual reruns of a
+      # single failed publish, gated by the `release` environment.
+      downstream_workflows: ""
     secrets:
       RELEASE_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
